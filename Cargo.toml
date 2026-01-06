@@ -5,4 +5,9 @@ edition = "2024"
 
 [dependencies]
 bitcoin_slices = { version = "0.10.0", features = ["sha2", "bitcoin"] }
-bitcoin = "0.32.8"
+bitcoin = {version = "0.32.8", features = ["rand"]}
+
+
+
+[dev-dependencies]
+rand = "0.8.5"
