@@ -1,0 +1,8 @@
+[package]
+name = "slices-experiment"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bitcoin_slices = { version = "0.10.0", features = ["sha2", "bitcoin"] }
+bitcoin = "0.32.8"
