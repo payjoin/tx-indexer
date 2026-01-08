@@ -2,23 +2,29 @@ use std::collections::HashMap;
 
 use bitcoin::consensus::Encodable;
 use bitcoin::hashes::Hash;
-use bitcoin::{OutPoint, Transaction, TxIn, TxOut};
+use bitcoin::{Transaction, TxOut, Txid};
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
 
-
 pub trait PrevOutIndex {
-    fn prev_txout(&self, ot: &OutPoint) -> TxOut;
+    // TODO: this should take an input id and return an id
+    // TODO: consider handle wrappers converting ids to the actual types.
+    // justification: the heuristics may not care about the content of the data. Only access that thru the handler.
+    fn prev_txout(&self, ot: &TxInId) -> TxOutId;
 }
 
 pub trait TxInIndex {
-    fn spending_txin(&self, tx: &TxOut) -> Option<TxIn>;
+    fn spending_txin(&self, tx: &TxOutId) -> Option<TxInId>;
+}
+
+pub trait TxOutIndex {
+    fn get_txout(&self, id: TxOutId) -> Option<TxOutHandler>;
 }
 
 pub trait FullIndex: PrevOutIndex + TxInIndex {}
 
 pub struct InMemoryIndex {
-    prev_txouts: HashMap<OutPoint, TxOut>,
-    spending_txins: HashMap<TxOut, TxIn>,
+    prev_txouts: HashMap<TxInId, TxOutId>,
+    spending_txins: HashMap<TxOutId, TxInId>,
 }
 
 impl InMemoryIndex {
@@ -32,52 +38,111 @@ impl InMemoryIndex {
 }
 
 impl PrevOutIndex for InMemoryIndex {
-    fn prev_txout(&self, ot: &OutPoint) -> TxOut {
+    fn prev_txout(&self, id: &TxInId) -> TxOutId {
         self.prev_txouts
-            .get(ot)
+            .get(id)
             .expect("Previous output should always be present if index is build correctly")
             .clone()
     }
 }
-
 impl TxInIndex for InMemoryIndex {
-    fn spending_txin(&self, tx_out: &TxOut) -> Option<TxIn> {
+    fn spending_txin(&self, tx_out: &TxOutId) -> Option<TxInId> {
         self.spending_txins.get(tx_out).cloned()
     }
 }
 
-impl FullIndex for InMemoryIndex {}
+// TODO(armins): come back to this later. when we need to access the txout data.
+// impl TxOutIndex for InMemoryIndex {
+//     fn get_txout(&self, id: TxOutId) -> Option<TxOutHandler> {
+//         self.tx
+//             .get(&id)
+//             .map(|txout| TxOutHandler { id, index: self })
+//     }
+// }
 
-// Txout short id is a hash of the txout
-type ShortId = u32; // 4 Byte short id identifier
+impl FullIndex for InMemoryIndex {}
 
 trait ToShortId: bitcoin::consensus::Encodable {
     /// Produce 80 byte hash of the item.
-    fn short_id(&self) -> ShortId;
+    fn short_id(&self) -> u32;
 }
 
-impl ToShortId for TxOut {
-    fn short_id(&self) -> ShortId {
-        let mut buf = Vec::new();
-        self.consensus_encode(&mut buf).unwrap();
-        let hash = bitcoin::hashes::sha256::Hash::hash(buf.as_slice());
+// TBD whether this is a generic or u32 specifically
+/// Sum of the short id of the txid and vout.
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
+pub struct TxOutId(u32);
+impl TxOutId {
+    fn new(txid: Txid, vout: u32) -> Self {
+        let txid_short_id = txid.short_id();
+        Self(txid_short_id + vout)
+    }
+}
+pub struct TxOutHandler {
+    id: TxOutId,
+    index: Box<dyn TxOutIndex>,
+}
 
-        // TODO: This is super ugly. Refactor later
-        u32::from_le_bytes(
-            hash.to_byte_array()
-                .to_vec()
-                .into_iter()
-                .take(4)
-                .collect::<Vec<u8>>()
-                .try_into()
-                .unwrap(),
-        )
+impl TxOutHandler {
+    fn new(id: TxOutId, index: Box<dyn TxOutIndex>) -> Self {
+        Self { id, index }
     }
 }
 
+/// Sum of the short id of the txid and vin
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
+pub struct TxInId(u32);
+impl TxInId {
+    fn new(txid: Txid, vin: u32) -> Self {
+        let txid_short_id = txid.short_id();
+        Self(txid_short_id + vin)
+    }
+}
+
+// TODO(armins): do later. Dont need this for now
+// pub struct TxInHandler {
+//     id: TxInId,
+//     index: Box<dyn TxInIndex>,
+// }
+
+// impl TxInHandler {
+//     fn new(id: TxInId, index: Box<dyn TxInIndex>) -> Self {
+//         Self { id, index }
+//     }
+// }
+
+macro_rules! impl_to_short_id {
+    ($t:ty) => {
+        impl ToShortId for $t {
+            fn short_id(&self) -> u32 {
+                let mut buf = Vec::new();
+                self.consensus_encode(&mut buf).unwrap();
+                let hash = bitcoin::hashes::sha256::Hash::hash(buf.as_slice());
+
+                u32::from_le_bytes(
+                    hash.to_byte_array()
+                        .to_vec()
+                        .into_iter()
+                        .take(4)
+                        .collect::<Vec<u8>>()
+                        .try_into()
+                        .unwrap(),
+                )
+            }
+        }
+    };
+}
+
+impl_to_short_id!(TxOut);
+impl_to_short_id!(Txid);
+
 pub struct MultiInputHeuristic {
-    uf: SparseDisjointSet<ShortId>,
+    uf: SparseDisjointSet<TxOutId>,
     index: Box<dyn PrevOutIndex>,
+}
+
+struct AbstractTransaction {
+    /// Short ids of txouts of the previous transactions
+    spent_coins: Vec<TxOutId>,
 }
 
 // TODO: trait definition for heuristics?
@@ -90,10 +155,12 @@ impl MultiInputHeuristic {
     }
 
     fn visit_tx(&mut self, tx: &Transaction) {
+        let txid = tx.compute_txid();
         // In the sparse representation we need to assign a unique short id to each txout
         tx.output
             .iter()
-            .map(|output| output.short_id())
+            .enumerate()
+            .map(|(vout, _)| TxOutId::new(txid, vout as u32))
             .for_each(|output| {
                 self.uf.find(output);
             });
@@ -101,21 +168,28 @@ impl MultiInputHeuristic {
         if tx.is_coinbase() {
             return;
         }
+        self.merge_txouts(AbstractTransaction {
+            spent_coins: tx
+                .input
+                .iter()
+                .enumerate()
+                .map(|(vin, _)| TxInId::new(txid, vin as u32))
+                .map(|input| self.index.prev_txout(&input))
+                .collect(),
+        })
+    }
 
-        // Create a root from the first input
-        let root = self.index.prev_txout(&tx.input[0].previous_output);
-        // Should create the root if it doesn't exist
-        self.uf.find(root.short_id());
-        for input in tx.input.iter().skip(1).map(|input| input.previous_output) {
-            let txout_index = self.index.prev_txout(&input);
-            self.uf.union(root.short_id(), txout_index.short_id());
-        }
+    fn merge_txouts(&mut self, tx: AbstractTransaction) {
+        tx.spent_coins.iter().reduce(|a, b| {
+            self.uf.union(*a, *b);
+            a
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::common_input::{InMemoryIndex, MultiInputHeuristic, ToShortId};
+    use crate::common_input::{InMemoryIndex, MultiInputHeuristic, ToShortId, TxInId, TxOutId};
     use bitcoin::{
         Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
         absolute::LockTime,
@@ -124,7 +198,6 @@ mod tests {
     use secp256k1::Secp256k1;
     use secp256k1::rand::rngs::OsRng;
     use tx_indexer_primitives::disjoint_set::DisJointSet;
-
 
     #[test]
     fn multi_input_heuristic() {
@@ -153,12 +226,12 @@ mod tests {
         let mut index = InMemoryIndex::new();
         // Add index for txouts spending inputs
         index.prev_txouts.insert(
-            spending_tx.input[0].previous_output,
-            coinbase1.output[3].clone(),
+            TxInId::new(spending_tx.compute_txid(), 0),
+            TxOutId::new(coinbase1.compute_txid(), 3),
         );
         index.prev_txouts.insert(
-            spending_tx.input[1].previous_output,
-            coinbase2.output[7].clone(),
+            TxInId::new(spending_tx.compute_txid(), 1),
+            TxOutId::new(coinbase2.compute_txid(), 7),
         );
 
         // Add index for txins spent by txouts
@@ -167,13 +240,13 @@ mod tests {
         heuristic.visit_tx(&spending_tx);
 
         assert_eq!(
-            heuristic.uf.find(coinbase1.output[3].short_id()),
-            heuristic.uf.find(coinbase2.output[7].short_id())
+            heuristic.uf.find(TxOutId::new(coinbase1.compute_txid(), 3)),
+            heuristic.uf.find(TxOutId::new(coinbase2.compute_txid(), 7))
         );
         // TODO: more assertions here
         assert_ne!(
-            heuristic.uf.find(coinbase2.output[7].short_id()),
-            heuristic.uf.find(coinbase3.output[1].short_id())
+            heuristic.uf.find(TxOutId::new(coinbase2.compute_txid(), 7)),
+            heuristic.uf.find(TxOutId::new(coinbase3.compute_txid(), 1))
         );
     }
 
