@@ -1,0 +1,6 @@
+[package]
+name = "tx-indexer-primitives"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]

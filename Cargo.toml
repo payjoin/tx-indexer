@@ -1,13 +1,9 @@
-[package]
-name = "slices-experiment"
+[workspace]
+name = "bitcoin-transaction-indexer"
 version = "0.1.0"
 edition = "2024"
+resolver = "3"
+members = ["src/crates/heuristics", "src/crates/primitives"]
 
-[dependencies]
-bitcoin_slices = { version = "0.10.0", features = ["sha2", "bitcoin"] }
-bitcoin = {version = "0.32.8", features = ["rand"]}
-
-
-
-[dev-dependencies]
-rand = "0.8.5"
+[workspace.dependencies]
+bitcoin = { version = "0.32.8", features = ["rand"] }

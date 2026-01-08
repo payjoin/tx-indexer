@@ -1,0 +1,11 @@
+[package]
+name = "heuristics"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bitcoin = { workspace = true }
+tx-indexer-primitives = { path = "../primitives" }
+
+[dev-dependencies]
+rand = "0.8.5"
