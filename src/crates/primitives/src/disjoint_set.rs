@@ -1,5 +1,10 @@
 use std::collections::HashMap;
 
+pub trait DisJointSet<K: Eq + std::hash::Hash + Copy> {
+    fn find(&mut self, x: K) -> K;
+    fn union(&mut self, x: K, y: K);
+}
+
 // TODO: make a union find trait that requires get parent and impl find and union.
 // open question: canonicalizing the parent and child requires the key to impl Ord -- probably fine. But we didnt do it.
 // For the vec type we need conversion into usize. Should we create a trait bound for that?
@@ -10,7 +15,10 @@ impl<K: Eq + std::hash::Hash + Copy> SparseDisjointSet<K> {
     pub fn new() -> Self {
         Self(HashMap::new())
     }
-    pub fn find(&mut self, x: K) -> K {
+}
+
+impl<K: Eq + std::hash::Hash + Copy> DisJointSet<K> for SparseDisjointSet<K> {
+    fn find(&mut self, x: K) -> K {
         let parent = *self.0.get(&x).unwrap_or(&x);
         if parent == x {
             return x;
@@ -20,7 +28,7 @@ impl<K: Eq + std::hash::Hash + Copy> SparseDisjointSet<K> {
 
         root
     }
-    pub fn union(&mut self, x: K, y: K) {
+    fn union(&mut self, x: K, y: K) {
         let x_root = self.find(x);
         let y_root = self.find(y);
 
@@ -39,21 +47,21 @@ impl SequentialDisjointSet {
     pub fn new(n: usize) -> Self {
         Self(Vec::from_iter(0..n))
     }
+}
 
-    /// Finds the root of the subset that x is in.
-    pub fn find(&mut self, x: usize) -> usize {
+impl DisJointSet<usize> for SequentialDisjointSet {
+    fn find(&mut self, x: usize) -> usize {
         let parent = self.0[x];
         if parent == x {
             return x;
         }
         let root = self.find(parent);
         self.0[x] = root;
-
         root
     }
 
     /// Declares that x and y are in the same subset. Merges the subsets of x and y.
-    pub fn union(&mut self, x: usize, y: usize) {
+    fn union(&mut self, x: usize, y: usize) {
         let x_root = self.find(x);
         let y_root = self.find(y);
 
@@ -70,7 +78,6 @@ impl SequentialDisjointSet {
         self.0[child] = parent;
     }
 }
-
 
 #[cfg(test)]
 mod tests {

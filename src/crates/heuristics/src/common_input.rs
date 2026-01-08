@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use bitcoin::consensus::Encodable;
 use bitcoin::hashes::Hash;
 use bitcoin::{OutPoint, Transaction, TxIn, TxOut};
-use tx_indexer_primitives::disjoint_set::SparseDisjointSet;
+use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
 
 
 pub trait PrevOutIndex {
@@ -123,6 +123,7 @@ mod tests {
     };
     use secp256k1::Secp256k1;
     use secp256k1::rand::rngs::OsRng;
+    use tx_indexer_primitives::disjoint_set::DisJointSet;
 
 
     #[test]
