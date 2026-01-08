@@ -49,15 +49,15 @@ impl TxInIndex for InMemoryIndex {
 impl FullIndex for InMemoryIndex {}
 
 // Txout short id is a hash of the txout
-type TxoutShortId = u32; // 4 Byte short id identifier
+type ShortId = u32; // 4 Byte short id identifier
 
-trait ShortId: bitcoin::consensus::Encodable {
+trait ToShortId: bitcoin::consensus::Encodable {
     /// Produce 80 byte hash of the item.
-    fn short_id(&self) -> TxoutShortId;
+    fn short_id(&self) -> ShortId;
 }
 
-impl ShortId for TxOut {
-    fn short_id(&self) -> TxoutShortId {
+impl ToShortId for TxOut {
+    fn short_id(&self) -> ShortId {
         let mut buf = Vec::new();
         self.consensus_encode(&mut buf).unwrap();
         let hash = bitcoin::hashes::sha256::Hash::hash(buf.as_slice());
@@ -76,7 +76,7 @@ impl ShortId for TxOut {
 }
 
 pub struct MultiInputHeuristic {
-    uf: SparseDisjointSet<TxoutShortId>,
+    uf: SparseDisjointSet<ShortId>,
     index: Box<dyn FullIndex>,
 }
 
@@ -115,9 +115,7 @@ impl MultiInputHeuristic {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        common_input::{ShortId, InMemoryIndex, MultiInputHeuristic},
-    };
+    use crate::common_input::{InMemoryIndex, MultiInputHeuristic, ToShortId};
     use bitcoin::{
         Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
         absolute::LockTime,
