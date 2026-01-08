@@ -77,7 +77,7 @@ impl ToShortId for TxOut {
 
 pub struct MultiInputHeuristic {
     uf: SparseDisjointSet<ShortId>,
-    index: Box<dyn FullIndex>,
+    index: Box<dyn PrevOutIndex>,
 }
 
 // TODO: trait definition for heuristics?
