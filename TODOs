@@ -1,0 +1,28 @@
+Nothingmuch TODOs:
+
+- Start work on the packed representation -> @nothingmuch
+- Need some papers for better coinjoin classification. -> @nothingmuch
+
+Armin TODOs:
+
+- make heuristics stateless -> @armin
+- Make tests better / more assertions. nothingmuch should not Edit existing tests but not adding to avoid conflicts     -> @armin
+- Remove the union find outdated TODOs
+- Finish id handled and import macros from sim
+
+Major features we already have:
+
+- binary classification for coinjoin detection (for loose not packed)
+- Hueristics analysis
+
+Major features we need:
+
+- Bounded parent tx look ups -> graph traversal (decendants/predecessors)
+  - Due to sensativity of this type of analysis, due to the order of the txs to be analyzed (parent or child may not be available at the time of analysis). This need explicit dependency tracking. Some notion of dispatching re-analysis when neighboring txs are available.
+  - Analysis can outputs some underdermined results (marked explicitly) or just refuse to analyze until the full dataset is available.
+- Arb value classification -> subset sum analysis
+- Graph laplacian
+  - bounded depth exact
+  - Isvans approximation
+- Packed representation of everything
+- Probabilistic clustering notion of uncertainties.  
