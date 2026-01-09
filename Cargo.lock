@@ -232,6 +232,9 @@ dependencies = [
 [[package]]
 name = "tx-indexer-primitives"
 version = "0.1.0"
+dependencies = [
+ "bitcoin",
+]
 
 [[package]]
 name = "unicode-ident"
