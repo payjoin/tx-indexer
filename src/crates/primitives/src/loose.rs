@@ -1,3 +1,4 @@
+use bitcoin::Amount;
 use bitcoin::consensus::Encodable;
 use std::collections::HashMap;
 use std::hash::DefaultHasher;
@@ -22,7 +23,7 @@ pub struct InMemoryIndex {
     prev_txouts: HashMap<TxInId, TxOutId>,
     spending_txins: HashMap<TxOutId, TxInId>,
     //  TODO: in the future replace with a trait
-    // TODO: is the insertion order important / meaningfu?
+    // TODO: test that insertion order does not make a difference
     txs: HashMap<TxId, bitcoin::Transaction>,
 }
 
@@ -87,21 +88,56 @@ impl TxInIndex for InMemoryIndex {
 // TBD whether this is a generic or u32 specifically
 /// Sum of the short id of the txid and vout.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
-pub struct TxOutId(u32);
+pub struct TxOutId {
+    txid: TxId,
+    vout: u32,
+}
+
+impl TxOutId {
+    fn with<'a>(&self, index: &'a InMemoryIndex) -> TxOutHandle<'a> {
+        TxOutHandle { id: *self, index }
+    }
+}
+
 pub struct TxOutHandle<'a> {
     id: TxOutId,
     index: &'a InMemoryIndex,
 }
 
 impl<'a> TxOutHandle<'a> {
+    // TODO: this new should exist. You always get a handle from the id.
     fn new(id: TxOutId, index: &'a InMemoryIndex) -> Self {
         Self { id, index }
+    }
+
+    pub fn amount(&self) -> Amount {
+        self.index
+            .txs
+            .get(&self.id.txid)
+            .expect("Tx should always exist")
+            .output[self.id.vout as usize]
+            .value
     }
 }
 
 /// Sum of the short id of the txid and vin
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
-pub struct TxInId(u32);
+pub struct TxInId {
+    txid: TxId,
+    vin: u32,
+}
+
+impl TxInId {
+    fn with<'a>(&self, index: &'a InMemoryIndex) -> TxInHandle<'a> {
+        TxInHandle { id: *self, index }
+    }
+}
+
+pub struct TxInHandle<'a> {
+    id: TxInId,
+    index: &'a InMemoryIndex,
+}
+
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 pub struct TxId(u32);
 
@@ -109,14 +145,26 @@ impl TxId {
     pub fn with<'a>(&self, index: &'a InMemoryIndex) -> TxHandle<'a> {
         TxHandle::new(*self, index)
     }
+
+    // TODO: this should not be pub. Only pub'd for testing purposes.
     pub fn txout_id(&self, vout: u32) -> TxOutId {
-        TxOutId(self.0.saturating_add(vout))
+        TxOutId { txid: *self, vout }
     }
 
     pub fn txin_id(&self, vin: u32) -> TxInId {
-        TxInId(self.0.saturating_add(vin))
+        TxInId { txid: *self, vin }
+    }
+
+    fn txout_handle<'a>(&self, index: &'a InMemoryIndex, vout: u32) -> TxOutHandle<'a> {
+        self.txout_id(vout).with(index)
+    }
+
+    fn txin_handle<'a>(&self, index: &'a InMemoryIndex, vin: u32) -> TxInHandle<'a> {
+        self.txin_id(vin).with(index)
     }
 }
+
+// TODO: we dont need this. Just use the index.
 pub struct TxData {
     /// Short ids of txouts of the previous transactions
     spent_coins: Vec<TxOutId>,
@@ -132,6 +180,10 @@ impl<'a> TxHandle<'a> {
         Self { id, index }
     }
 
+    pub fn id(&self) -> TxId {
+        self.id
+    }
+
     fn data(&self) -> TxData {
         TxData {
             spent_coins: self
@@ -141,6 +193,19 @@ impl<'a> TxHandle<'a> {
                 .map(|(_, outid)| outid.clone())
                 .collect(),
         }
+    }
+
+    pub fn outputs(&self) -> impl Iterator<Item = TxOutHandle<'a>> {
+        let outputs_len = self
+            .index
+            .txs
+            .get(&self.id)
+            .expect("If I have a handle it must exist?")
+            .output
+            .len();
+        (0..outputs_len)
+            .into_iter()
+            .map(|i| self.id.txout_handle(self.index, i as u32))
     }
 }
 
@@ -158,3 +223,14 @@ impl<'a> EnumerateSpentTxOuts for TxHandle<'a> {
     }
 }
 
+// TODO: find a better name for this
+pub trait EnumerateOutputValueInArbitraryOrder {
+    // TODO:
+    fn output_values(&self) -> impl Iterator<Item = Amount>;
+}
+
+impl<'a> EnumerateOutputValueInArbitraryOrder for TxHandle<'a> {
+    fn output_values(&self) -> impl Iterator<Item = Amount> {
+        self.outputs().map(|output| output.amount())
+    }
+}
