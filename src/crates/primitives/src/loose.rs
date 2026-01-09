@@ -1,38 +1,7 @@
 use bitcoin::consensus::Encodable;
-use bitcoin::hashes::Hash;
 use std::collections::HashMap;
-
-pub trait ToShortId: bitcoin::consensus::Encodable {
-    /// Produce 80 byte hash of the item.
-    fn short_id(&self) -> u32;
-}
-
-macro_rules! impl_to_short_id {
-    ($t:ty) => {
-        impl ToShortId for $t {
-            fn short_id(&self) -> u32 {
-                let mut buf = Vec::new();
-                self.consensus_encode(&mut buf).unwrap();
-                // TODO: replace with rapid hash or siphash
-                // to calculate ids we need a secret value so no one can grind txids that could create collissions.
-
-                let hash = bitcoin::hashes::sha256::Hash::hash(buf.as_slice());
-
-                u32::from_le_bytes(
-                    hash.to_byte_array()
-                        .to_vec()
-                        .into_iter()
-                        .take(4)
-                        .collect::<Vec<u8>>()
-                        .try_into()
-                        .unwrap(),
-                )
-            }
-        }
-    };
-}
-
-impl_to_short_id!(bitcoin::Txid);
+use std::hash::DefaultHasher;
+use std::hash::Hasher;
 
 pub trait PrevOutIndex {
     // TODO: this should take an input id and return an id
@@ -54,7 +23,7 @@ pub struct InMemoryIndex {
     spending_txins: HashMap<TxOutId, TxInId>,
     //  TODO: in the future replace with a trait
     // TODO: is the insertion order important / meaningfu?
-    txs: HashMap<LooseTxId, bitcoin::Transaction>,
+    txs: HashMap<TxId, bitcoin::Transaction>,
 }
 
 impl InMemoryIndex {
@@ -67,8 +36,8 @@ impl InMemoryIndex {
     }
 
     // FIXME: check all the keys before inserting. Lets not modify anything before checking for all dup checks
-    pub fn add_tx<'a>(&'a mut self, tx: &bitcoin::Transaction) -> LooseTxHandle<'a> {
-        let id = self.compute_loose_txid(tx.compute_txid());
+    pub fn add_tx<'a>(&'a mut self, tx: &bitcoin::Transaction) -> TxHandle<'a> {
+        let id = self.compute_txid(tx.compute_txid());
         let result = self.txs.insert(id, tx.clone());
         if result.is_some() {
             panic!("Transaction with id {:?} already exists!", id);
@@ -79,18 +48,23 @@ impl InMemoryIndex {
         for (vin, txin) in tx.input.iter().enumerate() {
             let vin_id = id.txin_id(vin as u32);
             let prev_vout = txin.previous_output.vout;
-            let prev_txid = self.compute_loose_txid(txin.previous_output.txid);
+            let prev_txid = self.compute_txid(txin.previous_output.txid);
             let prev_outid = prev_txid.txout_id(prev_vout);
             self.spending_txins.insert(prev_outid, vin_id);
             self.prev_txouts.insert(vin_id, prev_outid);
         }
 
-        LooseTxHandle { id, index: self }
+        TxHandle { id, index: self }
     }
 
-    fn compute_loose_txid(&self, txid: bitcoin::Txid) -> LooseTxId {
-        // TODO: replace with rapid hash or siphash instead of hashing the txid
-        LooseTxId(txid.short_id() as u32)
+    // TODO: once we need stable id, we may need to manage the random key ourselves. Once we need to persist things solve this TODO
+    pub fn compute_txid(&self, txid: bitcoin::Txid) -> TxId {
+        let mut hasher = DefaultHasher::new();
+        let mut buf = Vec::new();
+        txid.consensus_encode(&mut buf).unwrap();
+        hasher.write(buf.as_slice());
+        let hash = hasher.finish();
+        TxId(hash as u32)
     }
 }
 
@@ -129,14 +103,12 @@ impl<'a> TxOutHandle<'a> {
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 pub struct TxInId(u32);
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
-pub struct LooseTxId(u32);
+pub struct TxId(u32);
 
-impl LooseTxId {
-    pub fn new(txid: bitcoin::Txid) -> Self {
-        let txid_short_id = txid.short_id();
-        Self(txid_short_id)
+impl TxId {
+    pub fn with<'a>(&self, index: &'a InMemoryIndex) -> TxHandle<'a> {
+        TxHandle::new(*self, index)
     }
-
     pub fn txout_id(&self, vout: u32) -> TxOutId {
         TxOutId(self.0.saturating_add(vout))
     }
@@ -145,21 +117,33 @@ impl LooseTxId {
         TxInId(self.0.saturating_add(vin))
     }
 }
-pub struct LooseTxData {
+pub struct TxData {
     /// Short ids of txouts of the previous transactions
     spent_coins: Vec<TxOutId>,
 }
 
-pub struct LooseTxHandle<'a> {
-    id: LooseTxId,
+pub struct TxHandle<'a> {
+    id: TxId,
     index: &'a InMemoryIndex,
 }
 
-impl<'a> LooseTxHandle<'a> {
-    fn new(id: LooseTxId, index: &'a InMemoryIndex) -> Self {
+impl<'a> TxHandle<'a> {
+    fn new(id: TxId, index: &'a InMemoryIndex) -> Self {
         Self { id, index }
     }
+
+    fn data(&self) -> TxData {
+        TxData {
+            spent_coins: self
+                .index
+                .prev_txouts
+                .iter()
+                .map(|(_, outid)| outid.clone())
+                .collect(),
+        }
+    }
 }
+
 pub trait EnumerateSpentTxOuts {
     // TODO: do iterator later (maybe)
     // TODO:  handle?
@@ -168,22 +152,9 @@ pub trait EnumerateSpentTxOuts {
 
 // TODO: this should be a handle type generated by the handle
 // TODO: also need an abstract transaction Data struct
-impl EnumerateSpentTxOuts for LooseTxData {
+impl<'a> EnumerateSpentTxOuts for TxHandle<'a> {
     fn spent_coins(&self) -> Vec<TxOutId> {
-        self.spent_coins.clone()
+        self.data().spent_coins.clone()
     }
 }
 
-impl EnumerateSpentTxOuts for bitcoin::Transaction {
-    fn spent_coins(&self) -> Vec<TxOutId> {
-        self.input
-            .iter()
-            .enumerate()
-            .map(|(vin, _)| {
-                let prev_txid = LooseTxId::new(self.input[vin].previous_output.txid);
-                let prev_vout = self.input[vin].previous_output.vout;
-                prev_txid.txout_id(prev_vout)
-            })
-            .collect()
-    }
-}

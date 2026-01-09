@@ -15,7 +15,7 @@ impl MultiInputHeuristic {
         }
     }
 
-    fn merge_txouts(&mut self, tx: &impl EnumerateSpentTxOuts) {
+    fn merge_prevouts(&mut self, tx: &impl EnumerateSpentTxOuts) {
         tx.spent_coins().iter().reduce(|a, b| {
             self.uf.union(*a, *b);
             a
@@ -33,10 +33,7 @@ mod tests {
     };
     use secp256k1::Secp256k1;
     use secp256k1::rand::rngs::OsRng;
-    use tx_indexer_primitives::{
-        disjoint_set::DisJointSet,
-        loose::{InMemoryIndex, LooseTxId},
-    };
+    use tx_indexer_primitives::{disjoint_set::DisJointSet, loose::InMemoryIndex};
 
     #[test]
     fn multi_input_heuristic() {
@@ -79,25 +76,30 @@ mod tests {
         let mut heuristic = MultiInputHeuristic::new();
 
         for tx in all_txs.iter() {
-            heuristic.merge_txouts(tx);
+            let tx_handle = index.compute_txid(tx.compute_txid()).with(&index);
+            heuristic.merge_prevouts(&tx_handle);
         }
 
         assert_eq!(
-            heuristic
-                .uf
-                .find(LooseTxId::new(coinbase1.compute_txid()).txout_id(spending_vout_1)),
-            heuristic
-                .uf
-                .find(LooseTxId::new(coinbase2.compute_txid()).txout_id(spending_vout_2))
+            heuristic.uf.find(
+                index
+                    .compute_txid(coinbase1.compute_txid())
+                    .txout_id(spending_vout_1)
+            ),
+            heuristic.uf.find(
+                index
+                    .compute_txid(coinbase2.compute_txid())
+                    .txout_id(spending_vout_2)
+            )
         );
         // TODO: more assertions here
         assert_ne!(
             heuristic
                 .uf
-                .find(LooseTxId::new(coinbase2.compute_txid()).txout_id(7)),
+                .find(index.compute_txid(coinbase2.compute_txid()).txout_id(7)),
             heuristic
                 .uf
-                .find(LooseTxId::new(coinbase3.compute_txid()).txout_id(1))
+                .find(index.compute_txid(coinbase3.compute_txid()).txout_id(1))
         );
     }
 
