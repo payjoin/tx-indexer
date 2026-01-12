@@ -5,7 +5,6 @@ pub trait DisJointSet<K: Eq + std::hash::Hash + Copy> {
     fn union(&mut self, x: K, y: K);
 }
 
-// TODO: make a union find trait that requires get parent and impl find and union.
 // open question: canonicalizing the parent and child requires the key to impl Ord -- probably fine. But we didnt do it.
 // For the vec type we need conversion into usize. Should we create a trait bound for that?
 // For "loose" transactions. No sequential order.
