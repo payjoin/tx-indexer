@@ -5,7 +5,6 @@ use std::hash::DefaultHasher;
 use std::hash::Hasher;
 
 use crate::disjoint_set::DisJointSet;
-use crate::disjoint_set::SparseDisjointSet;
 
 pub trait PrevOutIndex {
     // TODO: this should take an input id and return an id
@@ -108,7 +107,10 @@ pub struct InMemoryClusteringIndex<UF: DisJointSet<TxOutId>> {
     index: InMemoryIndex,
     merged_prevouts: UF,
     // TODO: hashmap makes sense for loose repr. For packed graph this can be a large bit vector. One bit for the entire set of ordered txs.
+    // TODO: this should be unhardcoded to be construct out of some generic storage type
     tagged_coinjoins: HashMap<TxId, bool>,
+    // TODO: pub'd for now. Need to remove this
+    pub tagged_change_outputs: HashMap<TxOutId, bool>,
 }
 
 impl<UF: DisJointSet<TxOutId> + Default> InMemoryClusteringIndex<UF> {
@@ -117,6 +119,7 @@ impl<UF: DisJointSet<TxOutId> + Default> InMemoryClusteringIndex<UF> {
             index: InMemoryIndex::new(),
             merged_prevouts: UF::default(),
             tagged_coinjoins: HashMap::new(),
+            tagged_change_outputs: HashMap::new(),
         }
     }
 }
@@ -148,8 +151,8 @@ impl<UF: DisJointSet<TxOutId>> CoinJoinClassification for InMemoryClusteringInde
 /// Sum of the short id of the txid and vout.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 pub struct TxOutId {
-    txid: TxId,
-    vout: u32,
+    pub txid: TxId,
+    pub vout: u32,
 }
 
 impl TxOutId {
@@ -165,8 +168,16 @@ pub struct TxOutHandle<'a> {
 
 impl<'a> TxOutHandle<'a> {
     // TODO: this new should exist. You always get a handle from the id.
-    fn new(id: TxOutId, index: &'a InMemoryIndex) -> Self {
+    pub fn new(id: TxOutId, index: &'a InMemoryIndex) -> Self {
         Self { id, index }
+    }
+
+    pub fn id(&self) -> TxOutId {
+        self.id
+    }
+
+    pub fn tx(&self) -> TxHandle<'a> {
+        self.id.txid.with(self.index)
     }
 
     pub fn amount(&self) -> Amount {
@@ -176,6 +187,10 @@ impl<'a> TxOutHandle<'a> {
             .expect("Tx should always exist")
             .output[self.id.vout as usize]
             .value
+    }
+
+    pub fn vout(&self) -> u32 {
+        self.id.vout
     }
 }
 
@@ -198,7 +213,7 @@ pub struct TxInHandle<'a> {
 }
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
-pub struct TxId(u32);
+pub struct TxId(pub u32);
 
 impl TxId {
     pub fn with<'a>(&self, index: &'a InMemoryIndex) -> TxHandle<'a> {
@@ -223,12 +238,6 @@ impl TxId {
     }
 }
 
-// TODO: we dont need this. Just use the index.
-pub struct TxData {
-    /// Short ids of txouts of the previous transactions
-    spent_coins: Vec<TxOutId>,
-}
-
 pub struct TxHandle<'a> {
     id: TxId,
     index: &'a InMemoryIndex,
@@ -243,15 +252,12 @@ impl<'a> TxHandle<'a> {
         self.id
     }
 
-    fn data(&self) -> TxData {
-        TxData {
-            spent_coins: self
-                .index
-                .prev_txouts
-                .iter()
-                .map(|(_, outid)| outid.clone())
-                .collect(),
-        }
+    fn spent_coins(&self) -> Vec<TxOutId> {
+        self.index
+            .prev_txouts
+            .iter()
+            .map(|(_, outid)| outid.clone())
+            .collect()
     }
 
     pub fn outputs(&self) -> impl Iterator<Item = TxOutHandle<'a>> {
@@ -266,9 +272,46 @@ impl<'a> TxHandle<'a> {
             .into_iter()
             .map(|i| self.id.txout_handle(self.index, i as u32))
     }
+
+    pub fn output_count(&self) -> usize {
+        self.id.with(self.index).outputs().count()
+    }
 }
 
-pub trait EnumerateSpentTxOuts {
+// Anything transaction handle like
+pub trait AbstractTxHandle {}
+
+impl AbstractTxHandle for TxHandle<'_> {}
+
+pub trait TxConstituent {
+    type Handle: AbstractTxHandle;
+    fn containing_tx(&self) -> Self::Handle;
+
+    fn index(&self) -> usize;
+}
+
+impl<'a> TxConstituent for TxOutHandle<'a> {
+    type Handle = TxHandle<'a>;
+    fn containing_tx(&self) -> Self::Handle {
+        self.tx()
+    }
+
+    fn index(&self) -> usize {
+        self.id.vout as usize
+    }
+}
+
+pub trait OutputCount: AbstractTxHandle {
+    fn output_count(&self) -> usize;
+}
+
+impl OutputCount for TxHandle<'_> {
+    fn output_count(&self) -> usize {
+        self.output_count()
+    }
+}
+
+pub trait EnumerateSpentTxOuts: AbstractTxHandle {
     // TODO: do iterator later (maybe)
     // TODO:  handle?
     fn spent_coins(&self) -> Vec<TxOutId>;
@@ -278,12 +321,12 @@ pub trait EnumerateSpentTxOuts {
 // TODO: also need an abstract transaction Data struct
 impl<'a> EnumerateSpentTxOuts for TxHandle<'a> {
     fn spent_coins(&self) -> Vec<TxOutId> {
-        self.data().spent_coins.clone()
+        self.spent_coins()
     }
 }
 
 // TODO: find a better name for this
-pub trait EnumerateOutputValueInArbitraryOrder {
+pub trait EnumerateOutputValueInArbitraryOrder: AbstractTxHandle {
     // TODO:
     fn output_values(&self) -> impl Iterator<Item = Amount>;
 }

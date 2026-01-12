@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use tx_indexer_primitives::loose::{CoinJoinClassification, EnumerateOutputValueInArbitraryOrder, TxHandle};
+use tx_indexer_primitives::loose::{
+    CoinJoinClassification, EnumerateOutputValueInArbitraryOrder, TxHandle,
+};
 
 /// This is a super naive implementation that should be replace with a more sophisticated one.
 #[derive(Default, Debug)]
@@ -30,10 +32,13 @@ impl NaiveCoinjoinDetection {
 #[cfg(test)]
 mod tests {
     use bitcoin::Amount;
+    use tx_indexer_primitives::loose::AbstractTxHandle;
 
     use super::*;
 
     struct DummyOutputsValues(Vec<u64>);
+
+    impl AbstractTxHandle for DummyOutputsValues {}
 
     impl EnumerateOutputValueInArbitraryOrder for DummyOutputsValues {
         fn output_values(&self) -> impl Iterator<Item = Amount> {

@@ -1,4 +1,79 @@
+use std::collections::HashMap;
+
+use bitcoin::consensus::Encodable;
+use bitcoin::hashes::Hash;
+use bitcoin::{OutPoint, TxIn, TxOut};
+
 use tx_indexer_primitives::loose::{EnumerateSpentTxOuts, RelatedPrevOutsIndex};
+
+pub trait PrevOutIndex {
+    fn prev_txout(&self, ot: &OutPoint) -> TxOut;
+}
+
+pub trait TxInIndex {
+    fn spending_txin(&self, tx: &TxOut) -> Option<TxIn>;
+}
+
+pub trait FullIndex: PrevOutIndex + TxInIndex {}
+
+pub struct InMemoryIndex {
+    prev_txouts: HashMap<OutPoint, TxOut>,
+    spending_txins: HashMap<TxOut, TxIn>,
+}
+
+impl InMemoryIndex {
+    fn new() -> Self {
+        Self {
+            prev_txouts: HashMap::new(),
+            spending_txins: HashMap::new(),
+        }
+    }
+    // TODO: data ingestion
+}
+
+impl PrevOutIndex for InMemoryIndex {
+    fn prev_txout(&self, ot: &OutPoint) -> TxOut {
+        self.prev_txouts
+            .get(ot)
+            .expect("Previous output should always be present if index is build correctly")
+            .clone()
+    }
+}
+
+impl TxInIndex for InMemoryIndex {
+    fn spending_txin(&self, tx_out: &TxOut) -> Option<TxIn> {
+        self.spending_txins.get(tx_out).cloned()
+    }
+}
+
+impl FullIndex for InMemoryIndex {}
+
+// Txout short id is a hash of the txout
+type ShortId = u32; // 4 Byte short id identifier
+
+trait ToShortId: bitcoin::consensus::Encodable {
+    /// Produce 80 byte hash of the item.
+    fn short_id(&self) -> ShortId;
+}
+
+impl ToShortId for TxOut {
+    fn short_id(&self) -> ShortId {
+        let mut buf = Vec::new();
+        self.consensus_encode(&mut buf).unwrap();
+        let hash = bitcoin::hashes::sha256::Hash::hash(buf.as_slice());
+
+        // TODO: This is super ugly. Refactor later
+        u32::from_le_bytes(
+            hash.to_byte_array()
+                .to_vec()
+                .into_iter()
+                .take(4)
+                .collect::<Vec<u8>>()
+                .try_into()
+                .unwrap(),
+        )
+    }
+}
 
 pub struct MultiInputHeuristic;
 
@@ -26,7 +101,10 @@ mod tests {
     };
     use secp256k1::Secp256k1;
     use secp256k1::rand::rngs::OsRng;
-    use tx_indexer_primitives::{disjoint_set::SparseDisjointSet, loose::{InMemoryClusteringIndex, InMemoryIndex, RelatedPrevOutsIndex, TxOutId}};
+    use tx_indexer_primitives::{
+        disjoint_set::SparseDisjointSet,
+        loose::{InMemoryClusteringIndex, InMemoryIndex, RelatedPrevOutsIndex, TxOutId},
+    };
 
     #[test]
     fn multi_input_heuristic() {
@@ -89,14 +167,12 @@ mod tests {
         );
         // TODO: more assertions here
         assert_ne!(
-                clustering_index
-                .find_root(&index.compute_txid(coinbase2.compute_txid()).txout_id(7)),
-                clustering_index
-                .find_root(&index.compute_txid(coinbase3.compute_txid()).txout_id(1))
+            clustering_index.find_root(&index.compute_txid(coinbase2.compute_txid()).txout_id(7)),
+            clustering_index.find_root(&index.compute_txid(coinbase3.compute_txid()).txout_id(1))
         );
     }
 
-    fn create_coinbase_with_many_outputs(block_height: u32, num_outputs: usize) -> Transaction {
+    pub fn create_coinbase_with_many_outputs(block_height: u32, num_outputs: usize) -> Transaction {
         // Create coinbase input (special input with no previous output)
         let mut coinbase_script_bytes = block_height.to_le_bytes().to_vec();
         coinbase_script_bytes.push(0x00); // Add a byte to make it a valid script

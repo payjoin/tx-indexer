@@ -7,6 +7,7 @@ Armin TODOs:
 
 - Make tests better / more assertions. nothingmuch should not Edit existing tests but not adding to avoid conflicts     -> @armin
 - Finish id handled and import macros from sim
+- Basic change identification heuristics
 
 Major features we already have:
 
