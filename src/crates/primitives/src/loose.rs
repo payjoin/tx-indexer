@@ -4,6 +4,9 @@ use std::collections::HashMap;
 use std::hash::DefaultHasher;
 use std::hash::Hasher;
 
+use crate::disjoint_set::DisJointSet;
+use crate::disjoint_set::SparseDisjointSet;
+
 pub trait PrevOutIndex {
     // TODO: this should take an input id and return an id
     // TODO: consider handle wrappers converting ids to the actual types.
@@ -19,6 +22,7 @@ pub trait IndexedGraph: PrevOutIndex + TxInIndex {}
 
 impl IndexedGraph for InMemoryIndex {}
 
+#[derive(Debug)]
 pub struct InMemoryIndex {
     prev_txouts: HashMap<TxInId, TxOutId>,
     spending_txins: HashMap<TxOutId, TxInId>,
@@ -80,6 +84,61 @@ impl PrevOutIndex for InMemoryIndex {
 impl TxInIndex for InMemoryIndex {
     fn spending_txin(&self, tx_out: &TxOutId) -> Option<TxInId> {
         self.spending_txins.get(tx_out).cloned()
+    }
+}
+
+// Clustering and classification related traits
+
+pub trait CoinJoinClassification {
+    /// Tags a transaction as a coinjoin or not.
+    fn tag_tx(&mut self, tx_id: &TxId, is_coinjoin: bool);
+    /// Checks if a transaction is a coinjoin.
+    fn is_coinjoin(&self, tx_id: &TxId) -> Option<bool>;
+}
+/// Trait for merging previous outputs into a disjoint set.
+pub trait RelatedPrevOutsIndex {
+    /// Merges the previous outputs `a` and `b` into the same set.
+    fn merge_prevouts(&mut self, a: &TxOutId, b: &TxOutId);
+    /// Finds the root of the set containing the previous output `a`.
+    fn find_root(&mut self, a: &TxOutId) -> TxOutId;
+}
+
+#[derive(Debug)]
+pub struct InMemoryClusteringIndex<UF: DisJointSet<TxOutId>> {
+    index: InMemoryIndex,
+    merged_prevouts: UF,
+    // TODO: hashmap makes sense for loose repr. For packed graph this can be a large bit vector. One bit for the entire set of ordered txs.
+    tagged_coinjoins: HashMap<TxId, bool>,
+}
+
+impl<UF: DisJointSet<TxOutId> + Default> InMemoryClusteringIndex<UF> {
+    pub fn new() -> Self {
+        Self {
+            index: InMemoryIndex::new(),
+            merged_prevouts: UF::default(),
+            tagged_coinjoins: HashMap::new(),
+        }
+    }
+}
+
+impl<UF: DisJointSet<TxOutId>> RelatedPrevOutsIndex for InMemoryClusteringIndex<UF> {
+    /// Merges the previous outputs a and b into the same set.
+    fn merge_prevouts(&mut self, a: &TxOutId, b: &TxOutId) {
+        self.merged_prevouts.union(*a, *b);
+    }
+
+    fn find_root(&mut self, a: &TxOutId) -> TxOutId {
+        self.merged_prevouts.find(*a)
+    }
+}
+
+impl<UF: DisJointSet<TxOutId>> CoinJoinClassification for InMemoryClusteringIndex<UF> {
+    fn tag_tx(&mut self, tx_id: &TxId, is_coinjoin: bool) {
+        self.tagged_coinjoins.insert(*tx_id, is_coinjoin);
+    }
+
+    fn is_coinjoin(&self, tx_id: &TxId) -> Option<bool> {
+        self.tagged_coinjoins.get(tx_id).cloned()
     }
 }
 

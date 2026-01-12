@@ -11,8 +11,8 @@ pub trait DisJointSet<K: Eq + std::hash::Hash + Copy> {
 // For "loose" transactions. No sequential order.
 pub struct SparseDisjointSet<K: Eq + std::hash::Hash + Copy>(HashMap<K, K>);
 
-impl<K: Eq + std::hash::Hash + Copy> SparseDisjointSet<K> {
-    pub fn new() -> Self {
+impl<K: Eq + std::hash::Hash + Copy> Default for SparseDisjointSet<K> {
+    fn default() -> Self {
         Self(HashMap::new())
     }
 }
@@ -132,9 +132,9 @@ mod tests {
     #[test]
     fn test_sparse_union_find() {
         // Singleton case
-        assert_eq!(SparseDisjointSet::new().find(0), 0);
+        assert_eq!(SparseDisjointSet::default().find(0), 0);
 
-        let mut uf = SparseDisjointSet::new();
+        let mut uf = SparseDisjointSet::default();
         uf.union(0, 2);
         assert_eq!(uf.find(0), uf.find(2));
         assert_eq!(uf.find(1), uf.find(1));
@@ -163,7 +163,7 @@ mod tests {
         assert_eq!(uf.find(3), uf.find(0));
         assert_eq!(uf.find(4), uf.find(0));
 
-        let mut uf = SparseDisjointSet::new();
+        let mut uf = SparseDisjointSet::default();
         uf.union(0, 2);
         uf.union(4, 2);
         uf.union(3, 1);

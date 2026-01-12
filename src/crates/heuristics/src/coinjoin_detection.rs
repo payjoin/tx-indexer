@@ -1,18 +1,18 @@
 use std::collections::HashMap;
 
-use tx_indexer_primitives::loose::{EnumerateOutputValueInArbitraryOrder, TxHandle, TxId};
+use tx_indexer_primitives::loose::{CoinJoinClassification, EnumerateOutputValueInArbitraryOrder, TxHandle};
 
 /// This is a super naive implementation that should be replace with a more sophisticated one.
 #[derive(Default, Debug)]
-pub struct NaiveCoinjoinDetection {
-    // TODO: hashmap makes sense for loose repr. For packed graph this can be a large bit vector. One bit for the entire set of ordered txs.
-    tagged_coinjoins: HashMap<TxId, bool>,
-}
+pub struct NaiveCoinjoinDetection;
 
 impl NaiveCoinjoinDetection {
-    fn classify_tx(&mut self, tx: &TxHandle) {
-        self.tagged_coinjoins
-            .insert(tx.id(), self.is_coinjoin_tx(tx));
+    fn classify_tx(
+        &self,
+        tx: &TxHandle,
+        coinjoin_classification: &mut impl CoinJoinClassification,
+    ) {
+        coinjoin_classification.tag_tx(&tx.id(), self.is_coinjoin_tx(tx));
     }
 
     // TODO: impl actual detection
@@ -44,15 +44,10 @@ mod tests {
     #[test]
     fn test_is_coinjoin_tx() {
         let coinjoin_detection = NaiveCoinjoinDetection::default();
-        let not_coinjoin = DummyOutputsValues(vec![
-            100, 200, 300
-        ]);
+        let not_coinjoin = DummyOutputsValues(vec![100, 200, 300]);
         assert!(!coinjoin_detection.is_coinjoin_tx(&not_coinjoin));
 
-
-        let coinjoin = DummyOutputsValues(vec![
-            100, 100, 100, 200, 200, 200, 300, 300, 300
-        ]);
+        let coinjoin = DummyOutputsValues(vec![100, 100, 100, 200, 200, 200, 300, 300, 300]);
         assert!(coinjoin_detection.is_coinjoin_tx(&coinjoin));
     }
 }

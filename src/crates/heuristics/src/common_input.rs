@@ -1,23 +1,16 @@
-use tx_indexer_primitives::{
-    disjoint_set::{DisJointSet, SparseDisjointSet},
-    loose::{EnumerateSpentTxOuts, TxOutId},
-};
+use tx_indexer_primitives::loose::{EnumerateSpentTxOuts, RelatedPrevOutsIndex};
 
-pub struct MultiInputHeuristic {
-    uf: SparseDisjointSet<TxOutId>,
-}
+pub struct MultiInputHeuristic;
 
 // TODO: trait definition for heuristics?
 impl MultiInputHeuristic {
-    fn new() -> Self {
-        Self {
-            uf: SparseDisjointSet::new(),
-        }
-    }
-
-    fn merge_prevouts(&mut self, tx: &impl EnumerateSpentTxOuts) {
+    pub fn merge_prevouts(
+        &mut self,
+        clustering_index: &mut impl RelatedPrevOutsIndex,
+        tx: &impl EnumerateSpentTxOuts,
+    ) {
         tx.spent_coins().iter().reduce(|a, b| {
-            self.uf.union(*a, *b);
+            clustering_index.merge_prevouts(a, b);
             a
         });
     }
@@ -33,7 +26,7 @@ mod tests {
     };
     use secp256k1::Secp256k1;
     use secp256k1::rand::rngs::OsRng;
-    use tx_indexer_primitives::{disjoint_set::DisJointSet, loose::InMemoryIndex};
+    use tx_indexer_primitives::{disjoint_set::SparseDisjointSet, loose::{InMemoryClusteringIndex, InMemoryIndex, RelatedPrevOutsIndex, TxOutId}};
 
     #[test]
     fn multi_input_heuristic() {
@@ -67,39 +60,39 @@ mod tests {
             coinbase3.clone(),
             spending_tx.clone(),
         ];
+
+        let mut clustering_index = InMemoryClusteringIndex::<SparseDisjointSet<TxOutId>>::new();
         for tx in all_txs.iter() {
             index.add_tx(tx);
         }
 
         // Add index for txins spent by txouts
         // For this limited example there is two outs that are spet
-        let mut heuristic = MultiInputHeuristic::new();
+        let mut heuristic = MultiInputHeuristic;
 
         for tx in all_txs.iter() {
             let tx_handle = index.compute_txid(tx.compute_txid()).with(&index);
-            heuristic.merge_prevouts(&tx_handle);
+            heuristic.merge_prevouts(&mut clustering_index, &tx_handle);
         }
 
         assert_eq!(
-            heuristic.uf.find(
-                index
+            clustering_index.find_root(
+                &index
                     .compute_txid(coinbase1.compute_txid())
                     .txout_id(spending_vout_1)
             ),
-            heuristic.uf.find(
-                index
+            clustering_index.find_root(
+                &index
                     .compute_txid(coinbase2.compute_txid())
                     .txout_id(spending_vout_2)
             )
         );
         // TODO: more assertions here
         assert_ne!(
-            heuristic
-                .uf
-                .find(index.compute_txid(coinbase2.compute_txid()).txout_id(7)),
-            heuristic
-                .uf
-                .find(index.compute_txid(coinbase3.compute_txid()).txout_id(1))
+                clustering_index
+                .find_root(&index.compute_txid(coinbase2.compute_txid()).txout_id(7)),
+                clustering_index
+                .find_root(&index.compute_txid(coinbase3.compute_txid()).txout_id(1))
         );
     }
 
