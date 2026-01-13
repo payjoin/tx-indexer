@@ -1,4 +1,4 @@
-use tx_indexer_primitives::loose::{EnumerateSpentTxOuts, RelatedPrevOutsIndex};
+use tx_indexer_primitives::{abstract_types::EnumerateSpentTxOuts, loose::RelatedPrevOutsIndex};
 
 pub struct MultiInputHeuristic;
 

@@ -1,6 +1,7 @@
 use tx_indexer_primitives::{
+    abstract_types::{OutputCount, TxConstituent},
     disjoint_set::SparseDisjointSet,
-    loose::{InMemoryClusteringIndex, OutputCount, TxConstituent, TxHandle, TxOutId},
+    loose::{InMemoryClusteringIndex, TxHandle, TxOutId},
 };
 
 pub struct NaiveChangeIdentificationHueristic;
@@ -29,7 +30,7 @@ impl NaiveChangeIdentificationHueristic {
 #[cfg(test)]
 mod tests {
 
-    use tx_indexer_primitives::loose::AbstractTxHandle;
+    use tx_indexer_primitives::abstract_types::AbstractTxHandle;
 
     use super::*;
 
