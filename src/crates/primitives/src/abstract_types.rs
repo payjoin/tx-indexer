@@ -17,9 +17,7 @@ pub trait OutputCount: AbstractTxHandle {
 }
 
 pub trait EnumerateSpentTxOuts: AbstractTxHandle {
-    // TODO: do iterator later (maybe)
-    // TODO:  handle?
-    fn spent_coins(&self) -> Vec<TxOutId>;
+    fn spent_coins(&self) -> impl Iterator<Item = TxOutId>;
 }
 
 // TODO: find a better name for this

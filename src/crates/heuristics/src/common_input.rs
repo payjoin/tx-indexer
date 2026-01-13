@@ -9,8 +9,8 @@ impl MultiInputHeuristic {
         clustering_index: &mut impl RelatedPrevOutsIndex,
         tx: &impl EnumerateSpentTxOuts,
     ) {
-        tx.spent_coins().iter().reduce(|a, b| {
-            clustering_index.merge_prevouts(a, b);
+        tx.spent_coins().reduce(|a, b| {
+            clustering_index.merge_prevouts(&a, &b);
             a
         });
     }
