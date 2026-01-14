@@ -5,6 +5,7 @@ use crate::loose::TxOutId;
 // Anything transaction handle like
 pub trait AbstractTxHandle {}
 
+// Should be implemented by any type that is contained within a transaction.
 pub trait TxConstituent {
     type Handle: AbstractTxHandle;
     fn containing_tx(&self) -> Self::Handle;

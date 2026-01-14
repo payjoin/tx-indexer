@@ -30,38 +30,9 @@ impl NaiveChangeIdentificationHueristic {
 #[cfg(test)]
 mod tests {
 
-    use tx_indexer_primitives::abstract_types::AbstractTxHandle;
+    use tx_indexer_primitives::test_utils::{DummyTxHandle, DummyTxOut};
 
     use super::*;
-
-    #[derive(Clone)]
-    struct DummyTxHandle {
-        output_count: usize,
-    }
-
-    impl AbstractTxHandle for DummyTxHandle {}
-
-    impl OutputCount for DummyTxHandle {
-        fn output_count(&self) -> usize {
-            self.output_count
-        }
-    }
-
-    struct DummyTxOut {
-        index: usize,
-        containing_tx: DummyTxHandle,
-    }
-
-    impl TxConstituent for DummyTxOut {
-        type Handle = DummyTxHandle;
-        fn containing_tx(&self) -> Self::Handle {
-            self.containing_tx.clone()
-        }
-
-        fn index(&self) -> usize {
-            self.index
-        }
-    }
 
     #[test]
     fn test_classify_change() {
