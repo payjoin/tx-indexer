@@ -3,20 +3,47 @@ pub mod disjoint_set;
 pub mod loose;
 
 pub mod test_utils {
-    use crate::abstract_types::{
-        AbstractTxHandle, EnumerateOutputValueInArbitraryOrder, OutputCount, TxConstituent,
+    use std::collections::HashMap;
+
+    use bitcoin::Amount;
+
+    use crate::{
+        abstract_types::{
+            AbstractTxHandle, EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts,
+            OutputCount, TxConstituent,
+        },
+        disjoint_set::SparseDisjointSet,
+        loose::{TxId, TxOutId},
     };
 
     #[derive(Clone)]
     pub struct DummyTxHandle {
-        pub output_count: usize,
+        pub id: TxId,
+        pub outputs: Vec<u64>,
+        pub spent_coins: Vec<TxOutId>,
     }
 
-    impl AbstractTxHandle for DummyTxHandle {}
+    impl AbstractTxHandle for DummyTxHandle {
+        fn id(&self) -> TxId {
+            self.id
+        }
+    }
 
     impl OutputCount for DummyTxHandle {
         fn output_count(&self) -> usize {
-            self.output_count
+            self.outputs.len()
+        }
+    }
+
+    impl EnumerateOutputValueInArbitraryOrder for DummyTxHandle {
+        fn output_values(&self) -> impl Iterator<Item = Amount> {
+            self.outputs.iter().map(|amount| Amount::from_sat(*amount))
+        }
+    }
+
+    impl EnumerateSpentTxOuts for DummyTxHandle {
+        fn spent_coins(&self) -> impl Iterator<Item = TxOutId> {
+            self.spent_coins.iter().copied()
         }
     }
 
@@ -34,5 +61,12 @@ pub mod test_utils {
         fn index(&self) -> usize {
             self.index
         }
+    }
+
+    #[derive(Default)]
+    pub struct DummyIndex {
+        pub coinjoin_tags: HashMap<TxId, bool>,
+        pub change_tags: HashMap<TxOutId, bool>,
+        pub clustered_txouts: SparseDisjointSet<TxOutId>,
     }
 }

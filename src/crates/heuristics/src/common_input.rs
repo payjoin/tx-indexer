@@ -1,24 +1,43 @@
-use tx_indexer_primitives::{abstract_types::EnumerateSpentTxOuts, loose::RelatedPrevOutsIndex};
+use tx_indexer_primitives::abstract_types::EnumerateSpentTxOuts;
+
+use crate::MutableOperation;
 
 pub struct MultiInputHeuristic;
 
 // TODO: trait definition for heuristics?
 impl MultiInputHeuristic {
-    pub fn merge_prevouts(
-        &mut self,
-        clustering_index: &mut impl RelatedPrevOutsIndex,
-        tx: &impl EnumerateSpentTxOuts,
-    ) {
+    pub fn merge_prevouts(&self, tx: &impl EnumerateSpentTxOuts) -> Vec<MutableOperation> {
+        if tx.spent_coins().count() == 0 {
+            return vec![];
+        }
+        let mut operations = Vec::new();
         tx.spent_coins().reduce(|a, b| {
-            clustering_index.merge_prevouts(&a, &b);
+            operations.push(MutableOperation::Cluster(a, b));
             a
         });
+
+        operations
+    }
+}
+
+// This heuristic has a strict dependency that the coinjoin annotations must be present as to avoid cluster collapse.
+// If the containing tx is a coinjoin, the prevouts should NOT be clustered together.
+// TODO: how do we express this dependency?
+pub struct CoinjoinAwareMultiInputHeuristic;
+
+impl CoinjoinAwareMultiInputHeuristic {
+    pub fn merge_prevouts(&self, tx: &impl EnumerateSpentTxOuts) -> Vec<MutableOperation> {
+        if tx.spent_coins().count() == 0 {
+            return vec![];
+        }
+
+        todo!()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::common_input::MultiInputHeuristic;
+    use crate::{OperationExecutor, common_input::MultiInputHeuristic};
     use bitcoin::{
         Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
         absolute::LockTime,
@@ -28,7 +47,7 @@ mod tests {
     use secp256k1::rand::rngs::OsRng;
     use tx_indexer_primitives::{
         disjoint_set::SparseDisjointSet,
-        loose::{InMemoryClusteringIndex, InMemoryIndex, RelatedPrevOutsIndex, TxOutId},
+        loose::{InMemoryClusteringIndex, InMemoryIndex, TxOutId},
     };
 
     #[test]
@@ -71,11 +90,13 @@ mod tests {
 
         // Add index for txins spent by txouts
         // For this limited example there is two outs that are spet
-        let mut heuristic = MultiInputHeuristic;
+        let heuristic = MultiInputHeuristic;
 
         for tx in all_txs.iter() {
             let tx_handle = index.compute_txid(tx.compute_txid()).with(&index);
-            heuristic.merge_prevouts(&mut clustering_index, &tx_handle);
+            for ops in heuristic.merge_prevouts(&tx_handle) {
+                clustering_index.execute(&ops);
+            }
         }
 
         assert_eq!(

@@ -1,9 +1,11 @@
 use bitcoin::Amount;
 
-use crate::loose::TxOutId;
+use crate::loose::{TxId, TxOutId};
 
 // Anything transaction handle like
-pub trait AbstractTxHandle {}
+pub trait AbstractTxHandle {
+    fn id(&self) -> TxId;
+}
 
 // Should be implemented by any type that is contained within a transaction.
 pub trait TxConstituent {

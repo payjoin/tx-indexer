@@ -1,36 +1,39 @@
 use tx_indexer_primitives::{
-    abstract_types::{OutputCount, TxConstituent},
-    disjoint_set::SparseDisjointSet,
-    loose::{InMemoryClusteringIndex, TxHandle, TxOutId},
+    abstract_types::{AbstractTxHandle, OutputCount, TxConstituent},
+    loose::TxOutId,
 };
+
+use crate::MutableOperation;
 
 pub struct NaiveChangeIdentificationHueristic;
 
 impl NaiveChangeIdentificationHueristic {
-    // TODO: this method should be removed and replaced a with a loop over txs and the analysis operations we need to perform on each tx.
-    pub fn classify_change(
-        &self,
-        tx: &TxHandle,
-        in_memory_clustering_index: &mut InMemoryClusteringIndex<SparseDisjointSet<TxOutId>>,
-    ) {
-        for txout in tx.outputs() {
-            in_memory_clustering_index
-                .tagged_change_outputs
-                .insert(txout.id(), self.is_change(txout));
-        }
-    }
-
-    pub fn is_change(&self, txout: impl TxConstituent<Handle: OutputCount>) -> bool {
+    pub fn is_change(&self, txout: impl TxConstituent<Handle: OutputCount>) -> MutableOperation {
         let constituent_tx = txout.containing_tx();
-        constituent_tx.output_count() - 1 == txout.index()
+        MutableOperation::AnnotateChange(
+            TxOutId {
+                txid: constituent_tx.id(),
+                vout: txout.index() as u32,
+            },
+            constituent_tx.output_count() - 1 == txout.index(),
+        )
         // TODO: instead of the naive heuristic, simulate a strawman version of wallet fingerprint detection by looking at the spending tx txin
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use tx_indexer_primitives::{
+        abstract_types::AbstractTxHandle,
+        disjoint_set::DisJointSet,
+        loose::{TxId, TxOutId},
+        test_utils::{DummyIndex, DummyTxHandle, DummyTxOut},
+    };
 
-    use tx_indexer_primitives::test_utils::{DummyTxHandle, DummyTxOut};
+    use crate::{
+        OperationExecutor, coinjoin_detection::NaiveCoinjoinDetection,
+        common_input::MultiInputHeuristic,
+    };
 
     use super::*;
 
@@ -39,8 +42,135 @@ mod tests {
         let heuristic = NaiveChangeIdentificationHueristic;
         let txout = DummyTxOut {
             index: 0,
-            containing_tx: DummyTxHandle { output_count: 1 },
+            containing_tx: DummyTxHandle {
+                id: TxId(1),
+                outputs: vec![100],
+                spent_coins: vec![],
+            },
         };
-        assert!(heuristic.is_change(txout));
+        assert_eq!(
+            heuristic.is_change(txout),
+            MutableOperation::AnnotateChange(
+                TxOutId {
+                    txid: TxId(1),
+                    vout: 0
+                },
+                true
+            )
+        );
+    }
+
+    #[test]
+    fn test_heuritic_pipeline() {
+        // This test sets up two coinbases with many outputs, a spending transaction that spends from both coinbases and create a change and payment transaction.
+        // The change should be clustered together with the coinbase txouts. The order of operation should not matter.
+        // We should also avoid cluster collapse by checking for coinjoins
+        let change_identification = NaiveChangeIdentificationHueristic;
+        let coinjoin_detection = NaiveCoinjoinDetection::default();
+        let multi_input_heuristic = MultiInputHeuristic;
+
+        let coinbase1 = DummyTxHandle {
+            id: TxId(0),
+            outputs: vec![100, 200, 300],
+            spent_coins: vec![],
+        };
+        let coinbase2 = DummyTxHandle {
+            id: TxId(1),
+            outputs: vec![400, 500, 600],
+            spent_coins: vec![],
+        };
+
+        let spending_tx = DummyTxHandle {
+            id: TxId(2),
+            outputs: vec![
+                200, // payment output
+                100, // Change outputs
+            ],
+            spent_coins: vec![
+                TxOutId {
+                    txid: coinbase1.id(),
+                    vout: 0,
+                },
+                TxOutId {
+                    txid: coinbase2.id(),
+                    vout: 0,
+                },
+            ],
+        };
+        let payment_tx = DummyTxHandle {
+            id: TxId(3),
+            outputs: vec![100],
+            spent_coins: vec![TxOutId {
+                txid: spending_tx.id(),
+                vout: 0,
+            }],
+        };
+
+        let change_tx = DummyTxHandle {
+            id: TxId(4),
+            outputs: vec![200],
+            spent_coins: vec![TxOutId {
+                txid: spending_tx.id(),
+                vout: 1,
+            }],
+        };
+
+        let mut index = DummyIndex::default();
+
+        let all_txs = vec![
+            &coinbase1,
+            &coinbase2,
+            &spending_tx,
+            &payment_tx,
+            &change_tx,
+        ];
+        // Run All txs through coinjoin classification
+        for tx in all_txs {
+            index.execute(&coinjoin_detection.is_coinjoin_tx(&tx.clone()));
+        }
+
+        // Cluster spending tx outputs
+        for op in multi_input_heuristic.merge_prevouts(&spending_tx) {
+            index.execute(&op);
+        }
+        // Ensure the coinbase outputs are clustered together
+        let root = index.clustered_txouts.find(coinbase1.id().txout_id(0));
+        assert_eq!(
+            root,
+            index.clustered_txouts.find(coinbase2.id().txout_id(0))
+        );
+        // And the spending txins are also int he same cluster
+        assert_eq!(
+            root,
+            index.clustered_txouts.find(spending_tx.spent_coins[0])
+        );
+        assert_eq!(
+            root,
+            index.clustered_txouts.find(spending_tx.spent_coins[1])
+        );
+
+        // Gather change info
+        for (i, _amount) in spending_tx.outputs.iter().enumerate() {
+            let dummy_txout = DummyTxOut {
+                index: i,
+                containing_tx: spending_tx.clone(),
+            };
+            index.execute(&change_identification.is_change(dummy_txout));
+        }
+
+        // Now we shoudl cluster change txout with the spending txouts of the spending tx
+        let change_txout_id = TxOutId {
+            txid: spending_tx.id(),
+            vout: 1,
+        };
+        if *index.change_tags.get(&change_txout_id).unwrap() {
+            println!("Clustering change txout with spending txout");
+            index.clustered_txouts.union(root, change_txout_id);
+        }
+        // Change txout should be clustered now with the spent coinbase txouts
+        assert_eq!(
+            index.clustered_txouts.find(root),
+            index.clustered_txouts.find(change_txout_id)
+        );
     }
 }

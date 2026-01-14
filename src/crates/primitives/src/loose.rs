@@ -93,20 +93,6 @@ impl TxInIndex for InMemoryIndex {
 
 // Clustering and classification related traits
 
-pub trait CoinJoinClassification {
-    /// Tags a transaction as a coinjoin or not.
-    fn tag_tx(&mut self, tx_id: &TxId, is_coinjoin: bool);
-    /// Checks if a transaction is a coinjoin.
-    fn is_coinjoin(&self, tx_id: &TxId) -> Option<bool>;
-}
-/// Trait for merging previous outputs into a disjoint set.
-pub trait RelatedPrevOutsIndex {
-    /// Merges the previous outputs `a` and `b` into the same set.
-    fn merge_prevouts(&mut self, a: &TxOutId, b: &TxOutId);
-    /// Finds the root of the set containing the previous output `a`.
-    fn find_root(&mut self, a: &TxOutId) -> TxOutId;
-}
-
 #[derive(Debug)]
 pub struct InMemoryClusteringIndex<UF: DisJointSet<TxOutId>> {
     index: InMemoryIndex,
@@ -114,8 +100,7 @@ pub struct InMemoryClusteringIndex<UF: DisJointSet<TxOutId>> {
     // TODO: hashmap makes sense for loose repr. For packed graph this can be a large bit vector. One bit for the entire set of ordered txs.
     // TODO: this should be unhardcoded to be construct out of some generic storage type
     tagged_coinjoins: HashMap<TxId, bool>,
-    // TODO: pub'd for now. Need to remove this
-    pub tagged_change_outputs: HashMap<TxOutId, bool>,
+    tagged_change_outputs: HashMap<TxOutId, bool>,
 }
 
 impl<UF: DisJointSet<TxOutId> + Default> InMemoryClusteringIndex<UF> {
@@ -127,26 +112,29 @@ impl<UF: DisJointSet<TxOutId> + Default> InMemoryClusteringIndex<UF> {
             tagged_change_outputs: HashMap::new(),
         }
     }
-}
 
-impl<UF: DisJointSet<TxOutId>> RelatedPrevOutsIndex for InMemoryClusteringIndex<UF> {
-    /// Merges the previous outputs a and b into the same set.
-    fn merge_prevouts(&mut self, a: &TxOutId, b: &TxOutId) {
+    pub fn find_root(&mut self, tx_out_id: &TxOutId) -> TxOutId {
+        self.merged_prevouts.find(*tx_out_id)
+    }
+
+    pub fn union(&mut self, a: &TxOutId, b: &TxOutId) {
         self.merged_prevouts.union(*a, *b);
     }
 
-    fn find_root(&mut self, a: &TxOutId) -> TxOutId {
-        self.merged_prevouts.find(*a)
+    pub fn is_coinjoin(&self, tx_id: &TxId) -> Option<bool> {
+        self.tagged_coinjoins.get(tx_id).cloned()
     }
-}
 
-impl<UF: DisJointSet<TxOutId>> CoinJoinClassification for InMemoryClusteringIndex<UF> {
-    fn tag_tx(&mut self, tx_id: &TxId, is_coinjoin: bool) {
+    pub fn annotate_coinjoin(&mut self, tx_id: &TxId, is_coinjoin: bool) {
         self.tagged_coinjoins.insert(*tx_id, is_coinjoin);
     }
 
-    fn is_coinjoin(&self, tx_id: &TxId) -> Option<bool> {
-        self.tagged_coinjoins.get(tx_id).cloned()
+    pub fn is_change(&self, tx_out_id: &TxOutId) -> Option<bool> {
+        self.tagged_change_outputs.get(tx_out_id).cloned()
+    }
+
+    pub fn annotate_change(&mut self, tx_out_id: &TxOutId, is_change: bool) {
+        self.tagged_change_outputs.insert(*tx_out_id, is_change);
     }
 }
 
@@ -282,7 +270,11 @@ impl<'a> TxHandle<'a> {
     }
 }
 
-impl AbstractTxHandle for TxHandle<'_> {}
+impl AbstractTxHandle for TxHandle<'_> {
+    fn id(&self) -> TxId {
+        self.id
+    }
+}
 
 impl<'a> TxConstituent for TxOutHandle<'a> {
     type Handle = TxHandle<'a>;
