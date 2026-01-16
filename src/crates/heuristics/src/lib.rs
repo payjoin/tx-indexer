@@ -7,7 +7,9 @@ use tx_indexer_primitives::{
 pub mod change_identification;
 pub mod coinjoin_detection;
 pub mod common_input;
+pub mod pass;
 
+// TODO: in the future we will want to express that some heuristics return more concrete types.
 #[derive(Debug, PartialEq, Eq)]
 pub enum MutableOperation {
     Cluster(TxOutId, TxOutId),

@@ -8,6 +8,10 @@ use crate::MutableOperation;
 pub struct NaiveChangeIdentificationHueristic;
 
 impl NaiveChangeIdentificationHueristic {
+    pub fn temp_is_change(&self, txout: impl TxConstituent<Handle: OutputCount>) -> bool {
+        let constituent_tx = txout.containing_tx();
+        constituent_tx.output_count() - 1 == txout.index()
+    }
     pub fn is_change(&self, txout: impl TxConstituent<Handle: OutputCount>) -> MutableOperation {
         let constituent_tx = txout.containing_tx();
         MutableOperation::AnnotateChange(
@@ -21,13 +25,27 @@ impl NaiveChangeIdentificationHueristic {
     }
 }
 
+// TODO
+// pub struct FingerprintChangeIdentificationHueristic;
+
+// impl FingerprintChangeIdentificationHueristic {
+//     pub fn is_change(
+//         &self,
+//         txout: impl TxConstituent<Handle: FingerprintVector>,
+//     ) -> MutableOperation {
+//         let constituent_tx = txout.containing_tx();
+//         todo!("Get teh fingerprint vector and implement it")
+
+//         // TODO: instead of the naive heuristic, simulate a strawman version of wallet fingerprint detection by looking at the spending tx txin
+//     }
+// }
 #[cfg(test)]
 mod tests {
     use tx_indexer_primitives::{
         abstract_types::AbstractTxHandle,
         disjoint_set::DisJointSet,
         loose::{TxId, TxOutId},
-        test_utils::{DummyIndex, DummyTxHandle, DummyTxOut},
+        test_utils::{DummyIndex, DummyTxData, DummyTxOut},
     };
 
     use crate::{
@@ -42,9 +60,9 @@ mod tests {
         let heuristic = NaiveChangeIdentificationHueristic;
         let txout = DummyTxOut {
             index: 0,
-            containing_tx: DummyTxHandle {
+            containing_tx: DummyTxData {
                 id: TxId(1),
-                outputs: vec![100],
+                outputs_amounts: vec![100],
                 spent_coins: vec![],
             },
         };
@@ -69,20 +87,20 @@ mod tests {
         let coinjoin_detection = NaiveCoinjoinDetection::default();
         let multi_input_heuristic = MultiInputHeuristic;
 
-        let coinbase1 = DummyTxHandle {
+        let coinbase1 = DummyTxData {
             id: TxId(0),
-            outputs: vec![100, 200, 300],
+            outputs_amounts: vec![100, 200, 300],
             spent_coins: vec![],
         };
-        let coinbase2 = DummyTxHandle {
+        let coinbase2 = DummyTxData {
             id: TxId(1),
-            outputs: vec![400, 500, 600],
+            outputs_amounts: vec![400, 500, 600],
             spent_coins: vec![],
         };
 
-        let spending_tx = DummyTxHandle {
+        let spending_tx = DummyTxData {
             id: TxId(2),
-            outputs: vec![
+            outputs_amounts: vec![
                 200, // payment output
                 100, // Change outputs
             ],
@@ -97,18 +115,18 @@ mod tests {
                 },
             ],
         };
-        let payment_tx = DummyTxHandle {
+        let payment_tx = DummyTxData {
             id: TxId(3),
-            outputs: vec![100],
+            outputs_amounts: vec![100],
             spent_coins: vec![TxOutId {
                 txid: spending_tx.id(),
                 vout: 0,
             }],
         };
 
-        let change_tx = DummyTxHandle {
+        let change_tx = DummyTxData {
             id: TxId(4),
-            outputs: vec![200],
+            outputs_amounts: vec![200],
             spent_coins: vec![TxOutId {
                 txid: spending_tx.id(),
                 vout: 1,
@@ -150,7 +168,7 @@ mod tests {
         );
 
         // Gather change info
-        for (i, _amount) in spending_tx.outputs.iter().enumerate() {
+        for (i, _amount) in spending_tx.outputs_amounts.iter().enumerate() {
             let dummy_txout = DummyTxOut {
                 index: i,
                 containing_tx: spending_tx.clone(),

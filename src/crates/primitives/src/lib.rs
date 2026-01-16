@@ -16,32 +16,34 @@ pub mod test_utils {
         loose::{TxId, TxOutId},
     };
 
-    #[derive(Clone)]
-    pub struct DummyTxHandle {
+    #[derive(Debug, Clone)]
+    pub struct DummyTxData {
         pub id: TxId,
-        pub outputs: Vec<u64>,
+        pub outputs_amounts: Vec<u64>,
         pub spent_coins: Vec<TxOutId>,
     }
 
-    impl AbstractTxHandle for DummyTxHandle {
+    impl AbstractTxHandle for DummyTxData {
         fn id(&self) -> TxId {
             self.id
         }
     }
 
-    impl OutputCount for DummyTxHandle {
+    impl OutputCount for DummyTxData {
         fn output_count(&self) -> usize {
-            self.outputs.len()
+            self.outputs_amounts.len()
         }
     }
 
-    impl EnumerateOutputValueInArbitraryOrder for DummyTxHandle {
+    impl EnumerateOutputValueInArbitraryOrder for DummyTxData {
         fn output_values(&self) -> impl Iterator<Item = Amount> {
-            self.outputs.iter().map(|amount| Amount::from_sat(*amount))
+            self.outputs_amounts
+                .iter()
+                .map(|amount| Amount::from_sat(*amount))
         }
     }
 
-    impl EnumerateSpentTxOuts for DummyTxHandle {
+    impl EnumerateSpentTxOuts for DummyTxData {
         fn spent_coins(&self) -> impl Iterator<Item = TxOutId> {
             self.spent_coins.iter().copied()
         }
@@ -49,11 +51,17 @@ pub mod test_utils {
 
     pub struct DummyTxOut {
         pub index: usize,
-        pub containing_tx: DummyTxHandle,
+        pub containing_tx: DummyTxData,
+    }
+
+    impl DummyTxOut {
+        pub fn id(&self) -> TxOutId {
+            self.containing_tx.id().txout_id(self.index as u32)
+        }
     }
 
     impl TxConstituent for DummyTxOut {
-        type Handle = DummyTxHandle;
+        type Handle = DummyTxData;
         fn containing_tx(&self) -> Self::Handle {
             self.containing_tx.clone()
         }
@@ -68,5 +76,6 @@ pub mod test_utils {
         pub coinjoin_tags: HashMap<TxId, bool>,
         pub change_tags: HashMap<TxOutId, bool>,
         pub clustered_txouts: SparseDisjointSet<TxOutId>,
+        pub txs: HashMap<TxId, DummyTxData>,
     }
 }

@@ -149,6 +149,12 @@ pub struct TxOutId {
 }
 
 impl TxOutId {
+    pub fn new(txid: TxId, vout: u32) -> Self {
+        Self { txid, vout }
+    }
+}
+
+impl TxOutId {
     fn with<'a>(&self, index: &'a InMemoryIndex) -> TxOutHandle<'a> {
         TxOutHandle { id: *self, index }
     }

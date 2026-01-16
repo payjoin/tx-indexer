@@ -1,11 +1,27 @@
-use tx_indexer_primitives::abstract_types::EnumerateSpentTxOuts;
+use tx_indexer_primitives::{abstract_types::EnumerateSpentTxOuts, loose::TxOutId};
 
 use crate::MutableOperation;
 
 pub struct MultiInputHeuristic;
 
+pub enum MultiInputResult {
+    Cluster(Vec<(TxOutId, TxOutId)>),
+    NoOp,
+    Uncertain, // ?
+}
 // TODO: trait definition for heuristics?
 impl MultiInputHeuristic {
+    pub fn temp_merge_prevouts(&self, tx: &impl EnumerateSpentTxOuts) -> MultiInputResult {
+        if tx.spent_coins().count() == 0 {
+            return MultiInputResult::NoOp;
+        }
+        let mut pairs = Vec::new();
+        tx.spent_coins().reduce(|a, b| {
+            pairs.push((a, b));
+            a
+        });
+        MultiInputResult::Cluster(pairs)
+    }
     pub fn merge_prevouts(&self, tx: &impl EnumerateSpentTxOuts) -> Vec<MutableOperation> {
         if tx.spent_coins().count() == 0 {
             return vec![];
@@ -23,17 +39,29 @@ impl MultiInputHeuristic {
 // This heuristic has a strict dependency that the coinjoin annotations must be present as to avoid cluster collapse.
 // If the containing tx is a coinjoin, the prevouts should NOT be clustered together.
 // TODO: how do we express this dependency?
-pub struct CoinjoinAwareMultiInputHeuristic;
+// pub struct CoinjoinAwareMultiInputHeuristic;
 
-impl CoinjoinAwareMultiInputHeuristic {
-    pub fn merge_prevouts(&self, tx: &impl EnumerateSpentTxOuts) -> Vec<MutableOperation> {
-        if tx.spent_coins().count() == 0 {
-            return vec![];
-        }
+// impl CoinjoinAwareMultiInputHeuristic {
+//     pub fn merge_prevouts(
+//         &self,
+//         tx: &impl EnumerateSpentTxOuts,
+//     ) -> Vec<MutableOperation> {
+//         if tx.spent_coins().count() == 0 {
+//             return vec![];
+//         }
 
-        todo!()
-    }
-}
+//         if is_coinjoin {
+//             return vec![];
+//         }
+//         let mut operations = Vec::new();
+//         tx.spent_coins().reduce(|a, b| {
+//             operations.push(MutableOperation::Cluster(a, b));
+//             a
+//         });
+
+//         operations
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

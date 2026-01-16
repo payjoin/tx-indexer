@@ -9,6 +9,15 @@ use crate::MutableOperation;
 pub struct NaiveCoinjoinDetection;
 
 impl NaiveCoinjoinDetection {
+    pub fn is_coinjoin_temp_bool(&self, tx: &impl EnumerateOutputValueInArbitraryOrder) -> bool {
+        // TODO: impl actual detection
+        let mut counts = HashMap::new();
+        for value in tx.output_values() {
+            *counts.entry(value).or_insert(0) += 1;
+        }
+
+        counts.values().any(|&count| count >= 3)
+    }
     // TODO: impl actual detection
     pub fn is_coinjoin_tx(
         &self,
@@ -27,16 +36,16 @@ impl NaiveCoinjoinDetection {
 #[cfg(test)]
 mod tests {
 
-    use tx_indexer_primitives::{loose::TxId, test_utils::DummyTxHandle};
+    use tx_indexer_primitives::{loose::TxId, test_utils::DummyTxData};
 
     use super::*;
 
     #[test]
     fn test_is_coinjoin_tx() {
         let coinjoin_detection = NaiveCoinjoinDetection::default();
-        let not_coinjoin = DummyTxHandle {
+        let not_coinjoin = DummyTxData {
             id: TxId(0),
-            outputs: vec![100, 200, 300],
+            outputs_amounts: vec![100, 200, 300],
             spent_coins: vec![],
         };
         assert_eq!(
@@ -44,9 +53,9 @@ mod tests {
             MutableOperation::AnnotateTx(TxId(0), false)
         );
 
-        let coinjoin = DummyTxHandle {
+        let coinjoin = DummyTxData {
             id: TxId(1),
-            outputs: vec![100, 100, 100, 200, 200, 200, 300, 300, 300],
+            outputs_amounts: vec![100, 100, 100, 200, 200, 200, 300, 300, 300],
             spent_coins: vec![],
         };
         assert_eq!(
