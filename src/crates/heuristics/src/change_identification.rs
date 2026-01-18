@@ -1,6 +1,9 @@
+use std::collections::HashMap;
+
 use tx_indexer_primitives::{
     abstract_types::{AbstractTxHandle, OutputCount, TxConstituent},
     loose::TxOutId,
+    test_utils::{DummyTxData, DummyTxOut},
 };
 
 use crate::MutableOperation;
@@ -8,11 +11,15 @@ use crate::MutableOperation;
 pub struct NaiveChangeIdentificationHueristic;
 
 impl NaiveChangeIdentificationHueristic {
-    pub fn temp_is_change(&self, txout: impl TxConstituent<Handle: OutputCount>) -> bool {
+    fn is_change(txout: impl TxConstituent<Handle: OutputCount>) -> bool {
         let constituent_tx = txout.containing_tx();
         constituent_tx.output_count() - 1 == txout.index()
     }
-    pub fn is_change(&self, txout: impl TxConstituent<Handle: OutputCount>) -> MutableOperation {
+
+    pub fn is_change_ops(
+        &self,
+        txout: impl TxConstituent<Handle: OutputCount>,
+    ) -> MutableOperation {
         let constituent_tx = txout.containing_tx();
         MutableOperation::AnnotateChange(
             TxOutId {
@@ -23,6 +30,22 @@ impl NaiveChangeIdentificationHueristic {
         )
         // TODO: instead of the naive heuristic, simulate a strawman version of wallet fingerprint detection by looking at the spending tx txin
     }
+}
+
+pub fn change_identification_map_pass_fn(tx: &DummyTxData) -> HashMap<TxOutId, bool> {
+    let mut map = HashMap::new();
+    for (i, _amount) in tx.outputs_amounts.iter().enumerate() {
+        let txout_id = TxOutId::new(tx.id, i as u32);
+        let txout = DummyTxOut {
+            index: i,
+            containing_tx: tx.clone(),
+        };
+        map.insert(
+            txout_id,
+            NaiveChangeIdentificationHueristic::is_change(txout),
+        );
+    }
+    map
 }
 
 // TODO
@@ -67,7 +90,7 @@ mod tests {
             },
         };
         assert_eq!(
-            heuristic.is_change(txout),
+            heuristic.is_change_ops(txout),
             MutableOperation::AnnotateChange(
                 TxOutId {
                     txid: TxId(1),
@@ -148,7 +171,7 @@ mod tests {
         }
 
         // Cluster spending tx outputs
-        for op in multi_input_heuristic.merge_prevouts(&spending_tx) {
+        for op in multi_input_heuristic.merge_prevouts_ops(&spending_tx) {
             index.execute(&op);
         }
         // Ensure the coinbase outputs are clustered together
@@ -173,7 +196,7 @@ mod tests {
                 index: i,
                 containing_tx: spending_tx.clone(),
             };
-            index.execute(&change_identification.is_change(dummy_txout));
+            index.execute(&change_identification.is_change_ops(dummy_txout));
         }
 
         // Now we shoudl cluster change txout with the spending txouts of the spending tx

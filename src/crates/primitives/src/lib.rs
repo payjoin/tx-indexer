@@ -1,6 +1,7 @@
 pub mod abstract_types;
 pub mod disjoint_set;
 pub mod loose;
+pub mod pass;
 
 pub mod test_utils {
     use std::collections::HashMap;
@@ -14,6 +15,7 @@ pub mod test_utils {
         },
         disjoint_set::SparseDisjointSet,
         loose::{TxId, TxOutId},
+        pass::AnalysisPass,
     };
 
     #[derive(Debug, Clone)]
@@ -71,11 +73,17 @@ pub mod test_utils {
         }
     }
 
-    #[derive(Default)]
+    #[derive(Default, Clone)]
     pub struct DummyIndex {
         pub coinjoin_tags: HashMap<TxId, bool>,
         pub change_tags: HashMap<TxOutId, bool>,
         pub clustered_txouts: SparseDisjointSet<TxOutId>,
         pub txs: HashMap<TxId, DummyTxData>,
+    }
+
+    impl AnalysisPass<(), Box<dyn Iterator<Item = DummyTxData> + Send>> for DummyIndex {
+        fn output(self) -> Box<dyn Iterator<Item = DummyTxData> + Send> {
+            Box::new(self.txs.into_values())
+        }
     }
 }

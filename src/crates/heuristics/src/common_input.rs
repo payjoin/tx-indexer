@@ -11,7 +11,7 @@ pub enum MultiInputResult {
 }
 // TODO: trait definition for heuristics?
 impl MultiInputHeuristic {
-    pub fn temp_merge_prevouts(&self, tx: &impl EnumerateSpentTxOuts) -> MultiInputResult {
+    pub fn merge_prevouts(&self, tx: &impl EnumerateSpentTxOuts) -> MultiInputResult {
         if tx.spent_coins().count() == 0 {
             return MultiInputResult::NoOp;
         }
@@ -22,46 +22,30 @@ impl MultiInputHeuristic {
         });
         MultiInputResult::Cluster(pairs)
     }
-    pub fn merge_prevouts(&self, tx: &impl EnumerateSpentTxOuts) -> Vec<MutableOperation> {
-        if tx.spent_coins().count() == 0 {
-            return vec![];
-        }
+
+    pub fn merge_prevouts_ops(&self, tx: &impl EnumerateSpentTxOuts) -> Vec<MutableOperation> {
+        let res = self.merge_prevouts(tx);
         let mut operations = Vec::new();
-        tx.spent_coins().reduce(|a, b| {
-            operations.push(MutableOperation::Cluster(a, b));
-            a
-        });
+        match res {
+            MultiInputResult::Cluster(pairs) => {
+                for (a, b) in pairs {
+                    operations.push(MutableOperation::Cluster(a, b));
+                }
+            }
+            _ => {}
+        }
 
         operations
     }
 }
 
-// This heuristic has a strict dependency that the coinjoin annotations must be present as to avoid cluster collapse.
-// If the containing tx is a coinjoin, the prevouts should NOT be clustered together.
-// TODO: how do we express this dependency?
-// pub struct CoinjoinAwareMultiInputHeuristic;
-
-// impl CoinjoinAwareMultiInputHeuristic {
-//     pub fn merge_prevouts(
-//         &self,
-//         tx: &impl EnumerateSpentTxOuts,
-//     ) -> Vec<MutableOperation> {
-//         if tx.spent_coins().count() == 0 {
-//             return vec![];
-//         }
-
-//         if is_coinjoin {
-//             return vec![];
-//         }
-//         let mut operations = Vec::new();
-//         tx.spent_coins().reduce(|a, b| {
-//             operations.push(MutableOperation::Cluster(a, b));
-//             a
-//         });
-
-//         operations
-//     }
-// }
+pub fn common_input_map_pass_fn<T: EnumerateSpentTxOuts>(tx: T) -> Option<Vec<(TxOutId, TxOutId)>> {
+    let heuristic = MultiInputHeuristic;
+    match heuristic.merge_prevouts(&tx) {
+        MultiInputResult::Cluster(pairs) => Some(pairs),
+        _ => None,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -122,7 +106,7 @@ mod tests {
 
         for tx in all_txs.iter() {
             let tx_handle = index.compute_txid(tx.compute_txid()).with(&index);
-            for ops in heuristic.merge_prevouts(&tx_handle) {
+            for ops in heuristic.merge_prevouts_ops(&tx_handle) {
                 clustering_index.execute(&ops);
             }
         }

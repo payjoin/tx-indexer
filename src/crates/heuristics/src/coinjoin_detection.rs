@@ -9,7 +9,8 @@ use crate::MutableOperation;
 pub struct NaiveCoinjoinDetection;
 
 impl NaiveCoinjoinDetection {
-    pub fn is_coinjoin_temp_bool(&self, tx: &impl EnumerateOutputValueInArbitraryOrder) -> bool {
+    pub fn is_coinjoin(&self, tx: &impl EnumerateOutputValueInArbitraryOrder) -> bool {
+        // If there are >= 3 outputs of the same value, tag as coinjoin.
         // TODO: impl actual detection
         let mut counts = HashMap::new();
         for value in tx.output_values() {
@@ -18,19 +19,18 @@ impl NaiveCoinjoinDetection {
 
         counts.values().any(|&count| count >= 3)
     }
+
     // TODO: impl actual detection
     pub fn is_coinjoin_tx(
         &self,
         tx: &impl EnumerateOutputValueInArbitraryOrder,
     ) -> MutableOperation {
-        // If there are >= 3 outputs of the same value, tag as coinjoin.
-        let mut counts = HashMap::new();
-        for value in tx.output_values() {
-            *counts.entry(value).or_insert(0) += 1;
-        }
-
-        MutableOperation::AnnotateTx(tx.id(), counts.values().any(|&count| count >= 3))
+        MutableOperation::AnnotateTx(tx.id(), self.is_coinjoin(tx))
     }
+}
+
+pub fn coinjoin_detection_filter_pass_fn(tx: &impl EnumerateOutputValueInArbitraryOrder) -> bool {
+    !NaiveCoinjoinDetection.is_coinjoin(tx)
 }
 
 #[cfg(test)]

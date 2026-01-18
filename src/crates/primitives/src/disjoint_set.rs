@@ -8,6 +8,7 @@ pub trait DisJointSet<K: Eq + std::hash::Hash + Copy> {
 // open question: canonicalizing the parent and child requires the key to impl Ord -- probably fine. But we didnt do it.
 // For the vec type we need conversion into usize. Should we create a trait bound for that?
 // For "loose" transactions. No sequential order.
+#[derive(Clone)]
 pub struct SparseDisjointSet<K: Eq + std::hash::Hash + Copy>(HashMap<K, K>);
 
 impl<K: Eq + std::hash::Hash + Copy> Default for SparseDisjointSet<K> {
