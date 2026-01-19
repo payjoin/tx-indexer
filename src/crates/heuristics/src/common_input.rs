@@ -59,7 +59,8 @@ mod tests {
     use secp256k1::rand::rngs::OsRng;
     use tx_indexer_primitives::{
         disjoint_set::SparseDisjointSet,
-        loose::{InMemoryClusteringIndex, InMemoryIndex, TxOutId},
+        loose::TxOutId,
+        storage::{InMemoryClusteringIndex, InMemoryIndex},
     };
 
     #[test]

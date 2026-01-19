@@ -2,6 +2,7 @@ pub mod abstract_types;
 pub mod disjoint_set;
 pub mod loose;
 pub mod pass;
+pub mod storage;
 
 pub mod test_utils {
     use std::collections::HashMap;

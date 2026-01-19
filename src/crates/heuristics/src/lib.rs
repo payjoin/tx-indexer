@@ -1,6 +1,7 @@
 use tx_indexer_primitives::{
     disjoint_set::{DisJointSet, SparseDisjointSet},
-    loose::{InMemoryClusteringIndex, TxId, TxOutId},
+    loose::{TxId, TxOutId},
+    storage::InMemoryClusteringIndex,
     test_utils::DummyIndex,
 };
 
