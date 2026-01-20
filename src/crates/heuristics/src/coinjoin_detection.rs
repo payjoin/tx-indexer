@@ -2,11 +2,10 @@ use std::{any::TypeId, collections::HashMap};
 
 use tx_indexer_primitives::{
     abstract_types::EnumerateOutputValueInArbitraryOrder,
-    datalog::{CursorBook, FactStore, IsCoinJoinRel, MemStore, Rule, TxRel},
+    datalog::{CursorBook, IsCoinJoinRel, Rule, TxRel},
+    storage::{FactStore, MemStore},
     test_utils::DummyTxData,
 };
-
-use crate::MutableOperation;
 
 /// This is a super naive implementation that should be replace with a more sophisticated one.
 #[derive(Default, Debug)]
@@ -22,14 +21,6 @@ impl NaiveCoinjoinDetection {
         }
 
         counts.values().any(|&count| count >= 3)
-    }
-
-    // TODO: impl actual detection
-    pub fn is_coinjoin_tx(
-        &self,
-        tx: &impl EnumerateOutputValueInArbitraryOrder,
-    ) -> MutableOperation {
-        MutableOperation::AnnotateTx(tx.id(), self.is_coinjoin(tx))
     }
 }
 
@@ -77,19 +68,13 @@ mod tests {
             outputs_amounts: vec![100, 200, 300],
             spent_coins: vec![],
         };
-        assert_eq!(
-            coinjoin_detection.is_coinjoin_tx(&not_coinjoin),
-            MutableOperation::AnnotateTx(TxId(0), false)
-        );
+        assert_eq!(coinjoin_detection.is_coinjoin(&not_coinjoin), false);
 
         let coinjoin = DummyTxData {
             id: TxId(1),
             outputs_amounts: vec![100, 100, 100, 200, 200, 200, 300, 300, 300],
             spent_coins: vec![],
         };
-        assert_eq!(
-            coinjoin_detection.is_coinjoin_tx(&coinjoin),
-            MutableOperation::AnnotateTx(TxId(1), true)
-        );
+        assert_eq!(coinjoin_detection.is_coinjoin(&coinjoin), true);
     }
 }

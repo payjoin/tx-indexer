@@ -2,7 +2,7 @@ use std::{collections::HashMap, marker::PhantomData};
 
 use crate::{
     disjoint_set::{DisJointSet, SparseDisjointSet},
-    test_utils::DummyIndex,
+    storage::InMemoryIndex,
 };
 
 pub type BoxIter<T> = Box<dyn Iterator<Item = T> + Send>;
@@ -122,11 +122,11 @@ pub struct FnMergePass<'a, T, U, Pred> {
     pred: Pred,
     _pd: PhantomData<(T, U)>,
     // TODO: remove later or replace with a trait object
-    index: &'a DummyIndex,
+    index: &'a InMemoryIndex,
 }
 
 impl<'a, T, U, Pred> FnMergePass<'a, T, U, Pred> {
-    pub fn new(pred: Pred, index: &'a DummyIndex) -> Self {
+    pub fn new(pred: Pred, index: &'a InMemoryIndex) -> Self {
         Self {
             pred,
             _pd: PhantomData,
@@ -140,7 +140,7 @@ impl<'a, T, U, Pred> MergePass<SparseDisjointSet<T>, HashMap<U, bool>, SparseDis
 where
     T: Eq + std::hash::Hash + Copy,
     U: Eq + std::hash::Hash + Copy,
-    Pred: FnMut(&U, &DummyIndex) -> Option<(T, T)> + Send + 'static,
+    Pred: FnMut(&U, &InMemoryIndex) -> Option<(T, T)> + Send + 'static,
 {
     fn merge(
         mut self,
@@ -150,7 +150,7 @@ where
         for (u, is_true) in map {
             if is_true {
                 // Perhaps is true should be passed into the closure
-                if let Some((a, b)) = (self.pred)(&u, &self.index) {
+                if let Some((a, b)) = (self.pred)(&u, self.index) {
                     set.union(a, b);
                 }
             }

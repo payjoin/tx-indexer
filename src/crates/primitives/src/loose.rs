@@ -1,6 +1,6 @@
 use bitcoin::Amount;
 
-use crate::abstract_types::AbstractTxHandle;
+use crate::abstract_types::AbstractTransaction;
 use crate::abstract_types::EnumerateOutputValueInArbitraryOrder;
 use crate::abstract_types::EnumerateSpentTxOuts;
 use crate::abstract_types::OutputCount;
@@ -53,8 +53,9 @@ impl<'a> TxOutHandle<'a> {
             .txs
             .get(&self.id.txid)
             .expect("Tx should always exist")
-            .output[self.id.vout as usize]
-            .value
+            .output_at(self.id.vout as usize)
+            .expect("Output should always exist")
+            .value()
     }
 
     pub fn vout(&self) -> u32 {
@@ -76,6 +77,7 @@ impl TxInId {
 }
 
 pub struct TxInHandle<'a> {
+    #[allow(unused)]
     id: TxInId,
     index: &'a InMemoryIndex,
 }
@@ -101,6 +103,7 @@ impl TxId {
         self.txout_id(vout).with(index)
     }
 
+    #[allow(unused)]
     fn txin_handle<'a>(&self, index: &'a InMemoryIndex, vin: u32) -> TxInHandle<'a> {
         self.txin_id(vin).with(index)
     }
@@ -121,10 +124,7 @@ impl<'a> TxHandle<'a> {
     }
 
     fn spent_coins(&self) -> impl Iterator<Item = TxOutId> {
-        self.index
-            .prev_txouts
-            .iter()
-            .map(|(_, outid)| outid.clone())
+        self.index.prev_txouts.values().map(|outid| *outid)
     }
 
     pub fn outputs(&self) -> impl Iterator<Item = TxOutHandle<'a>> {
@@ -133,11 +133,8 @@ impl<'a> TxHandle<'a> {
             .txs
             .get(&self.id)
             .expect("If I have a handle it must exist?")
-            .output
-            .len();
-        (0..outputs_len)
-            .into_iter()
-            .map(|i| self.id.txout_handle(self.index, i as u32))
+            .output_count();
+        (0..outputs_len).map(|i| self.id.txout_handle(self.index, i as u32))
     }
 
     pub fn output_count(&self) -> usize {
@@ -145,9 +142,49 @@ impl<'a> TxHandle<'a> {
     }
 }
 
-impl AbstractTxHandle for TxHandle<'_> {
-    fn id(&self) -> TxId {
+impl AbstractTransaction for TxHandle<'_> {
+    fn txid(&self) -> TxId {
         self.id
+    }
+
+    // TODO: are these expects correct when in a pruned node
+    fn inputs(
+        &self,
+    ) -> Box<dyn Iterator<Item = Box<dyn crate::abstract_types::AbstractTxIn>> + '_> {
+        // Delegate to the stored transaction in the index
+        self.index
+            .txs
+            .get(&self.id)
+            .expect("Tx should always exist if we have a handle")
+            .inputs()
+    }
+
+    fn outputs(
+        &self,
+    ) -> Box<dyn Iterator<Item = Box<dyn crate::abstract_types::AbstractTxOut>> + '_> {
+        // Delegate to the stored transaction in the index
+        self.index
+            .txs
+            .get(&self.id)
+            .expect("Tx should always exist if we have a handle")
+            .outputs()
+    }
+
+    fn output_count(&self) -> usize {
+        self.index
+            .txs
+            .get(&self.id)
+            .expect("Tx should always exist if we have a handle")
+            .output_count()
+    }
+
+    fn output_at(&self, index: usize) -> Option<Box<dyn crate::abstract_types::AbstractTxOut>> {
+        // Delegate to the stored transaction in the index
+        self.index
+            .txs
+            .get(&self.id)
+            .expect("Tx should always exist if we have a handle")
+            .output_at(index)
     }
 }
 

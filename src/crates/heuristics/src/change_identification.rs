@@ -1,51 +1,137 @@
-use std::collections::HashMap;
+use std::{any::TypeId, collections::HashMap};
 
 use tx_indexer_primitives::{
-    abstract_types::{AbstractTxHandle, OutputCount, TxConstituent},
+    abstract_types::{OutputCount, TxConstituent},
+    datalog::{ChangeIdentificationRel, ClusterRel, CursorBook, Rule, TxRel},
+    disjoint_set::{DisJointSet, SparseDisjointSet},
     loose::TxOutId,
+    storage::{FactStore, MemStore},
     test_utils::{DummyTxData, DummyTxOut},
 };
 
-use crate::MutableOperation;
+#[derive(Debug, PartialEq, Eq)]
+pub enum ChangeIdentificationResult {
+    Change,
+    NotChange,
+}
 
 pub struct NaiveChangeIdentificationHueristic;
 
 impl NaiveChangeIdentificationHueristic {
-    fn is_change(txout: impl TxConstituent<Handle: OutputCount>) -> bool {
+    pub fn is_change(txout: impl TxConstituent<Handle: OutputCount>) -> ChangeIdentificationResult {
         let constituent_tx = txout.containing_tx();
-        constituent_tx.output_count() - 1 == txout.index()
-    }
-
-    pub fn is_change_ops(
-        &self,
-        txout: impl TxConstituent<Handle: OutputCount>,
-    ) -> MutableOperation {
-        let constituent_tx = txout.containing_tx();
-        MutableOperation::AnnotateChange(
-            TxOutId {
-                txid: constituent_tx.id(),
-                vout: txout.index() as u32,
-            },
-            constituent_tx.output_count() - 1 == txout.index(),
-        )
-        // TODO: instead of the naive heuristic, simulate a strawman version of wallet fingerprint detection by looking at the spending tx txin
+        if constituent_tx.output_count() - 1 == txout.index() {
+            ChangeIdentificationResult::Change
+        } else {
+            ChangeIdentificationResult::NotChange
+        }
     }
 }
 
 pub fn change_identification_map_pass_fn(tx: &DummyTxData) -> HashMap<TxOutId, bool> {
-    let mut map = HashMap::new();
-    for (i, _amount) in tx.outputs_amounts.iter().enumerate() {
-        let txout_id = TxOutId::new(tx.id, i as u32);
-        let txout = DummyTxOut {
-            index: i,
-            containing_tx: tx.clone(),
-        };
-        map.insert(
-            txout_id,
-            NaiveChangeIdentificationHueristic::is_change(txout),
-        );
+    todo!("Implement or remove this")
+    // let mut map = HashMap::new();
+    // for (i, _amount) in tx.outputs_amounts.iter().enumerate() {
+    //     let txout_id = TxOutId::new(tx.id, i as u32);
+    //     let txout = DummyTxOut {
+    //         index: i,
+    //         containing_tx: tx.clone(),
+    //     };
+    //     map.insert(
+    //         txout_id,
+    //         NaiveChangeIdentificationHueristic::is_change(txout),
+    //     );
+    // }
+    // map
+}
+
+pub struct ChangeIdentificationRule;
+
+impl Rule for ChangeIdentificationRule {
+    fn name(&self) -> &'static str {
+        "change_identification"
     }
-    map
+
+    fn inputs(&self) -> &'static [TypeId] {
+        const INS: &[TypeId] = &[TypeId::of::<TxRel>()];
+        INS
+    }
+
+    fn step(&mut self, rid: usize, store: &mut MemStore, cursors: &mut CursorBook) -> usize {
+        let delta_txs: Vec<DummyTxData> = cursors.read_delta::<TxRel>(rid, store);
+        if delta_txs.is_empty() {
+            return 0;
+        }
+
+        let mut out = 0;
+        for tx in delta_txs {
+            // gate: skip coinjoins (or change to score threshold if you store scores)
+
+            for (i, _amount) in tx.outputs_amounts.iter().enumerate() {
+                let txout_id = TxOutId::new(tx.id, i as u32);
+                let txout = DummyTxOut {
+                    index: i,
+                    containing_tx: tx.clone(),
+                };
+                let is_change = NaiveChangeIdentificationHueristic::is_change(txout);
+                if is_change == ChangeIdentificationResult::Change {
+                    store.insert::<ChangeIdentificationRel>((txout_id, true));
+                } else {
+                    store.insert::<ChangeIdentificationRel>((txout_id, false));
+                }
+                out += 1;
+            }
+        }
+        out
+    }
+}
+
+pub struct ChangeIdentificationClusterRule;
+
+impl Rule for ChangeIdentificationClusterRule {
+    fn name(&self) -> &'static str {
+        "change_identification_cluster"
+    }
+
+    fn inputs(&self) -> &'static [TypeId] {
+        const INS: &[TypeId] = &[TypeId::of::<ChangeIdentificationRel>()];
+        INS
+    }
+
+    fn step(&mut self, rid: usize, store: &mut MemStore, cursors: &mut CursorBook) -> usize {
+        let delta_change_txouts: Vec<TxOutId> = cursors
+            .read_delta::<ChangeIdentificationRel>(rid, store)
+            .iter()
+            .filter(|(_, is_change)| *is_change)
+            .map(|(txout_id, _)| *txout_id)
+            .collect();
+        if delta_change_txouts.is_empty() {
+            return 0;
+        }
+
+        let mut out = 0;
+        for txout_id in delta_change_txouts {
+            let index = store.index();
+            let mut set = SparseDisjointSet::<TxOutId>::default();
+            let txid = txout_id.txid;
+            // gate: skip coinjoins (or change to score threshold if you store scores)
+            // Assuming all the inputs are clustered together per naive MIH then we can pick the first input and union with that
+            let tx = index
+                .txs
+                .get(&txid)
+                .expect("Transaction should always exist");
+            let tx_inputs = tx.inputs().collect::<Vec<_>>();
+            if tx_inputs.is_empty() {
+                continue;
+            }
+            let txin = tx_inputs[0].as_ref();
+            set.union(txin.prev_txout_id(), txout_id);
+            if store.insert::<ClusterRel>(set) {
+                out += 1;
+            }
+        }
+        out
+    }
 }
 
 // TODO
@@ -65,22 +151,14 @@ pub fn change_identification_map_pass_fn(tx: &DummyTxData) -> HashMap<TxOutId, b
 #[cfg(test)]
 mod tests {
     use tx_indexer_primitives::{
-        abstract_types::AbstractTxHandle,
-        disjoint_set::DisJointSet,
-        loose::{TxId, TxOutId},
-        test_utils::{DummyIndex, DummyTxData, DummyTxOut},
-    };
-
-    use crate::{
-        OperationExecutor, coinjoin_detection::NaiveCoinjoinDetection,
-        common_input::MultiInputHeuristic,
+        loose::TxId,
+        test_utils::{DummyTxData, DummyTxOut},
     };
 
     use super::*;
 
     #[test]
     fn test_classify_change() {
-        let heuristic = NaiveChangeIdentificationHueristic;
         let txout = DummyTxOut {
             index: 0,
             containing_tx: DummyTxData {
@@ -90,128 +168,8 @@ mod tests {
             },
         };
         assert_eq!(
-            heuristic.is_change_ops(txout),
-            MutableOperation::AnnotateChange(
-                TxOutId {
-                    txid: TxId(1),
-                    vout: 0
-                },
-                true
-            )
-        );
-    }
-
-    #[test]
-    fn test_heuritic_pipeline() {
-        // This test sets up two coinbases with many outputs, a spending transaction that spends from both coinbases and create a change and payment transaction.
-        // The change should be clustered together with the coinbase txouts. The order of operation should not matter.
-        // We should also avoid cluster collapse by checking for coinjoins
-        let change_identification = NaiveChangeIdentificationHueristic;
-        let coinjoin_detection = NaiveCoinjoinDetection::default();
-        let multi_input_heuristic = MultiInputHeuristic;
-
-        let coinbase1 = DummyTxData {
-            id: TxId(0),
-            outputs_amounts: vec![100, 200, 300],
-            spent_coins: vec![],
-        };
-        let coinbase2 = DummyTxData {
-            id: TxId(1),
-            outputs_amounts: vec![400, 500, 600],
-            spent_coins: vec![],
-        };
-
-        let spending_tx = DummyTxData {
-            id: TxId(2),
-            outputs_amounts: vec![
-                200, // payment output
-                100, // Change outputs
-            ],
-            spent_coins: vec![
-                TxOutId {
-                    txid: coinbase1.id(),
-                    vout: 0,
-                },
-                TxOutId {
-                    txid: coinbase2.id(),
-                    vout: 0,
-                },
-            ],
-        };
-        let payment_tx = DummyTxData {
-            id: TxId(3),
-            outputs_amounts: vec![100],
-            spent_coins: vec![TxOutId {
-                txid: spending_tx.id(),
-                vout: 0,
-            }],
-        };
-
-        let change_tx = DummyTxData {
-            id: TxId(4),
-            outputs_amounts: vec![200],
-            spent_coins: vec![TxOutId {
-                txid: spending_tx.id(),
-                vout: 1,
-            }],
-        };
-
-        let mut index = DummyIndex::default();
-
-        let all_txs = vec![
-            &coinbase1,
-            &coinbase2,
-            &spending_tx,
-            &payment_tx,
-            &change_tx,
-        ];
-        // Run All txs through coinjoin classification
-        for tx in all_txs {
-            index.execute(&coinjoin_detection.is_coinjoin_tx(&tx.clone()));
-        }
-
-        // Cluster spending tx outputs
-        for op in multi_input_heuristic.merge_prevouts_ops(&spending_tx) {
-            index.execute(&op);
-        }
-        // Ensure the coinbase outputs are clustered together
-        let root = index.clustered_txouts.find(coinbase1.id().txout_id(0));
-        assert_eq!(
-            root,
-            index.clustered_txouts.find(coinbase2.id().txout_id(0))
-        );
-        // And the spending txins are also int he same cluster
-        assert_eq!(
-            root,
-            index.clustered_txouts.find(spending_tx.spent_coins[0])
-        );
-        assert_eq!(
-            root,
-            index.clustered_txouts.find(spending_tx.spent_coins[1])
-        );
-
-        // Gather change info
-        for (i, _amount) in spending_tx.outputs_amounts.iter().enumerate() {
-            let dummy_txout = DummyTxOut {
-                index: i,
-                containing_tx: spending_tx.clone(),
-            };
-            index.execute(&change_identification.is_change_ops(dummy_txout));
-        }
-
-        // Now we shoudl cluster change txout with the spending txouts of the spending tx
-        let change_txout_id = TxOutId {
-            txid: spending_tx.id(),
-            vout: 1,
-        };
-        if *index.change_tags.get(&change_txout_id).unwrap() {
-            println!("Clustering change txout with spending txout");
-            index.clustered_txouts.union(root, change_txout_id);
-        }
-        // Change txout should be clustered now with the spent coinbase txouts
-        assert_eq!(
-            index.clustered_txouts.find(root),
-            index.clustered_txouts.find(change_txout_id)
+            NaiveChangeIdentificationHueristic::is_change(txout),
+            ChangeIdentificationResult::Change
         );
     }
 }
