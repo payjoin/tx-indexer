@@ -5,6 +5,7 @@ use crate::abstract_types::EnumerateOutputValueInArbitraryOrder;
 use crate::abstract_types::EnumerateSpentTxOuts;
 use crate::abstract_types::OutputCount;
 use crate::abstract_types::TxConstituent;
+use crate::disjoint_set::DisJointSet;
 use crate::storage::InMemoryIndex;
 
 // Type defintions for loose txs and their ids
@@ -24,7 +25,7 @@ impl TxOutId {
 }
 
 impl TxOutId {
-    fn with<'a>(&self, index: &'a InMemoryIndex) -> TxOutHandle<'a> {
+    pub fn with<'a>(&self, index: &'a InMemoryIndex) -> TxOutHandle<'a> {
         TxOutHandle { id: *self, index }
     }
 }
@@ -61,6 +62,33 @@ impl<'a> TxOutHandle<'a> {
     pub fn vout(&self) -> u32 {
         self.id.vout
     }
+
+    pub fn spent_by(&self) -> Option<TxInHandle<'a>> {
+        self.index
+            .spending_txins
+            .get(&self.id)
+            .map(|txin_id| txin_id.with(self.index))
+    }
+}
+
+pub struct ClusterHandle<'a> {
+    txout_id: TxOutId,
+    index: &'a InMemoryIndex,
+    // TODO: this is specific for global clustering. not any particular clustering fact.
+    // Should specify which disjoin sets structure it is using.
+}
+
+impl<'a> ClusterHandle<'a> {
+    pub fn new(txout_id: TxOutId, index: &'a InMemoryIndex) -> Self {
+        Self { txout_id, index }
+    }
+
+    pub fn iter_txouts(&self) -> impl Iterator<Item = TxOutHandle<'a>> {
+        self.index
+            .global_clustering
+            .iter_set(self.txout_id)
+            .map(|txout_id| txout_id.with(self.index))
+    }
 }
 
 /// Sum of the short id of the txid and vin
@@ -77,9 +105,18 @@ impl TxInId {
 }
 
 pub struct TxInHandle<'a> {
-    #[allow(unused)]
     id: TxInId,
     index: &'a InMemoryIndex,
+}
+
+impl<'a> TxInHandle<'a> {
+    pub fn id(&self) -> TxInId {
+        self.id
+    }
+
+    pub fn tx(&self) -> TxHandle<'a> {
+        self.id.txid.with(self.index)
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
@@ -124,7 +161,7 @@ impl<'a> TxHandle<'a> {
     }
 
     fn spent_coins(&self) -> impl Iterator<Item = TxOutId> {
-        self.index.prev_txouts.values().map(|outid| *outid)
+        self.index.prev_txouts.values().copied()
     }
 
     pub fn outputs(&self) -> impl Iterator<Item = TxOutHandle<'a>> {
@@ -133,12 +170,25 @@ impl<'a> TxHandle<'a> {
             .txs
             .get(&self.id)
             .expect("If I have a handle it must exist?")
-            .output_count();
+            .output_len();
         (0..outputs_len).map(|i| self.id.txout_handle(self.index, i as u32))
     }
 
     pub fn output_count(&self) -> usize {
         self.id.with(self.index).outputs().count()
+    }
+
+    pub fn inputs_are_clustered(&self) -> bool {
+        let inputs = self.spent_coins().collect::<Vec<_>>();
+        if inputs.is_empty() {
+            return false;
+        }
+        let first_root = self.index.global_clustering.find(inputs[0]);
+        inputs.iter().all(|input| {
+            let other = self.index.global_clustering.find(*input);
+
+            other == first_root
+        })
     }
 }
 
@@ -170,12 +220,12 @@ impl AbstractTransaction for TxHandle<'_> {
             .outputs()
     }
 
-    fn output_count(&self) -> usize {
+    fn output_len(&self) -> usize {
         self.index
             .txs
             .get(&self.id)
             .expect("Tx should always exist if we have a handle")
-            .output_count()
+            .output_len()
     }
 
     fn output_at(&self, index: usize) -> Option<Box<dyn crate::abstract_types::AbstractTxOut>> {
@@ -194,7 +244,7 @@ impl<'a> TxConstituent for TxOutHandle<'a> {
         self.tx()
     }
 
-    fn index(&self) -> usize {
+    fn vout(&self) -> usize {
         self.id.vout as usize
     }
 }

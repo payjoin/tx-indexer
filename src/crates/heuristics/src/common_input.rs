@@ -15,24 +15,15 @@ pub struct MultiInputHeuristic;
 impl MultiInputHeuristic {
     pub fn merge_prevouts(&self, tx: &impl EnumerateSpentTxOuts) -> SparseDisjointSet<TxOutId> {
         if tx.spent_coins().count() == 0 {
-            return SparseDisjointSet::default();
+            return SparseDisjointSet::new();
         }
-        let mut set = SparseDisjointSet::default();
+        let set = SparseDisjointSet::new();
         tx.spent_coins().reduce(|a, b| {
             set.union(a, b);
             a
         });
         set
     }
-}
-
-pub fn common_input_map_pass_fn<T: EnumerateSpentTxOuts>(tx: T) -> Option<Vec<(TxOutId, TxOutId)>> {
-    unimplemented!();
-    // let heuristic = MultiInputHeuristic;
-    // match heuristic.merge_prevouts(&tx) {
-    //     MultiInputResult::Cluster(pairs) => Some(pairs),
-    //     _ => None,
-    // }
 }
 
 pub struct MihRule;
@@ -56,7 +47,7 @@ impl Rule for MihRule {
 
         let mut out = 0;
         for tx in delta_txs {
-            // gate: skip coinjoins (or change to score threshold if you store scores)
+            // gate: skip coinjoins
             if store.contains::<IsCoinJoinRel>(&(tx.id, true)) {
                 continue;
             }
@@ -72,155 +63,173 @@ impl Rule for MihRule {
 
 #[cfg(test)]
 mod tests {
-    use crate::common_input::MultiInputHeuristic;
-    use bitcoin::{
-        Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
-        absolute::LockTime,
-        secp256k1::{self},
-    };
-    use secp256k1::Secp256k1;
-    use secp256k1::rand::rngs::OsRng;
     use tx_indexer_primitives::{
-        disjoint_set::SparseDisjointSet, loose::TxOutId, storage::InMemoryIndex,
+        datalog::{ClusterRel, CursorBook, GlobalClusteringRel, IsCoinJoinRel, Rule, TxRel},
+        disjoint_set::{DisJointSet, SparseDisjointSet},
+        loose::{TxId, TxOutId},
+        storage::{FactStore, InMemoryIndex, MemStore},
+        test_utils::DummyTxData,
     };
 
-    // #[test]
-    // fn multi_input_heuristic() {
-    //     let coinbase1 = create_coinbase_with_many_outputs(1, 10); // 10 outputs
-    //     let coinbase2 = create_coinbase_with_many_outputs(2, 15); // 15 outputs
-    //     let coinbase3 = create_coinbase_with_many_outputs(3, 20); // 20 outputs
+    use crate::GlobalClustering;
 
-    //     let coinbase1_txid = coinbase1.compute_txid();
-    //     let coinbase2_txid = coinbase2.compute_txid();
+    use super::{MihRule, MultiInputHeuristic};
 
-    //     let spending_vout_1 = 3u32;
-    //     let spending_vout_2 = 7u32;
-
-    //     // Create a spending transaction that spends the two outputs:
-    //     let total_value = coinbase1.output[spending_vout_1 as usize]
-    //         .value
-    //         .checked_add(coinbase2.output[spending_vout_2 as usize].value)
-    //         .expect("value overflow");
-    //     let spending_tx = create_spending_transaction(
-    //         OutPoint::new(coinbase1_txid, spending_vout_1),
-    //         OutPoint::new(coinbase2_txid, spending_vout_2),
-    //         total_value,
-    //     );
-
-    //     assert_eq!(spending_tx.input.len(), 2);
-
-    //     let mut index = InMemoryIndex::new();
-    //     let all_txs = vec![
-    //         coinbase1.clone(),
-    //         coinbase2.clone(),
-    //         coinbase3.clone(),
-    //         spending_tx.clone(),
-    //     ];
-
-    //     let mut clustering_index = InMemoryClusteringIndex::<SparseDisjointSet<TxOutId>>::new();
-    //     for tx in all_txs.iter() {
-    //         index.add_tx(Box::new(BitcoinTransactionWrapper { tx: tx.clone() }));
-    //     }
-
-    //     // Add index for txins spent by txouts
-    //     // For this limited example there is two outs that are spet
-
-    //     // FIXME: removed these assertions during a refactor. Add them back in using abstract types not bitcoin types
-    //     // let heuristic = MultiInputHeuristic;
-    //     // for tx in all_txs.iter() {
-    //     //     let tx_handle = index.compute_txid(tx.compute_txid()).with(&index);
-    //     //     let prevouts = heuristic.merge_prevouts(&tx_handle);
-    //     //     for (a, b) in prevouts.iter() {
-    //     //         clustering_index.execute(MutableOperation::Cluster(*a, *b));
-    //     //     }
-    //     // }
-
-    //     assert_eq!(
-    //         clustering_index.find_root(
-    //                 InMemoryIndex::compute_txid(coinbase1.compute_txid())
-    //                 .txout_id(spending_vout_1)
-    //         ),
-    //         clustering_index.find_root(
-    //             InMemoryIndex::compute_txid(coinbase2.compute_txid())
-    //                 .txout_id(spending_vout_2)
-    //         )
-    //     );
-    //     // TODO: more assertions here
-    //     assert_ne!(
-    //         clustering_index.find_root(&index.compute_txid(coinbase2.compute_txid()).txout_id(7)),
-    //         clustering_index.find_root(&index.compute_txid(coinbase3.compute_txid()).txout_id(1))
-    //     );
-    // }
-
-    pub fn create_coinbase_with_many_outputs(block_height: u32, num_outputs: usize) -> Transaction {
-        // Create coinbase input (special input with no previous output)
-        let mut coinbase_script_bytes = block_height.to_le_bytes().to_vec();
-        coinbase_script_bytes.push(0x00); // Add a byte to make it a valid script
-        let coinbase_script = ScriptBuf::from(coinbase_script_bytes);
-        let coinbase_input = TxIn {
-            previous_output: OutPoint::null(),
-            script_sig: coinbase_script,
-            sequence: Sequence::MAX,
-            witness: Witness::new(),
+    #[test]
+    fn test_multi_input_heuristic_merge_prevouts() {
+        let tx = DummyTxData {
+            id: TxId(100),
+            outputs_amounts: vec![500, 300],
+            spent_coins: vec![
+                TxOutId::new(TxId(1), 0),
+                TxOutId::new(TxId(2), 1),
+                TxOutId::new(TxId(3), 0),
+            ],
         };
 
-        // Create many outputs
-        let mut outputs = Vec::new();
-        for i in 0..num_outputs {
-            // Each output has a different value (in satoshis)
-            let value = Amount::from_sat(50_000_000 + (i as u64 * 1_000_000));
-            // Use a unique keypair per output for the script_pubkey
-            let secp = Secp256k1::new();
-            let (_secret_key, public_key) = secp.generate_keypair(&mut OsRng);
-            let script_pubkey = ScriptBuf::new_p2pk(&public_key.into());
-            outputs.push(TxOut {
-                value,
-                script_pubkey,
-            });
-        }
+        let heuristic = MultiInputHeuristic;
+        let cluster = heuristic.merge_prevouts(&tx);
 
-        Transaction {
-            version: bitcoin::transaction::Version::TWO,
-            lock_time: LockTime::ZERO,
-            input: vec![coinbase_input],
-            output: outputs,
-        }
+        // All three inputs should be in the same cluster
+        let input1 = TxOutId::new(TxId(1), 0);
+        let input2 = TxOutId::new(TxId(2), 1);
+        let input3 = TxOutId::new(TxId(3), 0);
+
+        assert_eq!(cluster.find(input1), cluster.find(input2));
+        assert_eq!(cluster.find(input2), cluster.find(input3));
+        assert_eq!(cluster.find(input1), cluster.find(input3));
     }
 
-    fn create_spending_transaction(
-        prev_outpoint1: OutPoint,
-        prev_outpoint2: OutPoint,
-        total_value: Amount,
-    ) -> Transaction {
-        let input1 = TxIn {
-            previous_output: prev_outpoint1,
-            script_sig: ScriptBuf::new(),
-            sequence: Sequence::MAX,
-            witness: Witness::new(),
-        };
-        let input2 = TxIn {
-            previous_output: prev_outpoint2,
-            script_sig: ScriptBuf::new(),
-            sequence: Sequence::MAX,
-            witness: Witness::new(),
+    #[test]
+    fn test_multi_input_rule_step() {
+        let tx = DummyTxData {
+            id: TxId(200),
+            outputs_amounts: vec![1000],
+            spent_coins: vec![TxOutId::new(TxId(10), 0), TxOutId::new(TxId(11), 0)],
         };
 
-        let fee = Amount::from_sat(1_000);
-        let output_value = total_value.checked_sub(fee).unwrap_or(total_value);
-        let secp = Secp256k1::new();
-        let (_, public_key) = secp.generate_keypair(&mut OsRng);
-        let spk = ScriptBuf::new_p2pk(&public_key.into());
+        let mut store = MemStore::new(InMemoryIndex::new());
+        store.initialize::<TxRel>();
+        store.initialize::<IsCoinJoinRel>();
+        store.initialize::<ClusterRel>();
 
-        let output = TxOut {
-            value: output_value,
-            script_pubkey: spk,
+        store.insert::<TxRel>(tx.clone());
+
+        let mut rule = MihRule;
+        let mut cursors = CursorBook::new();
+        let rid = 0;
+
+        // First step should process the transaction
+        let count = rule.step(rid, &mut store, &mut cursors);
+        assert_eq!(count, 1);
+
+        let clusters: Vec<SparseDisjointSet<TxOutId>> =
+            store.read_range::<ClusterRel>(0, store.len::<ClusterRel>());
+        assert_eq!(clusters.len(), 1);
+
+        let cluster = &clusters[0];
+        let input1 = TxOutId::new(TxId(10), 0);
+        let input2 = TxOutId::new(TxId(11), 0);
+        assert_eq!(cluster.find(input1), cluster.find(input2));
+    }
+
+    #[test]
+    fn test_multi_input_rule_skips_coinjoin() {
+        // Create a coinjoin transaction with multiple inputs
+        let coinjoin_tx = DummyTxData {
+            id: TxId(300),
+            outputs_amounts: vec![500, 500, 500],
+            spent_coins: vec![
+                TxOutId::new(TxId(20), 0),
+                TxOutId::new(TxId(21), 0),
+                TxOutId::new(TxId(22), 0),
+            ],
         };
 
-        Transaction {
-            version: bitcoin::transaction::Version::TWO,
-            lock_time: LockTime::ZERO,
-            input: vec![input1, input2],
-            output: vec![output],
-        }
+        let mut store = MemStore::new(InMemoryIndex::new());
+        store.initialize::<TxRel>();
+        store.initialize::<IsCoinJoinRel>();
+        store.initialize::<ClusterRel>();
+
+        store.insert::<IsCoinJoinRel>((coinjoin_tx.id, true));
+        store.insert::<TxRel>(coinjoin_tx.clone());
+
+        let mut rule = MihRule;
+        let mut cursors = CursorBook::new();
+        let rid = 0;
+
+        // Should process but skip the coinjoin
+        let count = rule.step(rid, &mut store, &mut cursors);
+        assert_eq!(count, 0);
+
+        // No cluster should be created for coinjoin
+        let clusters: Vec<SparseDisjointSet<TxOutId>> =
+            store.read_range::<ClusterRel>(0, store.len::<ClusterRel>());
+        assert_eq!(clusters.len(), 0);
+    }
+
+    #[test]
+    fn test_multi_input_rule_single_input() {
+        // Transaction with only one input should create an empty cluster
+        let tx = DummyTxData {
+            id: TxId(400),
+            outputs_amounts: vec![100],
+            spent_coins: vec![TxOutId::new(TxId(30), 0)],
+        };
+
+        let heuristic = MultiInputHeuristic;
+        let cluster = heuristic.merge_prevouts(&tx);
+
+        let input = TxOutId::new(TxId(30), 0);
+        assert_eq!(cluster.find(input), input);
+    }
+
+    #[test]
+    fn test_multi_input_rule_no_inputs() {
+        // Coinbase transaction with no inputs
+        let coinbase = DummyTxData {
+            id: TxId(500),
+            outputs_amounts: vec![50000000],
+            spent_coins: vec![],
+        };
+
+        let heuristic = MultiInputHeuristic;
+        let cluster = heuristic.merge_prevouts(&coinbase);
+
+        assert_eq!(
+            cluster.find(TxOutId::new(TxId(999), 0)),
+            TxOutId::new(TxId(999), 0)
+        );
+    }
+
+    #[test]
+    fn test_global_clustering() {
+        let tx = DummyTxData {
+            id: TxId(200),
+            outputs_amounts: vec![1000],
+            spent_coins: vec![TxOutId::new(TxId(0), 0), TxOutId::new(TxId(1), 0)],
+        };
+
+        let mut store = MemStore::new(InMemoryIndex::new());
+        store.initialize::<TxRel>();
+        store.initialize::<IsCoinJoinRel>();
+        store.initialize::<ClusterRel>();
+        store.initialize::<GlobalClusteringRel>();
+
+        store.insert::<TxRel>(tx.clone());
+
+        let mut mih_rule = MihRule;
+        let mut global_clustering_rule = GlobalClustering;
+        let mut cursors = CursorBook::new();
+        let rid = 0;
+
+        mih_rule.step(rid, &mut store, &mut cursors);
+        global_clustering_rule.step(rid, &mut store, &mut cursors);
+
+        let global_clustering = store.index().global_clustering.clone();
+        assert_eq!(
+            global_clustering.find(TxOutId::new(TxId(0), 0)),
+            global_clustering.find(TxOutId::new(TxId(1), 0))
+        );
     }
 }

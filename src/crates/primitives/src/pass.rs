@@ -142,11 +142,7 @@ where
     U: Eq + std::hash::Hash + Copy,
     Pred: FnMut(&U, &InMemoryIndex) -> Option<(T, T)> + Send + 'static,
 {
-    fn merge(
-        mut self,
-        mut set: SparseDisjointSet<T>,
-        map: HashMap<U, bool>,
-    ) -> SparseDisjointSet<T> {
+    fn merge(mut self, set: SparseDisjointSet<T>, map: HashMap<U, bool>) -> SparseDisjointSet<T> {
         for (u, is_true) in map {
             if is_true {
                 // Perhaps is true should be passed into the closure
@@ -211,7 +207,7 @@ where
     F: FnMut(T) -> Option<Vec<(U, U)>> + Send + 'static,
 {
     fn map(mut self, input: BoxIter<T>) -> SparseDisjointSet<U> {
-        let mut disjoint_set = SparseDisjointSet::default();
+        let disjoint_set = SparseDisjointSet::new();
         for item in input {
             if let Some(pairs) = (self.f)(item) {
                 for (a, b) in pairs {

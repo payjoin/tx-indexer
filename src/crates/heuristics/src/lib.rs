@@ -2,63 +2,173 @@ pub mod change_identification;
 pub mod coinjoin_detection;
 pub mod common_input;
 
+use std::any::TypeId;
+
+use tx_indexer_primitives::{
+    datalog::{ClusterRel, CursorBook, GlobalClusteringRel, Rule, TxRel},
+    disjoint_set::SparseDisjointSet,
+    loose::TxOutId,
+    storage::{FactStore, MemStore},
+    test_utils::DummyTxData,
+};
+
+pub struct TransactionIngestionRule;
+
+impl Rule for TransactionIngestionRule {
+    fn name(&self) -> &'static str {
+        "transaction_ingestion"
+    }
+
+    fn inputs(&self) -> &'static [TypeId] {
+        const INS: &[TypeId] = &[];
+        INS
+    }
+
+    fn step(&mut self, rid: usize, store: &mut MemStore, cursors: &mut CursorBook) -> usize {
+        let delta_txs: Vec<DummyTxData> = cursors.read_delta::<TxRel>(rid, store);
+        if delta_txs.is_empty() {
+            return 0;
+        }
+
+        delta_txs.iter().for_each(|tx| {
+            // TODO: we just need to build the specific txin and txout indecies. For in memory can we just just point to the fact in memstore?
+            let _ = store.index_mut().add_tx(tx.clone().into());
+        });
+
+        delta_txs.len()
+    }
+}
+
+pub struct GlobalClustering;
+
+impl Rule for GlobalClustering {
+    fn name(&self) -> &'static str {
+        "global_clustering"
+    }
+
+    fn inputs(&self) -> &'static [TypeId] {
+        const INS: &[TypeId] = &[TypeId::of::<ClusterRel>()];
+        INS
+    }
+
+    fn step(&mut self, rid: usize, store: &mut MemStore, cursors: &mut CursorBook) -> usize {
+        let delta_clusters: Vec<SparseDisjointSet<TxOutId>> =
+            cursors.read_delta::<ClusterRel>(rid, store);
+        println!("Global delta_clusters: {:?}", delta_clusters);
+        if delta_clusters.is_empty() {
+            return 0;
+        }
+
+        let unified_cluster = delta_clusters
+            .into_iter()
+            .reduce(|acc, cluster| acc.join(&cluster))
+            .unwrap();
+        println!("unified_cluster: {:?}", unified_cluster);
+
+        if unified_cluster.is_empty() {
+            return 0;
+        }
+
+        let new_global = store.index().global_clustering.join(&unified_cluster);
+        store.index_mut().global_clustering = new_global;
+        store.insert::<GlobalClusteringRel>(unified_cluster.clone());
+
+        1
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tx_indexer_primitives::{
-        datalog::{ClusterRel, EngineBuilder, IsCoinJoinRel, TxRel},
+        datalog::{
+            ChangeIdentificationRel, ClusterRel, EngineBuilder, GlobalClusteringRel, IsCoinJoinRel,
+            TxRel,
+        },
         disjoint_set::DisJointSet,
         loose::{TxId, TxOutId},
-        pass::{AnalysisPass, FnMapPass, FnMapToBoolMapPass, FnMergePass, PredicateFilterPass},
         storage::{FactStore, InMemoryIndex},
         test_utils::DummyTxData,
     };
 
     use crate::{
-        change_identification::change_identification_map_pass_fn,
-        coinjoin_detection::{CoinJoinRule, coinjoin_detection_filter_pass_fn},
-        common_input::{MihRule, common_input_map_pass_fn},
+        GlobalClustering, TransactionIngestionRule,
+        change_identification::{ChangeIdentificationClusterRule, ChangeIdentificationRule},
+        coinjoin_detection::CoinJoinRule,
+        common_input::MihRule,
     };
+
+    /// A test fixture for the heuristics pipeline
+    /// This test is two coinbase txs, a spending tx that spends the two coinbases, a change output and a payment output.
+    struct TestFixture {
+        txs: Vec<DummyTxData>,
+    }
+
+    impl TestFixture {
+        fn new() -> Self {
+            let src = vec![
+                // Coinbase 1
+                DummyTxData {
+                    id: TxId(0),
+                    outputs_amounts: vec![100, 200, 300],
+                    spent_coins: vec![],
+                },
+                // Coinbase 2
+                DummyTxData {
+                    id: TxId(1),
+                    outputs_amounts: vec![100, 100],
+                    spent_coins: vec![],
+                },
+                // Non-coinjoin spending the two coinbases
+                DummyTxData {
+                    id: TxId(2),
+                    // Creating a change output and a payment output
+                    outputs_amounts: vec![100, 200],
+                    // Spending the vout = 0 of the two coinbases
+                    spent_coins: vec![TxOutId::new(TxId(0), 0), TxOutId::new(TxId(1), 0)],
+                },
+                // Spending the change output
+                DummyTxData {
+                    id: TxId(3),
+                    outputs_amounts: vec![100],
+                    // Spending the change output
+                    spent_coins: vec![TxOutId::new(TxId(2), 0)],
+                },
+                // Spending the payment output
+                DummyTxData {
+                    id: TxId(4),
+                    outputs_amounts: vec![200],
+                    // Spending the payment output
+                    spent_coins: vec![TxOutId::new(TxId(2), 1)],
+                },
+            ];
+            Self { txs: src }
+        }
+
+        fn all(&self) -> Vec<DummyTxData> {
+            self.txs.clone()
+        }
+
+        fn coinbases(&self) -> Vec<DummyTxData> {
+            vec![self.txs[0].clone(), self.txs[1].clone()]
+        }
+
+        fn spending_tx(&self) -> DummyTxData {
+            self.txs[2].clone()
+        }
+
+        fn payment_output(&self) -> TxOutId {
+            TxOutId::new(self.txs[2].id, 0)
+        }
+
+        fn change_output(&self) -> TxOutId {
+            TxOutId::new(self.txs[2].id, 1)
+        }
+    }
 
     // #[test]
     // fn test_filtered() {
-    //     let src = vec![
-    //         // Coinbase 1
-    //         DummyTxData {
-    //             id: TxId(0),
-    //             outputs_amounts: vec![100, 200, 300],
-    //             spent_coins: vec![],
-    //         },
-    //         // Coinbase 2
-    //         DummyTxData {
-    //             id: TxId(1),
-    //             outputs_amounts: vec![100, 100],
-    //             spent_coins: vec![],
-    //         },
-    //         // Non-coinjoin spending the two coinbases
-    //         DummyTxData {
-    //             id: TxId(2),
-    //             // Creating a change output and a payment output
-    //             outputs_amounts: vec![100, 200],
-    //             // Spending the vout = 0 of the two coinbases
-    //             spent_coins: vec![TxOutId::new(TxId(0), 0), TxOutId::new(TxId(1), 0)],
-    //         },
-    //         // Spending the change output
-    //         DummyTxData {
-    //             id: TxId(3),
-    //             outputs_amounts: vec![100],
-    //             // Spending the change output
-    //             spent_coins: vec![TxOutId::new(TxId(2), 0)],
-    //         },
-    //         // Spending the payment output
-    //         DummyTxData {
-    //             id: TxId(4),
-    //             outputs_amounts: vec![200],
-    //             // Spending the payment output
-    //             spent_coins: vec![TxOutId::new(TxId(2), 1)],
-    //         },
-    //     ];
-
-    //     let mut index = InMemoryIndex::new();
+    // let fixture = TestFixture::new();
+    // let mut index = InMemoryIndex::new();
 
     //     for tx in src.iter() {
     //         index.txs.insert(tx.id, tx.clone().into());
@@ -108,10 +218,16 @@ mod tests {
     // }
 
     #[test]
-    fn test_coinjoin_detection() {
+    fn test_e2e_pipeline() {
+        let fixture = TestFixture::new();
+
         let mut engine = EngineBuilder::new()
-            .add_rule(Box::new(MihRule))
+            .add_rule(Box::new(TransactionIngestionRule))
             .add_rule(Box::new(CoinJoinRule))
+            .add_rule(Box::new(MihRule))
+            .add_rule(Box::new(ChangeIdentificationRule))
+            .add_rule(Box::new(ChangeIdentificationClusterRule))
+            .add_rule(Box::new(GlobalClustering))
             .build();
 
         // TODO: eliminate memstore, store.initialized.
@@ -121,51 +237,36 @@ mod tests {
         store.initialize::<TxRel>();
         store.initialize::<IsCoinJoinRel>();
         store.initialize::<ClusterRel>();
-        // Lets create some dummy txs
-        let txs = vec![
-            DummyTxData {
-                id: TxId(0),
-                outputs_amounts: vec![100, 200, 300],
-                spent_coins: vec![],
-            },
-            DummyTxData {
-                id: TxId(1),
-                outputs_amounts: vec![100, 200, 300],
-                spent_coins: vec![],
-            },
-        ];
-        for tx in txs {
+        store.initialize::<GlobalClusteringRel>();
+        store.initialize::<ChangeIdentificationRel>();
+
+        for tx in fixture.coinbases() {
             store.insert::<TxRel>(tx);
         }
+
         engine.run_to_fixpoint(&mut store);
-
-        let coinjoin_facts = store.read_range::<IsCoinJoinRel>(0, store.len::<IsCoinJoinRel>());
-        assert_eq!(coinjoin_facts.len(), 2);
-        assert_eq!(coinjoin_facts[0], (TxId(0), false));
-        assert_eq!(coinjoin_facts[1], (TxId(1), false));
-
-        let clustering_facts = store.read_range::<ClusterRel>(0, store.len::<ClusterRel>());
-        // Two empty sets, one for each tx
-        assert_eq!(clustering_facts.len(), 2);
 
         // Lets add more txs (this time with inputs) and re-run with deltas causing writes
-        let txs = vec![DummyTxData {
-            id: TxId(2),
-            outputs_amounts: vec![100, 200],
-            spent_coins: vec![TxOutId::new(TxId(0), 0), TxOutId::new(TxId(1), 0)],
-        }];
-        store.insert::<TxRel>(txs[0].clone());
+        store.insert::<TxRel>(fixture.spending_tx());
         engine.run_to_fixpoint(&mut store);
-        // Coinjoin results should be the same
-        let res = store.read_range::<IsCoinJoinRel>(0, store.len::<IsCoinJoinRel>());
-        assert_eq!(res.len(), 3);
-        assert_eq!(res[0], (TxId(0), false));
-        assert_eq!(res[1], (TxId(1), false));
-        assert_eq!(res[2], (TxId(2), false));
-        // new MIH clusters should be present
-        let res = store.read_range::<ClusterRel>(0, store.len::<ClusterRel>());
-        assert_eq!(res.len(), 3);
 
-        // assert_eq!(res[0], (TxOutId::new(TxId(0), 0), TxOutId::new(TxId(1), 0)));
+        // Two new clustering facts should be present:
+        // 1. MIH on the spending tx
+        // 2. Change clustering on the change output of the spending tx
+        // Under global clustering we should have one cluster with all these txouts and one empty cluster because of the first run above
+        let cluster = store.index().global_clustering.clone();
+        println!("cluster: {:?}", cluster);
+        assert_eq!(
+            cluster.find(fixture.spending_tx().spent_coins[0]),
+            cluster.find(fixture.spending_tx().spent_coins[1])
+        );
+        assert_eq!(
+            cluster.find(fixture.change_output()),
+            cluster.find(fixture.spending_tx().spent_coins[0])
+        );
+        assert_ne!(
+            cluster.find(fixture.change_output()),
+            cluster.find(fixture.payment_output())
+        );
     }
 }

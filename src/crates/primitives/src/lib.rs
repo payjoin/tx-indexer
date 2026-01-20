@@ -86,7 +86,7 @@ pub mod test_utils {
             Box::new(outputs.into_iter())
         }
 
-        fn output_count(&self) -> usize {
+        fn output_len(&self) -> usize {
             self.outputs_amounts.len()
         }
 
@@ -149,7 +149,7 @@ pub mod test_utils {
             self.containing_tx.clone()
         }
 
-        fn index(&self) -> usize {
+        fn vout(&self) -> usize {
             self.index
         }
     }

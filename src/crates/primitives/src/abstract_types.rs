@@ -7,7 +7,7 @@ pub trait TxConstituent {
     type Handle: AbstractTransaction;
     fn containing_tx(&self) -> Self::Handle;
 
-    fn index(&self) -> usize;
+    fn vout(&self) -> usize;
 }
 
 pub trait OutputCount: AbstractTransaction {
@@ -20,7 +20,6 @@ pub trait EnumerateSpentTxOuts: AbstractTransaction {
 
 // TODO: find a better name for this
 pub trait EnumerateOutputValueInArbitraryOrder: AbstractTransaction {
-    // TODO:
     fn output_values(&self) -> impl Iterator<Item = Amount>;
 }
 
@@ -33,6 +32,7 @@ pub trait AbstractTxIn {
     /// Returns the output index of the previous output
     fn prev_vout(&self) -> u32;
     /// Returns the previous output ID
+    // TODO: should have a into impl from txin to txout id
     fn prev_txout_id(&self) -> TxOutId {
         TxOutId::new(self.prev_txid(), self.prev_vout())
     }
@@ -57,7 +57,7 @@ pub trait AbstractTransaction {
     /// Returns an iterator over transaction outputs
     fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut>> + '_>;
     /// Returns the number of outputs
-    fn output_count(&self) -> usize;
+    fn output_len(&self) -> usize;
     /// Returns the output at the given index, if it exists
     fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>>;
 }

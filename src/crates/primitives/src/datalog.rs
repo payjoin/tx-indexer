@@ -39,7 +39,14 @@ impl Relation for ChangeIdentificationRel {
     type Fact = (TxOutId, bool);
     const NAME: &'static str = "ChangeIdentification";
 }
-// Tagged facts: different facts existing in different domain of knowledge
+
+pub struct GlobalClusteringRel;
+impl Relation for GlobalClusteringRel {
+    type Fact = SparseDisjointSet<TxOutId>;
+    const NAME: &'static str = "GlobalClustering";
+}
+
+// TODO Tagged facts: different facts existing in different domain of knowledge
 
 /// A rule is a function that takes a set of facts and emits a set of derived facts.
 pub trait Rule {
@@ -125,7 +132,6 @@ impl CursorBook {
         self.offsets.insert((rule_id, rel), off);
     }
 
-    // LEFT of here: need a trait for getting a collection of facts regadless of the shape of the fact
     pub fn read_delta<R: Relation>(&mut self, rule_id: usize, store: &MemStore) -> Vec<R::Fact> {
         let rel = TypeId::of::<R>();
         let start = self.get(rule_id, rel);

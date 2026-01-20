@@ -2,13 +2,12 @@ use bitcoin::consensus::Encodable;
 
 use crate::abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut};
 use crate::datalog::Relation;
+use crate::disjoint_set::{DisJointSet, SparseDisjointSet};
 use crate::loose::{TxHandle, TxId, TxInId, TxOutId};
-use crate::pass::AnalysisPass;
 use std::hash::{DefaultHasher, Hasher};
 use std::{any::TypeId, collections::HashMap};
 
 pub trait PrevOutIndex {
-    // TODO: this should take an input id and return an id
     // TODO: consider handle wrappers converting ids to the actual types.
     // justification: the heuristics may not care about the content of the data. Only access that thru the handler.
     fn prev_txout(&self, ot: &TxInId) -> TxOutId;
@@ -23,12 +22,11 @@ pub trait IndexedGraph: PrevOutIndex + TxInIndex {}
 impl IndexedGraph for InMemoryIndex {}
 
 pub struct InMemoryIndex {
-    // TODO: these indecies should get derived from the AST pipeline and live as facts
     pub prev_txouts: HashMap<TxInId, TxOutId>,
     pub spending_txins: HashMap<TxOutId, TxInId>,
-    //  TODO: in the future replace with a trait
     // TODO: test that insertion order does not make a difference
     pub txs: HashMap<TxId, Box<dyn AbstractTransaction + Send + Sync>>,
+    pub global_clustering: SparseDisjointSet<TxOutId>,
 }
 
 impl std::fmt::Debug for InMemoryIndex {
@@ -53,6 +51,7 @@ impl InMemoryIndex {
             prev_txouts: HashMap::new(),
             spending_txins: HashMap::new(),
             txs: HashMap::new(),
+            global_clustering: SparseDisjointSet::new(),
         }
     }
 
@@ -173,7 +172,7 @@ impl AbstractTransaction for BitcoinTransactionWrapper {
         Box::new(outputs.into_iter())
     }
 
-    fn output_count(&self) -> usize {
+    fn output_len(&self) -> usize {
         self.tx.output.len()
     }
 
@@ -189,53 +188,6 @@ impl From<bitcoin::Transaction> for Box<dyn AbstractTransaction + Send + Sync> {
         Box::new(BitcoinTransactionWrapper { tx: val })
     }
 }
-
-// Clustering and classification related traits
-
-// #[derive(Debug)]
-// pub struct InMemoryClusteringIndex<UF: DisJointSet<TxOutId>> {
-//     index: InMemoryIndex,
-//     merged_prevouts: UF,
-//     // TODO: hashmap makes sense for loose repr. For packed graph this can be a large bit vector. One bit for the entire set of ordered txs.
-//     // TODO: this should be unhardcoded to be construct out of some generic storage type
-//     tagged_coinjoins: HashMap<TxId, bool>,
-//     tagged_change_outputs: HashMap<TxOutId, bool>,
-// }
-
-// impl<UF: DisJointSet<TxOutId> + Default> InMemoryClusteringIndex<UF> {
-//     pub fn new() -> Self {
-//         Self {
-//             index: InMemoryIndex::new(),
-//             merged_prevouts: UF::default(),
-//             tagged_coinjoins: HashMap::new(),
-//             tagged_change_outputs: HashMap::new(),
-//         }
-//     }
-
-//     pub fn find_root(&mut self, tx_out_id: &TxOutId) -> TxOutId {
-//         self.merged_prevouts.find(*tx_out_id)
-//     }
-
-//     pub fn union(&mut self, a: &TxOutId, b: &TxOutId) {
-//         self.merged_prevouts.union(*a, *b);
-//     }
-
-//     pub fn is_coinjoin(&self, tx_id: &TxId) -> Option<bool> {
-//         self.tagged_coinjoins.get(tx_id).cloned()
-//     }
-
-//     pub fn annotate_coinjoin(&mut self, tx_id: &TxId, is_coinjoin: bool) {
-//         self.tagged_coinjoins.insert(*tx_id, is_coinjoin);
-//     }
-
-//     pub fn is_change(&self, tx_out_id: &TxOutId) -> Option<bool> {
-//         self.tagged_change_outputs.get(tx_out_id).cloned()
-//     }
-
-//     pub fn annotate_change(&mut self, tx_out_id: &TxOutId, is_change: bool) {
-//         self.tagged_change_outputs.insert(*tx_out_id, is_change);
-//     }
-// }
 
 pub trait FactStore {
     fn insert<R: Relation>(&mut self, fact: R::Fact) -> bool;
@@ -260,6 +212,15 @@ impl MemStore {
 
     pub fn index(&self) -> &InMemoryIndex {
         &self.index
+    }
+
+    pub fn index_mut(&mut self) -> &mut InMemoryIndex {
+        &mut self.index
+    }
+
+    // TODO: should be moved to TxOutHandle instead
+    pub fn is_clustered(&mut self, a: &TxOutId, b: &TxOutId) -> bool {
+        self.index_mut().global_clustering.find(*a) == self.index_mut().global_clustering.find(*b)
     }
 
     // TODO: placeholder hack should remove later
