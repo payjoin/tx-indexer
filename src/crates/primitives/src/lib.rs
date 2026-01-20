@@ -1,4 +1,5 @@
 pub mod abstract_types;
+pub mod datalog;
 pub mod disjoint_set;
 pub mod loose;
 pub mod pass;
@@ -19,7 +20,7 @@ pub mod test_utils {
         pass::AnalysisPass,
     };
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct DummyTxData {
         pub id: TxId,
         pub outputs_amounts: Vec<u64>,

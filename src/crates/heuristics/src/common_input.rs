@@ -1,4 +1,11 @@
-use tx_indexer_primitives::{abstract_types::EnumerateSpentTxOuts, loose::TxOutId};
+use std::any::TypeId;
+
+use tx_indexer_primitives::{
+    abstract_types::EnumerateSpentTxOuts,
+    datalog::{CursorBook, FactStore, IsCoinJoinRel, LinkRel, MemStore, Rule, TxRel},
+    loose::TxOutId,
+    test_utils::DummyTxData,
+};
 
 use crate::MutableOperation;
 
@@ -44,6 +51,48 @@ pub fn common_input_map_pass_fn<T: EnumerateSpentTxOuts>(tx: T) -> Option<Vec<(T
     match heuristic.merge_prevouts(&tx) {
         MultiInputResult::Cluster(pairs) => Some(pairs),
         _ => None,
+    }
+}
+
+pub struct MihRule;
+
+impl Rule for MihRule {
+    fn name(&self) -> &'static str {
+        "mih"
+    }
+
+    fn inputs(&self) -> &'static [TypeId] {
+        // depends on Tx deltas; also reads IsCoinJoin for gating
+        const INS: &[TypeId] = &[TypeId::of::<TxRel>(), TypeId::of::<IsCoinJoinRel>()];
+        INS
+    }
+
+    fn step(&mut self, rid: usize, store: &mut MemStore, cursors: &mut CursorBook) -> usize {
+        let delta_txs: Vec<DummyTxData> = cursors.read_delta::<TxRel>(rid, store);
+        if delta_txs.is_empty() {
+            return 0;
+        }
+
+        let mut out = 0;
+        for tx in delta_txs {
+            // gate: skip coinjoins (or change to score threshold if you store scores)
+            if store.contains::<IsCoinJoinRel>(&(tx.id, true)) {
+                continue;
+            }
+
+            let to_merge = MultiInputHeuristic.merge_prevouts(&tx);
+            match to_merge {
+                MultiInputResult::Cluster(pairs) => {
+                    for (a, b) in pairs {
+                        if store.insert::<LinkRel>((a, b)) {
+                            out += 1;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
     }
 }
 

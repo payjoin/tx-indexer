@@ -57,6 +57,7 @@ impl OperationExecutor for DummyIndex {
 #[cfg(test)]
 mod tests {
     use tx_indexer_primitives::{
+        datalog::{EngineBuilder, FactStore, IsCoinJoinRel, LinkRel, TxRel},
         disjoint_set::DisJointSet,
         loose::{TxId, TxOutId},
         pass::{AnalysisPass, FnMapPass, FnMapToBoolMapPass, FnMergePass, PredicateFilterPass},
@@ -65,8 +66,8 @@ mod tests {
 
     use crate::{
         change_identification::change_identification_map_pass_fn,
-        coinjoin_detection::coinjoin_detection_filter_pass_fn,
-        common_input::common_input_map_pass_fn,
+        coinjoin_detection::{CoinJoinRule, coinjoin_detection_filter_pass_fn},
+        common_input::{MihRule, common_input_map_pass_fn},
     };
 
     #[test]
@@ -155,5 +156,65 @@ mod tests {
             analysis.find(change_txout),
             analysis.find(other_cluster_txout)
         );
+    }
+
+    #[test]
+    fn test_coinjoin_detection() {
+        let mut engine = EngineBuilder::new()
+            .add_rule(Box::new(MihRule))
+            .add_rule(Box::new(CoinJoinRule))
+            .build();
+
+        // TODO: eliminate memstore, store.initialized.
+        // TODO: repr data dependency with rust expressions.
+        // TODO: datatype for the entire computation -> what the engine takes as input
+        let mut store = tx_indexer_primitives::datalog::MemStore::new();
+        store.initialize::<TxRel>();
+        store.initialize::<IsCoinJoinRel>();
+        store.initialize::<LinkRel>();
+        // Lets create some dummy txs
+        let txs = vec![
+            DummyTxData {
+                id: TxId(0),
+                outputs_amounts: vec![100, 200, 300],
+                spent_coins: vec![],
+            },
+            DummyTxData {
+                id: TxId(1),
+                outputs_amounts: vec![100, 200, 300],
+                spent_coins: vec![],
+            },
+        ];
+        for tx in txs {
+            store.insert::<TxRel>(tx);
+        }
+        engine.run_to_fixpoint(&mut store);
+
+        let coinjoin_facts = store.read_range::<IsCoinJoinRel>(0, store.len::<IsCoinJoinRel>());
+        assert_eq!(coinjoin_facts.len(), 2);
+        assert_eq!(coinjoin_facts[0], (TxId(0), false));
+        assert_eq!(coinjoin_facts[1], (TxId(1), false));
+
+        let clustering_facts = store.read_range::<LinkRel>(0, store.len::<LinkRel>());
+        assert_eq!(clustering_facts.len(), 0);
+
+        // Lets add more txs (this time with inputs) and re-run with deltas causing writes
+        let txs = vec![DummyTxData {
+            id: TxId(2),
+            outputs_amounts: vec![100, 200],
+            spent_coins: vec![TxOutId::new(TxId(0), 0), TxOutId::new(TxId(1), 0)],
+        }];
+        store.insert::<TxRel>(txs[0].clone());
+        engine.run_to_fixpoint(&mut store);
+        // Coinjoin results should be the same
+        let res = store.read_range::<IsCoinJoinRel>(0, store.len::<IsCoinJoinRel>());
+        assert_eq!(res.len(), 3);
+        assert_eq!(res[0], (TxId(0), false));
+        assert_eq!(res[1], (TxId(1), false));
+        assert_eq!(res[2], (TxId(2), false));
+        // new MIH clusters should be present
+        let res = store.read_range::<LinkRel>(0, store.len::<LinkRel>());
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0], (TxOutId::new(TxId(0), 0), TxOutId::new(TxId(1), 0)));
     }
 }

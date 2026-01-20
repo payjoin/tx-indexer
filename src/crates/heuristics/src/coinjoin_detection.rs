@@ -1,6 +1,10 @@
-use std::collections::HashMap;
+use std::{any::TypeId, collections::HashMap};
 
-use tx_indexer_primitives::abstract_types::EnumerateOutputValueInArbitraryOrder;
+use tx_indexer_primitives::{
+    abstract_types::EnumerateOutputValueInArbitraryOrder,
+    datalog::{CursorBook, FactStore, IsCoinJoinRel, MemStore, Rule, TxRel},
+    test_utils::DummyTxData,
+};
 
 use crate::MutableOperation;
 
@@ -31,6 +35,31 @@ impl NaiveCoinjoinDetection {
 
 pub fn coinjoin_detection_filter_pass_fn(tx: &impl EnumerateOutputValueInArbitraryOrder) -> bool {
     !NaiveCoinjoinDetection.is_coinjoin(tx)
+}
+
+pub struct CoinJoinRule;
+
+impl Rule for CoinJoinRule {
+    fn name(&self) -> &'static str {
+        "coinjoin detection"
+    }
+
+    fn inputs(&self) -> &'static [TypeId] {
+        const INS: &[TypeId] = &[TypeId::of::<TxRel>()];
+        INS
+    }
+
+    fn step(&mut self, rid: usize, store: &mut MemStore, cursors: &mut CursorBook) -> usize {
+        let delta_txs: Vec<DummyTxData> = cursors.read_delta::<TxRel>(rid, store);
+        if delta_txs.is_empty() {
+            return 0;
+        }
+
+        for tx in &delta_txs {
+            store.insert::<IsCoinJoinRel>((tx.id, NaiveCoinjoinDetection.is_coinjoin(tx)));
+        }
+        delta_txs.len()
+    }
 }
 
 #[cfg(test)]
