@@ -4,9 +4,8 @@ use tx_indexer_primitives::{
     abstract_types::EnumerateSpentTxOuts,
     datalog::{ClusterRel, CursorBook, IsCoinJoinRel, Rule, TxRel},
     disjoint_set::{DisJointSet, SparseDisjointSet},
-    loose::TxOutId,
+    loose::{TxId, TxOutId},
     storage::{FactStore, MemStore},
-    test_utils::DummyTxData,
 };
 
 pub struct MultiInputHeuristic;
@@ -40,19 +39,20 @@ impl Rule for MihRule {
     }
 
     fn step(&mut self, rid: usize, store: &mut MemStore, cursors: &mut CursorBook) -> usize {
-        let delta_txs: Vec<DummyTxData> = cursors.read_delta::<TxRel>(rid, store);
-        if delta_txs.is_empty() {
+        let delta_tx_ids: Vec<TxId> = cursors.read_delta::<TxRel>(rid, store);
+        if delta_tx_ids.is_empty() {
             return 0;
         }
 
         let mut out = 0;
-        for tx in delta_txs {
+        for tx_id in delta_tx_ids {
             // gate: skip coinjoins
-            if store.contains::<IsCoinJoinRel>(&(tx.id, true)) {
+            if store.contains::<IsCoinJoinRel>(&(tx_id, true)) {
                 continue;
             }
 
-            let to_merge = MultiInputHeuristic.merge_prevouts(&tx);
+            let tx_handle = tx_id.with(store.index());
+            let to_merge = MultiInputHeuristic.merge_prevouts(&tx_handle);
             if store.insert::<ClusterRel>(to_merge) {
                 out += 1;
             }
@@ -64,7 +64,10 @@ impl Rule for MihRule {
 #[cfg(test)]
 mod tests {
     use tx_indexer_primitives::{
-        datalog::{ClusterRel, CursorBook, GlobalClusteringRel, IsCoinJoinRel, Rule, TxRel},
+        datalog::{
+            AbstractTxWrapper, ClusterRel, CursorBook, GlobalClusteringRel, IsCoinJoinRel,
+            RawTxRel, Rule, TxRel,
+        },
         disjoint_set::{DisJointSet, SparseDisjointSet},
         loose::{TxId, TxOutId},
         storage::{FactStore, InMemoryIndex, MemStore},
@@ -109,11 +112,18 @@ mod tests {
         };
 
         let mut store = MemStore::new(InMemoryIndex::new());
+        store.initialize::<RawTxRel>();
         store.initialize::<TxRel>();
         store.initialize::<IsCoinJoinRel>();
         store.initialize::<ClusterRel>();
 
-        store.insert::<TxRel>(tx.clone());
+        let tx_wrapper = AbstractTxWrapper::new(tx.clone().into());
+        store.insert::<RawTxRel>(tx_wrapper);
+
+        // Run TransactionIngestionRule to add to index and emit TxId
+        let mut ingestion_rule = crate::TransactionIngestionRule;
+        let mut cursors = CursorBook::new();
+        ingestion_rule.step(0, &mut store, &mut cursors);
 
         let mut rule = MihRule;
         let mut cursors = CursorBook::new();
@@ -147,12 +157,19 @@ mod tests {
         };
 
         let mut store = MemStore::new(InMemoryIndex::new());
+        store.initialize::<RawTxRel>();
         store.initialize::<TxRel>();
         store.initialize::<IsCoinJoinRel>();
         store.initialize::<ClusterRel>();
 
         store.insert::<IsCoinJoinRel>((coinjoin_tx.id, true));
-        store.insert::<TxRel>(coinjoin_tx.clone());
+        let tx_wrapper = AbstractTxWrapper::new(coinjoin_tx.clone().into());
+        store.insert::<RawTxRel>(tx_wrapper);
+
+        // Run TransactionIngestionRule to add to index and emit TxId
+        let mut ingestion_rule = crate::TransactionIngestionRule;
+        let mut cursors = CursorBook::new();
+        ingestion_rule.step(0, &mut store, &mut cursors);
 
         let mut rule = MihRule;
         let mut cursors = CursorBook::new();
@@ -211,12 +228,19 @@ mod tests {
         };
 
         let mut store = MemStore::new(InMemoryIndex::new());
+        store.initialize::<RawTxRel>();
         store.initialize::<TxRel>();
         store.initialize::<IsCoinJoinRel>();
         store.initialize::<ClusterRel>();
         store.initialize::<GlobalClusteringRel>();
 
-        store.insert::<TxRel>(tx.clone());
+        let tx_wrapper = AbstractTxWrapper::new(tx.clone().into());
+        store.insert::<RawTxRel>(tx_wrapper);
+
+        // Run TransactionIngestionRule to add to index and emit TxId
+        let mut ingestion_rule = crate::TransactionIngestionRule;
+        let mut cursors = CursorBook::new();
+        ingestion_rule.step(0, &mut store, &mut cursors);
 
         let mut mih_rule = MihRule;
         let mut global_clustering_rule = GlobalClustering;

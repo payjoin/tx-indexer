@@ -1,12 +1,11 @@
 use std::{any::TypeId, collections::HashSet};
 
 use tx_indexer_primitives::{
-    abstract_types::{AbstractTransaction, EnumerateSpentTxOuts, OutputCount, TxConstituent},
+    abstract_types::{EnumerateSpentTxOuts, OutputCount, TxConstituent},
     datalog::{ChangeIdentificationRel, ClusterRel, CursorBook, GlobalClusteringRel, Rule, TxRel},
     disjoint_set::{DisJointSet, SparseDisjointSet},
     loose::{ClusterHandle, TxId, TxOutId},
     storage::{FactStore, MemStore},
-    test_utils::DummyTxOut,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -41,8 +40,8 @@ impl Rule for ChangeIdentificationRule {
     }
 
     fn step(&mut self, rid: usize, store: &mut MemStore, cursors: &mut CursorBook) -> usize {
-        let delta_txs = cursors.read_delta::<TxRel>(rid, store);
-        if delta_txs.is_empty() {
+        let delta_tx_ids: Vec<TxId> = cursors.read_delta::<TxRel>(rid, store);
+        if delta_tx_ids.is_empty() {
             return 0;
         }
 
@@ -82,25 +81,25 @@ impl Rule for ChangeIdentificationRule {
             }
         }
 
-        for tx in delta_txs {
-            if tx.spent_coins().next().is_none() {
+        // Collect all results first to avoid borrowing issues
+        let mut results = Vec::new();
+        for tx_id in delta_tx_ids {
+            let tx_handle = tx_id.with(store.index());
+            if tx_handle.spent_coins().next().is_none() {
                 // Coinbases don't have "change"
                 continue;
             }
-            for (i, _amount) in tx.outputs().enumerate() {
-                let txout_id = TxOutId::new(tx.id, i as u32);
-                let txout = DummyTxOut {
-                    index: i,
-                    containing_tx: tx.clone(),
-                };
-                let is_change = NaiveChangeIdentificationHueristic::is_change(txout);
-                if is_change == ChangeIdentificationResult::Change {
-                    store.insert::<ChangeIdentificationRel>((txout_id, true));
-                } else {
-                    store.insert::<ChangeIdentificationRel>((txout_id, false));
-                }
-                out += 1;
+            for txout_handle in tx_handle.outputs() {
+                let txout_id = txout_handle.id();
+                let is_change = NaiveChangeIdentificationHueristic::is_change(txout_handle);
+                results.push((txout_id, is_change == ChangeIdentificationResult::Change));
             }
+        }
+
+        // Now insert all results
+        for (txout_id, is_change) in results {
+            store.insert::<ChangeIdentificationRel>((txout_id, is_change));
+            out += 1;
         }
         out
     }

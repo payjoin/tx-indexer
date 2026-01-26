@@ -5,11 +5,12 @@ pub mod common_input;
 use std::any::TypeId;
 
 use tx_indexer_primitives::{
-    datalog::{ClusterRel, CursorBook, GlobalClusteringRel, Rule, TxRel},
+    datalog::{
+        AbstractTxWrapper, ClusterRel, CursorBook, GlobalClusteringRel, RawTxRel, Rule, TxRel,
+    },
     disjoint_set::SparseDisjointSet,
     loose::TxOutId,
     storage::{FactStore, MemStore},
-    test_utils::DummyTxData,
 };
 
 pub struct TransactionIngestionRule;
@@ -20,22 +21,29 @@ impl Rule for TransactionIngestionRule {
     }
 
     fn inputs(&self) -> &'static [TypeId] {
-        const INS: &[TypeId] = &[];
+        const INS: &[TypeId] = &[TypeId::of::<RawTxRel>()];
         INS
     }
 
     fn step(&mut self, rid: usize, store: &mut MemStore, cursors: &mut CursorBook) -> usize {
-        let delta_txs: Vec<DummyTxData> = cursors.read_delta::<TxRel>(rid, store);
+        let delta_txs: Vec<AbstractTxWrapper> = cursors.read_delta::<RawTxRel>(rid, store);
         if delta_txs.is_empty() {
             return 0;
         }
 
-        delta_txs.iter().for_each(|tx| {
-            // TODO: we just need to build the specific txin and txout indecies. For in memory can we just just point to the fact in memstore?
-            let _ = store.index_mut().add_tx(tx.clone().into());
-        });
+        let mut count = 0;
+        for tx_wrapper in delta_txs {
+            let tx_arc = tx_wrapper.into_arc();
+            let tx_id = tx_arc.txid();
 
-        delta_txs.len()
+            let _ = store.index_mut().add_tx(tx_arc);
+
+            // Emit TxId to TxRel
+            store.insert::<TxRel>(tx_id);
+            count += 1;
+        }
+
+        count
     }
 }
 
@@ -81,8 +89,8 @@ impl Rule for GlobalClustering {
 mod tests {
     use tx_indexer_primitives::{
         datalog::{
-            ChangeIdentificationRel, ClusterRel, EngineBuilder, GlobalClusteringRel, IsCoinJoinRel,
-            TxRel,
+            AbstractTxWrapper, ChangeIdentificationRel, ClusterRel, EngineBuilder,
+            GlobalClusteringRel, IsCoinJoinRel, RawTxRel, TxRel,
         },
         disjoint_set::DisJointSet,
         loose::{TxId, TxOutId},
@@ -234,6 +242,7 @@ mod tests {
         // TODO: repr data dependency with rust expressions.
         // TODO: datatype for the entire computation -> what the engine takes as input
         let mut store = tx_indexer_primitives::storage::MemStore::new(InMemoryIndex::new());
+        store.initialize::<RawTxRel>();
         store.initialize::<TxRel>();
         store.initialize::<IsCoinJoinRel>();
         store.initialize::<ClusterRel>();
@@ -241,13 +250,15 @@ mod tests {
         store.initialize::<ChangeIdentificationRel>();
 
         for tx in fixture.coinbases() {
-            store.insert::<TxRel>(tx);
+            let tx_wrapper = AbstractTxWrapper::new(tx.into());
+            store.insert::<RawTxRel>(tx_wrapper);
         }
 
         engine.run_to_fixpoint(&mut store);
 
         // Lets add more txs (this time with inputs) and re-run with deltas causing writes
-        store.insert::<TxRel>(fixture.spending_tx());
+        let tx_wrapper = AbstractTxWrapper::new(fixture.spending_tx().into());
+        store.insert::<RawTxRel>(tx_wrapper);
         engine.run_to_fixpoint(&mut store);
 
         // Two new clustering facts should be present:

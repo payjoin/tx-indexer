@@ -1,4 +1,5 @@
 use bitcoin::consensus::Encodable;
+use std::sync::Arc;
 
 use crate::abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut};
 use crate::datalog::Relation;
@@ -25,7 +26,7 @@ pub struct InMemoryIndex {
     pub prev_txouts: HashMap<TxInId, TxOutId>,
     pub spending_txins: HashMap<TxOutId, TxInId>,
     // TODO: test that insertion order does not make a difference
-    pub txs: HashMap<TxId, Box<dyn AbstractTransaction + Send + Sync>>,
+    pub txs: HashMap<TxId, Arc<dyn AbstractTransaction + Send + Sync>>,
     pub global_clustering: SparseDisjointSet<TxOutId>,
 }
 
@@ -58,7 +59,7 @@ impl InMemoryIndex {
     // FIXME: check all the keys before inserting. Lets not modify anything before checking for all dup checks
     pub fn add_tx<'a>(
         &'a mut self,
-        tx: Box<dyn AbstractTransaction + Send + Sync>,
+        tx: Arc<dyn AbstractTransaction + Send + Sync>,
     ) -> TxHandle<'a> {
         let id = tx.txid();
 

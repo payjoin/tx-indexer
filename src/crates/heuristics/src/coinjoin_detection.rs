@@ -3,8 +3,8 @@ use std::{any::TypeId, collections::HashMap};
 use tx_indexer_primitives::{
     abstract_types::EnumerateOutputValueInArbitraryOrder,
     datalog::{CursorBook, IsCoinJoinRel, Rule, TxRel},
+    loose::TxId,
     storage::{FactStore, MemStore},
-    test_utils::DummyTxData,
 };
 
 /// This is a super naive implementation that should be replace with a more sophisticated one.
@@ -41,15 +41,17 @@ impl Rule for CoinJoinRule {
     }
 
     fn step(&mut self, rid: usize, store: &mut MemStore, cursors: &mut CursorBook) -> usize {
-        let delta_txs: Vec<DummyTxData> = cursors.read_delta::<TxRel>(rid, store);
-        if delta_txs.is_empty() {
+        let delta_tx_ids: Vec<TxId> = cursors.read_delta::<TxRel>(rid, store);
+        if delta_tx_ids.is_empty() {
             return 0;
         }
 
-        for tx in &delta_txs {
-            store.insert::<IsCoinJoinRel>((tx.id, NaiveCoinjoinDetection.is_coinjoin(tx)));
+        for tx_id in &delta_tx_ids {
+            let tx_handle = tx_id.with(store.index());
+            let is_coinjoin = NaiveCoinjoinDetection.is_coinjoin(&tx_handle);
+            store.insert::<IsCoinJoinRel>((*tx_id, is_coinjoin));
         }
-        delta_txs.len()
+        delta_tx_ids.len()
     }
 }
 
