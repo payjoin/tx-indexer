@@ -102,6 +102,14 @@ impl TxInId {
     fn with<'a>(&self, index: &'a InMemoryIndex) -> TxInHandle<'a> {
         TxInHandle { id: *self, index }
     }
+
+    pub fn txid(&self) -> TxId {
+        self.txid
+    }
+
+    pub fn vin(&self) -> u32 {
+        self.vin
+    }
 }
 
 pub struct TxInHandle<'a> {
@@ -176,6 +184,10 @@ impl<'a> TxHandle<'a> {
 
     pub fn output_count(&self) -> usize {
         self.id.with(self.index).outputs().count()
+    }
+
+    pub fn is_coinbase(&self) -> bool {
+        self.spent_coins().count() == 0
     }
 
     pub fn inputs_are_clustered(&self) -> bool {

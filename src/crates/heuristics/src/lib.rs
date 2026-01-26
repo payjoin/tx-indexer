@@ -6,6 +6,8 @@ use std::any::TypeId;
 
 use tx_indexer_primitives::{
     datalog::{ClusterRel, GlobalClusteringRel, RawTransactionInput, RawTxRel, Rule, TxRel},
+    disjoint_set::{DisJointSet, SparseDisjointSet},
+    loose::TxOutId,
     storage::{FactStore, MemStore},
 };
 
@@ -72,12 +74,52 @@ impl Rule for GlobalClustering {
             return 0;
         }
 
-        let new_global = store.index().global_clustering.join(&unified_cluster);
-        store.index_mut().global_clustering = new_global;
-        store.insert::<GlobalClusteringRel>(unified_cluster.clone());
-
-        1
+        let old_global = store.index().global_clustering.clone();
+        let new_global = old_global.join(&unified_cluster);
+        
+        if unified_cluster_has_new_info(&unified_cluster, &old_global) {
+            store.index_mut().global_clustering = new_global;
+            store.insert::<GlobalClusteringRel>(unified_cluster.clone());
+            1
+        } else {
+            0
+        }
     }
+}
+
+fn unified_cluster_has_new_info(
+    unified_cluster: &SparseDisjointSet<TxOutId>,
+    global_clustering: &SparseDisjointSet<TxOutId>,
+) -> bool {
+    if unified_cluster.is_empty() {
+        return false;
+    }
+    
+    let roots: Vec<_> = unified_cluster.iter_parent_ids().collect();
+    if roots.is_empty() {
+        return false;
+    }
+    
+    let mut all_elements = Vec::new();
+    for &root in &roots {
+        all_elements.extend(unified_cluster.iter_set(root));
+    }
+    
+    if all_elements.len() < 2 {
+        return false;
+    }
+    
+    let unified_root = unified_cluster.find(all_elements[0]);
+    for &elem in &all_elements {
+        if unified_cluster.find(elem) != unified_root {
+            continue;
+        }
+        if global_clustering.find(elem) != global_clustering.find(all_elements[0]) {
+            return true;
+        }
+    }
+    
+    false
 }
 
 #[cfg(test)]
@@ -95,7 +137,7 @@ mod tests {
 
     use crate::{
         GlobalClustering, TransactionIngestionRule,
-        change_identification::{ChangeIdentificationClusterRule, ChangeIdentificationRule},
+        change_identification::ChangeIdentificationRule,
         coinjoin_detection::CoinJoinRule,
         common_input::MihRule,
     };
@@ -229,7 +271,6 @@ mod tests {
             .add_rule(CoinJoinRule)
             .add_rule(MihRule)
             .add_rule(ChangeIdentificationRule)
-            .add_rule(ChangeIdentificationClusterRule)
             .add_rule(GlobalClustering)
             .build();
 
@@ -241,8 +282,8 @@ mod tests {
         store.initialize::<TxRel>();
         store.initialize::<IsCoinJoinRel>();
         store.initialize::<ClusterRel>();
-        store.initialize::<GlobalClusteringRel>();
         store.initialize::<ChangeIdentificationRel>();
+        store.initialize::<GlobalClusteringRel>();
 
         for tx in fixture.coinbases() {
             let tx_wrapper = AbstractTxWrapper::new(tx.into());

@@ -193,21 +193,6 @@ impl RuleInput for TransactionInput {
             if rel_type_id == TypeId::of::<TxRel>() {
                 let delta: Vec<TxId> = cursors.read_delta::<TxRel>(rule_id, store);
                 txids.extend(delta);
-            } else if rel_type_id == TypeId::of::<IsCoinJoinRel>() {
-                let delta: Vec<(TxId, bool)> = cursors.read_delta::<IsCoinJoinRel>(rule_id, store);
-                txids.extend(delta.iter().map(|(txid, _)| *txid));
-            } else if rel_type_id == TypeId::of::<ClusterRel>() {
-                let delta: Vec<SparseDisjointSet<TxOutId>> =
-                    cursors.read_delta::<ClusterRel>(rule_id, store);
-                for cluster in delta {
-                    for txout_id in cluster.iter_parent_ids() {
-                        txids.insert(txout_id.txid);
-                    }
-                }
-            } else if rel_type_id == TypeId::of::<ChangeIdentificationRel>() {
-                let delta: Vec<(TxOutId, bool)> =
-                    cursors.read_delta::<ChangeIdentificationRel>(rule_id, store);
-                txids.extend(delta.iter().map(|(txout_id, _)| txout_id.txid));
             }
         }
 
@@ -248,10 +233,6 @@ impl RuleInput for ClusterInput {
             if rel_type_id == TypeId::of::<ClusterRel>() {
                 let delta: Vec<SparseDisjointSet<TxOutId>> =
                     cursors.read_delta::<ClusterRel>(rule_id, store);
-                clusters.extend(delta);
-            } else if rel_type_id == TypeId::of::<GlobalClusteringRel>() {
-                let delta: Vec<SparseDisjointSet<TxOutId>> =
-                    cursors.read_delta::<GlobalClusteringRel>(rule_id, store);
                 clusters.extend(delta);
             }
         }
@@ -314,6 +295,10 @@ impl TxOutInput {
     pub fn iter(&self) -> impl Iterator<Item = TxOutId> + '_ {
         self.txouts.iter().copied()
     }
+
+    pub fn new(txouts: Vec<TxOutId>) -> Self {
+        Self { txouts }
+    }
 }
 
 impl RuleInput for TxOutInput {
@@ -327,17 +312,8 @@ impl RuleInput for TxOutInput {
         let mut txouts = HashSet::new();
 
         for &rel_type_id in relations {
-            if rel_type_id == TypeId::of::<ChangeIdentificationRel>() {
-                let delta: Vec<(TxOutId, bool)> =
-                    cursors.read_delta::<ChangeIdentificationRel>(rule_id, store);
-                txouts.extend(delta.iter().map(|(txout_id, _)| *txout_id));
-            } else if rel_type_id == TypeId::of::<ClusterRel>() {
-                let delta: Vec<SparseDisjointSet<TxOutId>> =
-                    cursors.read_delta::<ClusterRel>(rule_id, store);
-                for cluster in delta {
-                    txouts.extend(cluster.iter_parent_ids());
-                }
-            } else if rel_type_id == TypeId::of::<GlobalClusteringRel>() {
+            // New transactions fact in general needs to be collected here.
+            if rel_type_id == TypeId::of::<GlobalClusteringRel>() {
                 let delta: Vec<SparseDisjointSet<TxOutId>> =
                     cursors.read_delta::<GlobalClusteringRel>(rule_id, store);
                 for cluster in delta {
