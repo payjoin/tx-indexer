@@ -2,7 +2,9 @@ use std::any::TypeId;
 
 use tx_indexer_primitives::{
     abstract_types::EnumerateSpentTxOuts,
-    datalog::{ClusterRel, IsCoinJoinRel, Rule, TransactionAnnotationInput, TxRel},
+    datalog::{
+        ClusterRel, IsCoinJoinRel, Rule, TransactionAnnotationInput, TransactionInput, TxRel,
+    },
     disjoint_set::{DisJointSet, SparseDisjointSet},
     loose::TxOutId,
     storage::{FactStore, MemStore},
@@ -28,24 +30,22 @@ impl MultiInputHeuristic {
 pub struct MihRule;
 
 impl Rule for MihRule {
-    type Input = TransactionAnnotationInput;
+    type Input = TransactionInput;
 
     fn name(&self) -> &'static str {
         "mih"
     }
 
     fn inputs(&self) -> &'static [TypeId] {
-        // reads IsCoinJoin for gating. So all txs need to be annotated first
-        // TODO: this creates a strong coupling between these. We could just depend of txs and tell
-        // the engine that annotation should run first.
-        const INS: &[TypeId] = &[TypeId::of::<IsCoinJoinRel>()];
+        // depends on Tx deltas; also reads IsCoinJoin for gating
+        const INS: &[TypeId] = &[TypeId::of::<TxRel>()];
         INS
     }
 
     fn step(&mut self, input: Self::Input, store: &mut MemStore) -> usize {
         let mut out = 0;
-        for (tx_id, is_coinjoin) in input.iter() {
-            if is_coinjoin {
+        for tx_id in input.iter() {
+            if store.contains::<IsCoinJoinRel>(&(tx_id, true)) {
                 continue;
             }
 

@@ -58,7 +58,6 @@ impl Rule for GlobalClustering {
 
     fn step(&mut self, input: Self::Input, store: &mut MemStore) -> usize {
         let clusters: Vec<_> = input.iter().collect();
-        println!("Global delta_clusters: {:?}", clusters);
         if clusters.is_empty() {
             return 0;
         }
@@ -68,7 +67,6 @@ impl Rule for GlobalClustering {
             .cloned()
             .reduce(|acc, cluster| acc.join(&cluster))
             .unwrap();
-        println!("unified_cluster: {:?}", unified_cluster);
 
         if unified_cluster.is_empty() {
             return 0;
@@ -76,7 +74,7 @@ impl Rule for GlobalClustering {
 
         let old_global = store.index().global_clustering.clone();
         let new_global = old_global.join(&unified_cluster);
-        
+
         if unified_cluster_has_new_info(&unified_cluster, &old_global) {
             store.index_mut().global_clustering = new_global;
             store.insert::<GlobalClusteringRel>(unified_cluster.clone());
@@ -94,21 +92,21 @@ fn unified_cluster_has_new_info(
     if unified_cluster.is_empty() {
         return false;
     }
-    
+
     let roots: Vec<_> = unified_cluster.iter_parent_ids().collect();
     if roots.is_empty() {
         return false;
     }
-    
+
     let mut all_elements = Vec::new();
     for &root in &roots {
         all_elements.extend(unified_cluster.iter_set(root));
     }
-    
+
     if all_elements.len() < 2 {
         return false;
     }
-    
+
     let unified_root = unified_cluster.find(all_elements[0]);
     for &elem in &all_elements {
         if unified_cluster.find(elem) != unified_root {
@@ -118,7 +116,7 @@ fn unified_cluster_has_new_info(
             return true;
         }
     }
-    
+
     false
 }
 
@@ -137,8 +135,7 @@ mod tests {
 
     use crate::{
         GlobalClustering, TransactionIngestionRule,
-        change_identification::ChangeIdentificationRule,
-        coinjoin_detection::CoinJoinRule,
+        change_identification::ChangeIdentificationRule, coinjoin_detection::CoinJoinRule,
         common_input::MihRule,
     };
 
@@ -302,7 +299,6 @@ mod tests {
         // 2. Change clustering on the change output of the spending tx
         // Under global clustering we should have one cluster with all these txouts and one empty cluster because of the first run above
         let cluster = store.index().global_clustering.clone();
-        println!("cluster: {:?}", cluster);
         assert_eq!(
             cluster.find(fixture.spending_tx().spent_coins[0]),
             cluster.find(fixture.spending_tx().spent_coins[1])
