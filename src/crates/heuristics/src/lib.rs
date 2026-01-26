@@ -5,17 +5,15 @@ pub mod common_input;
 use std::any::TypeId;
 
 use tx_indexer_primitives::{
-    datalog::{
-        AbstractTxWrapper, ClusterRel, CursorBook, GlobalClusteringRel, RawTxRel, Rule, TxRel,
-    },
-    disjoint_set::SparseDisjointSet,
-    loose::TxOutId,
+    datalog::{ClusterRel, GlobalClusteringRel, RawTransactionInput, RawTxRel, Rule, TxRel},
     storage::{FactStore, MemStore},
 };
 
 pub struct TransactionIngestionRule;
 
 impl Rule for TransactionIngestionRule {
+    type Input = RawTransactionInput;
+
     fn name(&self) -> &'static str {
         "transaction_ingestion"
     }
@@ -25,15 +23,10 @@ impl Rule for TransactionIngestionRule {
         INS
     }
 
-    fn step(&mut self, rid: usize, store: &mut MemStore, cursors: &mut CursorBook) -> usize {
-        let delta_txs: Vec<AbstractTxWrapper> = cursors.read_delta::<RawTxRel>(rid, store);
-        if delta_txs.is_empty() {
-            return 0;
-        }
-
+    fn step(&mut self, input: Self::Input, store: &mut MemStore) -> usize {
         let mut count = 0;
-        for tx_wrapper in delta_txs {
-            let tx_arc = tx_wrapper.into_arc();
+        for tx_wrapper in input.iter() {
+            let tx_arc = tx_wrapper.clone().into_arc();
             let tx_id = tx_arc.txid();
 
             let _ = store.index_mut().add_tx(tx_arc);
@@ -50,6 +43,8 @@ impl Rule for TransactionIngestionRule {
 pub struct GlobalClustering;
 
 impl Rule for GlobalClustering {
+    type Input = tx_indexer_primitives::datalog::ClusterInput;
+
     fn name(&self) -> &'static str {
         "global_clustering"
     }
@@ -59,16 +54,16 @@ impl Rule for GlobalClustering {
         INS
     }
 
-    fn step(&mut self, rid: usize, store: &mut MemStore, cursors: &mut CursorBook) -> usize {
-        let delta_clusters: Vec<SparseDisjointSet<TxOutId>> =
-            cursors.read_delta::<ClusterRel>(rid, store);
-        println!("Global delta_clusters: {:?}", delta_clusters);
-        if delta_clusters.is_empty() {
+    fn step(&mut self, input: Self::Input, store: &mut MemStore) -> usize {
+        let clusters: Vec<_> = input.iter().collect();
+        println!("Global delta_clusters: {:?}", clusters);
+        if clusters.is_empty() {
             return 0;
         }
 
-        let unified_cluster = delta_clusters
+        let unified_cluster = clusters
             .into_iter()
+            .cloned()
             .reduce(|acc, cluster| acc.join(&cluster))
             .unwrap();
         println!("unified_cluster: {:?}", unified_cluster);
@@ -230,12 +225,12 @@ mod tests {
         let fixture = TestFixture::new();
 
         let mut engine = EngineBuilder::new()
-            .add_rule(Box::new(TransactionIngestionRule))
-            .add_rule(Box::new(CoinJoinRule))
-            .add_rule(Box::new(MihRule))
-            .add_rule(Box::new(ChangeIdentificationRule))
-            .add_rule(Box::new(ChangeIdentificationClusterRule))
-            .add_rule(Box::new(GlobalClustering))
+            .add_rule(TransactionIngestionRule)
+            .add_rule(CoinJoinRule)
+            .add_rule(MihRule)
+            .add_rule(ChangeIdentificationRule)
+            .add_rule(ChangeIdentificationClusterRule)
+            .add_rule(GlobalClustering)
             .build();
 
         // TODO: eliminate memstore, store.initialized.

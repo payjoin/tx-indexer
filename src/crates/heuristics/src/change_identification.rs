@@ -2,7 +2,9 @@ use std::{any::TypeId, collections::HashSet};
 
 use tx_indexer_primitives::{
     abstract_types::{EnumerateSpentTxOuts, OutputCount, TxConstituent},
-    datalog::{ChangeIdentificationRel, ClusterRel, CursorBook, GlobalClusteringRel, Rule, TxRel},
+    datalog::{
+        ChangeIdentificationRel, ClusterRel, GlobalClusteringRel, Rule, TransactionInput, TxRel,
+    },
     disjoint_set::{DisJointSet, SparseDisjointSet},
     loose::{ClusterHandle, TxId, TxOutId},
     storage::{FactStore, MemStore},
@@ -30,6 +32,8 @@ impl NaiveChangeIdentificationHueristic {
 pub struct ChangeIdentificationRule;
 
 impl Rule for ChangeIdentificationRule {
+    type Input = TransactionInput;
+
     fn name(&self) -> &'static str {
         "change_identification"
     }
@@ -39,51 +43,10 @@ impl Rule for ChangeIdentificationRule {
         INS
     }
 
-    fn step(&mut self, rid: usize, store: &mut MemStore, cursors: &mut CursorBook) -> usize {
-        let delta_tx_ids: Vec<TxId> = cursors.read_delta::<TxRel>(rid, store);
-        if delta_tx_ids.is_empty() {
-            return 0;
-        }
-
-        let delta_clusters: Vec<SparseDisjointSet<TxOutId>> =
-            cursors.read_delta::<ClusterRel>(rid, store);
-        // Transactions that now are clustered. We may have known change but now can cluster its change with the other clustered outputs.
-        // Collect txids first to avoid borrowing store during iteration
-        let txids = delta_clusters
-            .into_iter()
-            .flat_map(|cluster| cluster.iter_parent_ids().collect::<Vec<_>>())
-            .collect::<HashSet<TxOutId>>();
-
-        let mut out = 0;
-        // TODO: collapse into one loop
-        for txid in txids {
-            let tx = txid.with(store.index()).spent_by().map(|txin| txin.tx());
-            if let Some(tx) = tx {
-                let output_results: Vec<(TxOutId, bool)> = tx
-                    .outputs()
-                    .map(|output| {
-                        let txout_id = output.id();
-                        let is_change = NaiveChangeIdentificationHueristic::is_change(output);
-                        (txout_id, is_change)
-                    })
-                    .map(|(txout_id, is_change)| {
-                        (
-                            txout_id,
-                            matches!(is_change, ChangeIdentificationResult::Change),
-                        )
-                    })
-                    .collect();
-
-                for (txout_id, is_change) in output_results {
-                    store.insert::<ChangeIdentificationRel>((txout_id, is_change));
-                    out += 1;
-                }
-            }
-        }
-
+    fn step(&mut self, input: Self::Input, store: &mut MemStore) -> usize {
         // Collect all results first to avoid borrowing issues
         let mut results = Vec::new();
-        for tx_id in delta_tx_ids {
+        for tx_id in input.iter() {
             let tx_handle = tx_id.with(store.index());
             if tx_handle.spent_coins().next().is_none() {
                 // Coinbases don't have "change"
@@ -97,6 +60,7 @@ impl Rule for ChangeIdentificationRule {
         }
 
         // Now insert all results
+        let mut out = 0;
         for (txout_id, is_change) in results {
             store.insert::<ChangeIdentificationRel>((txout_id, is_change));
             out += 1;
@@ -145,6 +109,8 @@ impl ChangeIdentificationClusterRule {
 }
 
 impl Rule for ChangeIdentificationClusterRule {
+    type Input = tx_indexer_primitives::datalog::TxOutInput;
+
     fn name(&self) -> &'static str {
         "change_identification_cluster"
     }
@@ -157,19 +123,10 @@ impl Rule for ChangeIdentificationClusterRule {
         INS
     }
 
-    fn step(&mut self, rid: usize, store: &mut MemStore, cursors: &mut CursorBook) -> usize {
-        // Gather all change outputs that have been labeled
-        let binding = cursors.read_delta::<ChangeIdentificationRel>(rid, store);
-        let delta_change_outputs = binding.iter().map(|(txout_id, _)| *txout_id);
-
-        // Gather all global clustering facts that have been updated
-        let binding = cursors.read_delta::<GlobalClusteringRel>(rid, store);
-        let delta_global_clustering = binding.iter().flat_map(|set| set.iter_parent_ids());
-        // .flat_map(|txout_id| store.index().global_clustering.iter_set(txout_id));
-
+    fn step(&mut self, input: Self::Input, store: &mut MemStore) -> usize {
         let mut affected_txs = HashSet::new();
 
-        for txout_id in delta_change_outputs.chain(delta_global_clustering) {
+        for txout_id in input.iter() {
             let cluster_handle = ClusterHandle::new(txout_id, store.index());
 
             // Get all txouts in the cluster
@@ -185,9 +142,12 @@ impl Rule for ChangeIdentificationClusterRule {
         for tx_id in affected_txs {
             println!("affected_txs: {:?}", tx_id);
             let set = self.analyze_change(tx_id, store);
-            store.insert::<ClusterRel>(set);
 
-            out += 1;
+            // Only write if the set is not empty (i.e., we actually found change outputs to cluster)
+            if !set.is_empty() {
+                store.insert::<ClusterRel>(set);
+                out += 1;
+            }
         }
 
         out

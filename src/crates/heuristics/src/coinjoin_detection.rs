@@ -2,8 +2,7 @@ use std::{any::TypeId, collections::HashMap};
 
 use tx_indexer_primitives::{
     abstract_types::EnumerateOutputValueInArbitraryOrder,
-    datalog::{CursorBook, IsCoinJoinRel, Rule, TxRel},
-    loose::TxId,
+    datalog::{IsCoinJoinRel, Rule, TransactionInput, TxRel},
     storage::{FactStore, MemStore},
 };
 
@@ -31,6 +30,8 @@ pub fn coinjoin_detection_filter_pass_fn(tx: &impl EnumerateOutputValueInArbitra
 pub struct CoinJoinRule;
 
 impl Rule for CoinJoinRule {
+    type Input = TransactionInput;
+
     fn name(&self) -> &'static str {
         "coinjoin detection"
     }
@@ -40,18 +41,15 @@ impl Rule for CoinJoinRule {
         INS
     }
 
-    fn step(&mut self, rid: usize, store: &mut MemStore, cursors: &mut CursorBook) -> usize {
-        let delta_tx_ids: Vec<TxId> = cursors.read_delta::<TxRel>(rid, store);
-        if delta_tx_ids.is_empty() {
-            return 0;
-        }
-
-        for tx_id in &delta_tx_ids {
+    fn step(&mut self, input: Self::Input, store: &mut MemStore) -> usize {
+        let mut count = 0;
+        for tx_id in input.iter() {
             let tx_handle = tx_id.with(store.index());
             let is_coinjoin = NaiveCoinjoinDetection.is_coinjoin(&tx_handle);
-            store.insert::<IsCoinJoinRel>((*tx_id, is_coinjoin));
+            store.insert::<IsCoinJoinRel>((tx_id, is_coinjoin));
+            count += 1;
         }
-        delta_tx_ids.len()
+        count
     }
 }
 
