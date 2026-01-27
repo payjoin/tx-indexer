@@ -1,8 +1,7 @@
 use std::any::TypeId;
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use crate::abstract_types::AbstractTransaction;
+use crate::abstract_types::AbstractTxWrapper;
 use crate::disjoint_set::SparseDisjointSet;
 use crate::loose::{TxId, TxOutId};
 use crate::storage::{FactStore, MemStore};
@@ -13,59 +12,6 @@ use crate::storage::{FactStore, MemStore};
 pub trait Relation: 'static {
     type Fact: Clone + Eq + 'static;
     const NAME: &'static str;
-}
-
-/// Wrapper for AbstractTransaction that implements Clone + Eq
-#[derive(Clone)]
-pub struct AbstractTxWrapper(Arc<dyn AbstractTransaction + Send + Sync>);
-
-impl AbstractTxWrapper {
-    pub fn new(tx: Box<dyn AbstractTransaction + Send + Sync>) -> Self {
-        Self(Arc::from(tx))
-    }
-
-    pub fn as_ref(&self) -> &dyn AbstractTransaction {
-        self.0.as_ref()
-    }
-
-    /// Get the Arc for adding to index
-    pub fn into_arc(self) -> Arc<dyn AbstractTransaction + Send + Sync> {
-        self.0
-    }
-}
-
-impl PartialEq for AbstractTxWrapper {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.txid() == other.0.txid()
-    }
-}
-
-impl Eq for AbstractTxWrapper {}
-
-impl AbstractTransaction for AbstractTxWrapper {
-    fn txid(&self) -> TxId {
-        self.0.txid()
-    }
-
-    fn inputs(
-        &self,
-    ) -> Box<dyn Iterator<Item = Box<dyn crate::abstract_types::AbstractTxIn>> + '_> {
-        self.0.inputs()
-    }
-
-    fn outputs(
-        &self,
-    ) -> Box<dyn Iterator<Item = Box<dyn crate::abstract_types::AbstractTxOut>> + '_> {
-        self.0.outputs()
-    }
-
-    fn output_len(&self) -> usize {
-        self.0.output_len()
-    }
-
-    fn output_at(&self, index: usize) -> Option<Box<dyn crate::abstract_types::AbstractTxOut>> {
-        self.0.output_at(index)
-    }
 }
 
 pub struct RawTxRel;

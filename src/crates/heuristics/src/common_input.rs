@@ -2,9 +2,7 @@ use std::any::TypeId;
 
 use tx_indexer_primitives::{
     abstract_types::EnumerateSpentTxOuts,
-    datalog::{
-        ClusterRel, IsCoinJoinRel, Rule, TransactionAnnotationInput, TransactionInput, TxRel,
-    },
+    datalog::{ClusterRel, IsCoinJoinRel, Rule, TransactionInput, TxRel},
     disjoint_set::{DisJointSet, SparseDisjointSet},
     loose::TxOutId,
     storage::{FactStore, MemStore},
@@ -65,14 +63,12 @@ impl Rule for MihRule {
 #[cfg(test)]
 mod tests {
     use tx_indexer_primitives::{
-        datalog::{
-            AbstractTxWrapper, ClusterRel, EngineBuilder, GlobalClusteringRel, IsCoinJoinRel,
-            RawTxRel, TxRel,
-        },
+        abstract_types::AbstractTxWrapper,
+        datalog::{ClusterRel, EngineBuilder, GlobalClusteringRel, IsCoinJoinRel, RawTxRel, TxRel},
         disjoint_set::{DisJointSet, SparseDisjointSet},
         loose::{TxId, TxOutId},
         storage::{FactStore, InMemoryIndex, MemStore},
-        test_utils::DummyTxData,
+        test_utils::{DummyTxData, DummyTxOutData},
     };
 
     use super::{MihRule, MultiInputHeuristic};
@@ -81,7 +77,10 @@ mod tests {
     fn test_multi_input_heuristic_merge_prevouts() {
         let tx = DummyTxData {
             id: TxId(100),
-            outputs_amounts: vec![500, 300],
+            outputs: vec![
+                DummyTxOutData::new_with_amount(500),
+                DummyTxOutData::new_with_amount(300),
+            ],
             spent_coins: vec![
                 TxOutId::new(TxId(1), 0),
                 TxOutId::new(TxId(2), 1),
@@ -106,7 +105,7 @@ mod tests {
     fn test_multi_input_rule_step() {
         let tx = DummyTxData {
             id: TxId(200),
-            outputs_amounts: vec![1000],
+            outputs: vec![DummyTxOutData::new_with_amount(1000)],
             spent_coins: vec![TxOutId::new(TxId(10), 0), TxOutId::new(TxId(11), 0)],
         };
 
@@ -146,7 +145,11 @@ mod tests {
         // Create a coinjoin transaction with multiple inputs
         let coinjoin_tx = DummyTxData {
             id: TxId(300),
-            outputs_amounts: vec![500, 500, 500],
+            outputs: vec![
+                DummyTxOutData::new_with_amount(500),
+                DummyTxOutData::new_with_amount(500),
+                DummyTxOutData::new_with_amount(500),
+            ],
             spent_coins: vec![
                 TxOutId::new(TxId(20), 0),
                 TxOutId::new(TxId(21), 0),
@@ -183,7 +186,7 @@ mod tests {
         // Transaction with only one input should create an empty cluster
         let tx = DummyTxData {
             id: TxId(400),
-            outputs_amounts: vec![100],
+            outputs: vec![DummyTxOutData::new_with_amount(100)],
             spent_coins: vec![TxOutId::new(TxId(30), 0)],
         };
 
@@ -199,7 +202,7 @@ mod tests {
         // Coinbase transaction with no inputs
         let coinbase = DummyTxData {
             id: TxId(500),
-            outputs_amounts: vec![50000000],
+            outputs: vec![DummyTxOutData::new_with_amount(50000000)],
             spent_coins: vec![],
         };
 
@@ -216,7 +219,7 @@ mod tests {
     fn test_global_clustering() {
         let tx = DummyTxData {
             id: TxId(200),
-            outputs_amounts: vec![1000],
+            outputs: vec![DummyTxOutData::new_with_amount(1000)],
             spent_coins: vec![TxOutId::new(TxId(0), 0), TxOutId::new(TxId(1), 0)],
         };
 

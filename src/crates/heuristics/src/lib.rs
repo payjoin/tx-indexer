@@ -1,6 +1,7 @@
 pub mod change_identification;
 pub mod coinjoin_detection;
 pub mod common_input;
+pub mod same_address;
 
 use std::any::TypeId;
 
@@ -75,6 +76,8 @@ impl Rule for GlobalClustering {
         let old_global = store.index().global_clustering.clone();
         let new_global = old_global.join(&unified_cluster);
 
+        // TODO: this is a expensive hack to know if global clustering has made progress.
+        // Alternatively we could see if the incoming cluster has new or different clusters before joining and then skip this check
         if unified_cluster_has_new_info(&unified_cluster, &old_global) {
             store.index_mut().global_clustering = new_global;
             store.insert::<GlobalClusteringRel>(unified_cluster.clone());
@@ -123,14 +126,15 @@ fn unified_cluster_has_new_info(
 #[cfg(test)]
 mod tests {
     use tx_indexer_primitives::{
+        abstract_types::AbstractTxWrapper,
         datalog::{
-            AbstractTxWrapper, ChangeIdentificationRel, ClusterRel, EngineBuilder,
-            GlobalClusteringRel, IsCoinJoinRel, RawTxRel, TxRel,
+            ChangeIdentificationRel, ClusterRel, EngineBuilder, GlobalClusteringRel, IsCoinJoinRel,
+            RawTxRel, TxRel,
         },
         disjoint_set::DisJointSet,
         loose::{TxId, TxOutId},
         storage::{FactStore, InMemoryIndex},
-        test_utils::DummyTxData,
+        test_utils::{DummyTxData, DummyTxOutData},
     };
 
     use crate::{
@@ -147,38 +151,49 @@ mod tests {
 
     impl TestFixture {
         fn new() -> Self {
+            let spk_hash = [1u8; 20];
             let src = vec![
                 // Coinbase 1
                 DummyTxData {
                     id: TxId(0),
-                    outputs_amounts: vec![100, 200, 300],
+                    outputs: vec![
+                        DummyTxOutData::new(100, spk_hash),
+                        DummyTxOutData::new(200, spk_hash),
+                        DummyTxOutData::new(300, spk_hash),
+                    ],
                     spent_coins: vec![],
                 },
                 // Coinbase 2
                 DummyTxData {
                     id: TxId(1),
-                    outputs_amounts: vec![100, 100],
+                    outputs: vec![
+                        DummyTxOutData::new(100, spk_hash),
+                        DummyTxOutData::new(100, spk_hash),
+                    ],
                     spent_coins: vec![],
                 },
                 // Non-coinjoin spending the two coinbases
                 DummyTxData {
                     id: TxId(2),
                     // Creating a change output and a payment output
-                    outputs_amounts: vec![100, 200],
+                    outputs: vec![
+                        DummyTxOutData::new(100, spk_hash),
+                        DummyTxOutData::new(200, spk_hash),
+                    ],
                     // Spending the vout = 0 of the two coinbases
                     spent_coins: vec![TxOutId::new(TxId(0), 0), TxOutId::new(TxId(1), 0)],
                 },
                 // Spending the change output
                 DummyTxData {
                     id: TxId(3),
-                    outputs_amounts: vec![100],
+                    outputs: vec![DummyTxOutData::new(100, spk_hash)],
                     // Spending the change output
                     spent_coins: vec![TxOutId::new(TxId(2), 0)],
                 },
                 // Spending the payment output
                 DummyTxData {
                     id: TxId(4),
-                    outputs_amounts: vec![200],
+                    outputs: vec![DummyTxOutData::new(200, spk_hash)],
                     // Spending the payment output
                     spent_coins: vec![TxOutId::new(TxId(2), 1)],
                 },
@@ -186,6 +201,7 @@ mod tests {
             Self { txs: src }
         }
 
+        #[allow(unused)]
         fn all(&self) -> Vec<DummyTxData> {
             self.txs.clone()
         }

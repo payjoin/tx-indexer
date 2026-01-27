@@ -1,5 +1,6 @@
 use bitcoin::Amount;
 
+use crate::ScriptPubkeyHash;
 use crate::abstract_types::AbstractTransaction;
 use crate::abstract_types::EnumerateOutputValueInArbitraryOrder;
 use crate::abstract_types::EnumerateSpentTxOuts;
@@ -12,7 +13,7 @@ use crate::storage::InMemoryIndex;
 
 // TBD whether this is a generic or u32 specifically
 /// Sum of the short id of the txid and vout.
-#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Ord, PartialOrd)]
 pub struct TxOutId {
     pub txid: TxId,
     pub vout: u32,
@@ -69,6 +70,16 @@ impl<'a> TxOutHandle<'a> {
             .get(&self.id)
             .map(|txin_id| txin_id.with(self.index))
     }
+
+    pub fn script_pubkey_hash(&self) -> ScriptPubkeyHash {
+        self.index
+            .txs
+            .get(&self.id.txid)
+            .expect("Tx should always exist")
+            .output_at(self.id.vout as usize)
+            .expect("Output should always exist")
+            .script_pubkey_hash()
+    }
 }
 
 pub struct ClusterHandle<'a> {
@@ -92,7 +103,7 @@ impl<'a> ClusterHandle<'a> {
 }
 
 /// Sum of the short id of the txid and vin
-#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Ord, PartialOrd)]
 pub struct TxInId {
     txid: TxId,
     vin: u32,
@@ -127,7 +138,7 @@ impl<'a> TxInHandle<'a> {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Ord, PartialOrd)]
 pub struct TxId(pub u32);
 
 impl TxId {
@@ -169,7 +180,7 @@ impl<'a> TxHandle<'a> {
     }
 
     fn spent_coins(&self) -> impl Iterator<Item = TxOutId> {
-        self.index.prev_txouts.values().copied()
+        self.inputs().map(|input| input.prev_txout_id())
     }
 
     pub fn outputs(&self) -> impl Iterator<Item = TxOutHandle<'a>> {
@@ -188,6 +199,10 @@ impl<'a> TxHandle<'a> {
 
     pub fn is_coinbase(&self) -> bool {
         self.spent_coins().count() == 0
+    }
+
+    pub fn change_vout(&self) -> Option<u32> {
+        unimplemented!()
     }
 
     pub fn inputs_are_clustered(&self) -> bool {
