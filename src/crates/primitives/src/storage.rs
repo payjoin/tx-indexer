@@ -1,12 +1,16 @@
 use bitcoin::consensus::Encodable;
 use std::sync::Arc;
 
+use crate::ScriptPubkeyHash;
 use crate::abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut};
 use crate::datalog::Relation;
-use crate::disjoint_set::{DisJointSet, SparseDisjointSet};
+use crate::disjoint_set::SparseDisjointSet;
 use crate::loose::{TxHandle, TxId, TxInId, TxOutId};
 use std::hash::{DefaultHasher, Hasher};
-use std::{any::TypeId, collections::HashMap};
+use std::{
+    any::TypeId,
+    collections::{BTreeSet, HashMap},
+};
 
 pub trait PrevOutIndex {
     // TODO: consider handle wrappers converting ids to the actual types.
@@ -28,6 +32,8 @@ pub struct InMemoryIndex {
     // TODO: test that insertion order does not make a difference
     pub txs: HashMap<TxId, Arc<dyn AbstractTransaction + Send + Sync>>,
     pub global_clustering: SparseDisjointSet<TxOutId>,
+    /// Index mapping script pubkey hash (20 bytes) to set of transaction IDs that use it
+    pub spk_to_txout_ids: HashMap<ScriptPubkeyHash, BTreeSet<TxOutId>>,
 }
 
 impl std::fmt::Debug for InMemoryIndex {
@@ -53,6 +59,7 @@ impl InMemoryIndex {
             spending_txins: HashMap::new(),
             txs: HashMap::new(),
             global_clustering: SparseDisjointSet::new(),
+            spk_to_txout_ids: HashMap::new(),
         }
     }
 
@@ -61,13 +68,13 @@ impl InMemoryIndex {
         &'a mut self,
         tx: Arc<dyn AbstractTransaction + Send + Sync>,
     ) -> TxHandle<'a> {
-        let id = tx.txid();
+        let tx_id = tx.txid();
 
         // Process inputs to build the index before storing
         // Collect inputs into a vector to avoid lifetime issues
         let inputs: Vec<_> = tx.inputs().collect();
         for (vin, txin) in inputs.iter().enumerate() {
-            let vin_id = id.txin_id(vin as u32);
+            let vin_id = tx_id.txin_id(vin as u32);
             let prev_vout = txin.prev_vout();
             let prev_txid = txin.prev_txid();
             let prev_outid = prev_txid.txout_id(prev_vout);
@@ -75,12 +82,22 @@ impl InMemoryIndex {
             self.prev_txouts.insert(vin_id, prev_outid);
         }
 
-        let result = self.txs.insert(id, tx);
-        if result.is_some() {
-            panic!("Transaction with id {:?} already exists!", id);
+        // Process outputs to build SPK index
+        let outputs: Vec<_> = tx.outputs().collect();
+        for (vout_idx, output) in outputs.iter().enumerate() {
+            let spk_hash = output.script_pubkey_hash();
+            self.spk_to_txout_ids
+                .entry(spk_hash)
+                .or_default()
+                .insert(TxOutId::new(tx_id, vout_idx as u32));
         }
 
-        TxHandle::new(id, self)
+        let result = self.txs.insert(tx_id, tx);
+        if result.is_some() {
+            panic!("Transaction with id {:?} already exists!", tx_id);
+        }
+
+        TxHandle::new(tx_id, self)
     }
 
     // TODO: once we need stable id, we may need to manage the random key ourselves. Once we need to persist things solve this TODO
@@ -127,12 +144,25 @@ impl AbstractTxIn for BitcoinTxInWrapper {
 
 struct BitcoinTxOutWrapper {
     value: bitcoin::Amount,
+    script_pubkey: bitcoin::ScriptBuf,
 }
 
 impl AbstractTxOut for BitcoinTxOutWrapper {
     fn value(&self) -> bitcoin::Amount {
         self.value
     }
+
+    fn script_pubkey_hash(&self) -> ScriptPubkeyHash {
+        extract_script_pubkey_hash(&self.script_pubkey)
+    }
+}
+
+fn extract_script_pubkey_hash(script: &bitcoin::ScriptBuf) -> ScriptPubkeyHash {
+    let script_hash = script.script_hash();
+
+    let mut hash = [0u8; 20];
+    hash.copy_from_slice(&script_hash.to_raw_hash()[..]);
+    hash
 }
 
 struct BitcoinTransactionWrapper {
@@ -167,7 +197,10 @@ impl AbstractTransaction for BitcoinTransactionWrapper {
             .output
             .iter()
             .map(|txout| {
-                Box::new(BitcoinTxOutWrapper { value: txout.value }) as Box<dyn AbstractTxOut>
+                Box::new(BitcoinTxOutWrapper {
+                    value: txout.value,
+                    script_pubkey: txout.script_pubkey.clone(),
+                }) as Box<dyn AbstractTxOut>
             })
             .collect();
         Box::new(outputs.into_iter())
@@ -179,7 +212,10 @@ impl AbstractTransaction for BitcoinTransactionWrapper {
 
     fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>> {
         self.tx.output.get(index).map(|txout| {
-            Box::new(BitcoinTxOutWrapper { value: txout.value }) as Box<dyn AbstractTxOut>
+            Box::new(BitcoinTxOutWrapper {
+                value: txout.value,
+                script_pubkey: txout.script_pubkey.clone(),
+            }) as Box<dyn AbstractTxOut>
         })
     }
 }
@@ -217,11 +253,6 @@ impl MemStore {
 
     pub fn index_mut(&mut self) -> &mut InMemoryIndex {
         &mut self.index
-    }
-
-    // TODO: should be moved to TxOutHandle instead
-    pub fn is_clustered(&mut self, a: &TxOutId, b: &TxOutId) -> bool {
-        self.index_mut().global_clustering.find(*a) == self.index_mut().global_clustering.find(*b)
     }
 
     // TODO: placeholder hack should remove later

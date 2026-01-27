@@ -56,7 +56,10 @@ impl Rule for CoinJoinRule {
 #[cfg(test)]
 mod tests {
 
-    use tx_indexer_primitives::{loose::TxId, test_utils::DummyTxData};
+    use tx_indexer_primitives::{
+        loose::TxId,
+        test_utils::{DummyTxData, DummyTxOutData},
+    };
 
     use super::*;
 
@@ -65,14 +68,28 @@ mod tests {
         let coinjoin_detection = NaiveCoinjoinDetection::default();
         let not_coinjoin = DummyTxData {
             id: TxId(0),
-            outputs_amounts: vec![100, 200, 300],
+            outputs: vec![
+                DummyTxOutData::new_with_amount(100),
+                DummyTxOutData::new_with_amount(200),
+                DummyTxOutData::new_with_amount(300),
+            ],
             spent_coins: vec![],
         };
         assert_eq!(coinjoin_detection.is_coinjoin(&not_coinjoin), false);
 
         let coinjoin = DummyTxData {
             id: TxId(1),
-            outputs_amounts: vec![100, 100, 100, 200, 200, 200, 300, 300, 300],
+            outputs: vec![
+                DummyTxOutData::new_with_amount(100),
+                DummyTxOutData::new_with_amount(100),
+                DummyTxOutData::new_with_amount(100),
+                DummyTxOutData::new_with_amount(200),
+                DummyTxOutData::new_with_amount(200),
+                DummyTxOutData::new_with_amount(200),
+                DummyTxOutData::new_with_amount(300),
+                DummyTxOutData::new_with_amount(300),
+                DummyTxOutData::new_with_amount(300),
+            ],
             spent_coins: vec![],
         };
         assert_eq!(coinjoin_detection.is_coinjoin(&coinjoin), true);

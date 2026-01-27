@@ -277,7 +277,7 @@ mod tests {
         // Singleton case
         assert_eq!(SequentialDisjointSet::new(1).find(0), 0);
 
-        let mut uf = SequentialDisjointSet::new(5);
+        let uf = SequentialDisjointSet::new(5);
         uf.union(0, 2);
         assert_eq!(uf.find(0), 0);
         assert_eq!(uf.find(1), 1);
@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(uf.find(3), 0);
         assert_eq!(uf.find(4), 0);
 
-        let mut uf = SequentialDisjointSet::new(5);
+        let uf = SequentialDisjointSet::new(5);
         uf.union(0, 2);
         uf.union(4, 2);
         uf.union(3, 1);
@@ -323,7 +323,7 @@ mod tests {
         // Singleton case
         assert_eq!(SparseDisjointSet::new().find(0), 0);
 
-        let mut uf = SparseDisjointSet::new();
+        let uf = SparseDisjointSet::new();
         uf.union(0, 2);
         assert_eq!(uf.find(0), uf.find(2));
         assert_eq!(uf.find(1), uf.find(1));
@@ -352,7 +352,7 @@ mod tests {
         assert_eq!(uf.find(3), uf.find(0));
         assert_eq!(uf.find(4), uf.find(0));
 
-        let mut uf = SparseDisjointSet::new();
+        let uf = SparseDisjointSet::new();
         uf.union(0, 2);
         uf.union(4, 2);
         uf.union(3, 1);
@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn test_union_find_no_unions() {
         // Test that all elements remain separate when no unions are performed
-        let mut uf = SequentialDisjointSet::new(10);
+        let uf = SequentialDisjointSet::new(10);
         for i in 0..10 {
             assert_eq!(uf.find(i), i);
         }
@@ -376,7 +376,7 @@ mod tests {
     #[test]
     fn test_union_find_sequential_chain() {
         // Test sequential unions forming a chain: 0-1-2-3-4
-        let mut uf = SequentialDisjointSet::new(5);
+        let uf = SequentialDisjointSet::new(5);
         uf.union(0, 1);
         uf.union(1, 2);
         uf.union(2, 3);
@@ -391,7 +391,7 @@ mod tests {
     #[test]
     fn test_union_find_idempotent_union() {
         // Test that unioning the same pair multiple times is idempotent
-        let mut uf = SequentialDisjointSet::new(5);
+        let uf = SequentialDisjointSet::new(5);
         uf.union(1, 2);
         uf.union(1, 2);
         uf.union(2, 1);
@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn test_union_find_union_with_self() {
         // Test that unioning an element with itself is idempotent
-        let mut uf = SequentialDisjointSet::new(5);
+        let uf = SequentialDisjointSet::new(5);
         uf.union(2, 2);
         assert_eq!(uf.find(2), 2);
 
@@ -416,7 +416,7 @@ mod tests {
     fn test_union_find_path_compression() {
         // Test that path compression works correctly
         // Create a chain: 0 <- 1 <- 2 <- 3 <- 4
-        let mut uf = SequentialDisjointSet::new(5);
+        let uf = SequentialDisjointSet::new(5);
         uf.union(0, 1);
         uf.union(1, 2);
         uf.union(2, 3);
@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn test_union_find_star_pattern() {
         // Test star pattern: all elements connected to center
-        let mut uf = SequentialDisjointSet::new(10);
+        let uf = SequentialDisjointSet::new(10);
         for i in 1..10 {
             uf.union(0, i);
         }
@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn test_union_find_two_groups() {
         // Test two separate groups that never merge
-        let mut uf = SequentialDisjointSet::new(10);
+        let uf = SequentialDisjointSet::new(10);
         // Group 1: 0, 1, 2, 3, 4
         for i in 1..5 {
             uf.union(0, i);
@@ -471,7 +471,7 @@ mod tests {
     #[test]
     fn test_union_find_transitivity() {
         // Test transitivity: if A is connected to B and B to C, then A is connected to C
-        let mut uf = SequentialDisjointSet::new(5);
+        let uf = SequentialDisjointSet::new(5);
         uf.union(0, 1);
         uf.union(1, 2);
         // Without directly unioning 0 and 2, they should be connected
@@ -486,7 +486,7 @@ mod tests {
     #[test]
     fn test_union_find_large_set() {
         // Test with a larger set
-        let mut uf = SequentialDisjointSet::new(100);
+        let uf = SequentialDisjointSet::new(100);
         // Create groups of 10
         for group in 0..10 {
             let base = group * 10;
@@ -512,7 +512,7 @@ mod tests {
     #[test]
     fn test_union_find_merge_groups() {
         // Test merging two existing groups
-        let mut uf = SequentialDisjointSet::new(10);
+        let uf = SequentialDisjointSet::new(10);
         // Create group 1: 0-4
         for i in 1..5 {
             uf.union(0, i);
@@ -534,13 +534,13 @@ mod tests {
     #[test]
     fn test_union_find_reverse_order() {
         // Test that union order doesn't matter for final result
-        let mut uf1 = SequentialDisjointSet::new(5);
+        let uf1 = SequentialDisjointSet::new(5);
         uf1.union(0, 1);
         uf1.union(2, 3);
         uf1.union(1, 2);
         uf1.union(3, 4);
 
-        let mut uf2 = SequentialDisjointSet::new(5);
+        let uf2 = SequentialDisjointSet::new(5);
         uf2.union(4, 3);
         uf2.union(3, 2);
         uf2.union(2, 1);
@@ -606,11 +606,11 @@ mod tests {
     #[test]
     fn test_join_overlapping_sets() {
         // Test joining two DSUs with overlapping elements
-        let mut dsu1 = SparseDisjointSet::new();
+        let dsu1 = SparseDisjointSet::new();
         dsu1.union(1, 2);
         dsu1.union(2, 3);
 
-        let mut dsu2 = SparseDisjointSet::new();
+        let dsu2 = SparseDisjointSet::new();
         dsu2.union(3, 4);
         dsu2.union(4, 5);
 
@@ -699,10 +699,10 @@ mod tests {
     #[test]
     fn test_join_preserves_original_sets() {
         // Test that join doesn't modify the original DSUs
-        let mut dsu1 = SparseDisjointSet::new();
+        let dsu1 = SparseDisjointSet::new();
         dsu1.union(1, 2);
 
-        let mut dsu2 = SparseDisjointSet::new();
+        let dsu2 = SparseDisjointSet::new();
         dsu2.union(3, 4);
 
         let root1_before = dsu1.find(1);

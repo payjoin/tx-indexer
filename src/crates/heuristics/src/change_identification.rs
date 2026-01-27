@@ -4,7 +4,7 @@ use tx_indexer_primitives::{
     abstract_types::{EnumerateSpentTxOuts, OutputCount, TxConstituent},
     datalog::{ChangeIdentificationRel, ClusterRel, GlobalClusteringRel, Rule, TxRel},
     disjoint_set::{DisJointSet, SparseDisjointSet},
-    loose::{ClusterHandle, TxHandle, TxId, TxOutId},
+    loose::{ClusterHandle, TxHandle, TxOutId},
     storage::{FactStore, MemStore},
 };
 
@@ -158,7 +158,7 @@ mod tests {
         datalog::TxOutInput,
         loose::{TxId, TxOutId},
         storage::{FactStore, InMemoryIndex, MemStore},
-        test_utils::DummyTxData,
+        test_utils::{DummyTxData, DummyTxOutData},
     };
 
     use super::*;
@@ -175,10 +175,10 @@ mod tests {
     #[test]
     fn test_classify_change() {
         let txout = tx_indexer_primitives::test_utils::DummyTxOut {
-            index: 0,
+            vout: 0,
             containing_tx: DummyTxData {
                 id: TxId(1),
-                outputs_amounts: vec![100],
+                outputs: vec![DummyTxOutData::new_with_amount(100)],
                 spent_coins: vec![],
             },
         };
@@ -193,12 +193,15 @@ mod tests {
         let mut index = InMemoryIndex::new();
         let prev_tx = DummyTxData {
             id: TxId(0),
-            outputs_amounts: vec![500],
+            outputs: vec![DummyTxOutData::new_with_amount(500)],
             spent_coins: vec![],
         };
         let tx = DummyTxData {
             id: TxId(1),
-            outputs_amounts: vec![100, 200],
+            outputs: vec![
+                DummyTxOutData::new_with_amount(100),
+                DummyTxOutData::new_with_amount(200),
+            ],
             spent_coins: vec![TxOutId::new(TxId(0), 0)],
         };
         index.add_tx(Arc::new(prev_tx));
@@ -221,7 +224,10 @@ mod tests {
         let mut index = InMemoryIndex::new();
         let tx = DummyTxData {
             id: TxId(1),
-            outputs_amounts: vec![100, 200],
+            outputs: vec![
+                DummyTxOutData::new_with_amount(100),
+                DummyTxOutData::new_with_amount(200),
+            ],
             spent_coins: vec![],
         };
         index.add_tx(Arc::new(tx.clone()));
@@ -240,14 +246,20 @@ mod tests {
         let mut index = InMemoryIndex::new();
         let prev_tx = DummyTxData {
             id: TxId(0),
-            outputs_amounts: vec![500, 500],
+            outputs: vec![
+                DummyTxOutData::new_with_amount(500),
+                DummyTxOutData::new_with_amount(500),
+            ],
             spent_coins: vec![],
         };
         let input1 = TxOutId::new(TxId(0), 0);
         let input2 = TxOutId::new(TxId(0), 1);
         let tx = DummyTxData {
             id: TxId(1),
-            outputs_amounts: vec![100, 200],
+            outputs: vec![
+                DummyTxOutData::new_with_amount(100),
+                DummyTxOutData::new_with_amount(200),
+            ],
             spent_coins: vec![input1, input2],
         };
         index.add_tx(Arc::new(prev_tx));
@@ -276,14 +288,20 @@ mod tests {
         let mut index = InMemoryIndex::new();
         let prev_tx = DummyTxData {
             id: TxId(0),
-            outputs_amounts: vec![500, 500],
+            outputs: vec![
+                DummyTxOutData::new_with_amount(500),
+                DummyTxOutData::new_with_amount(500),
+            ],
             spent_coins: vec![],
         };
         let input1 = TxOutId::new(TxId(0), 0);
         let input2 = TxOutId::new(TxId(0), 1);
         let tx = DummyTxData {
             id: TxId(1),
-            outputs_amounts: vec![100, 200],
+            outputs: vec![
+                DummyTxOutData::new_with_amount(100),
+                DummyTxOutData::new_with_amount(200),
+            ],
             spent_coins: vec![input1, input2],
         };
         index.add_tx(Arc::new(prev_tx));
@@ -308,17 +326,23 @@ mod tests {
         let mut index = InMemoryIndex::new();
         let prev_tx = DummyTxData {
             id: TxId(0),
-            outputs_amounts: vec![500, 500],
+            outputs: vec![
+                DummyTxOutData::new_with_amount(500),
+                DummyTxOutData::new_with_amount(500),
+            ],
             spent_coins: vec![],
         };
         let tx1 = DummyTxData {
             id: TxId(1),
-            outputs_amounts: vec![100, 200],
+            outputs: vec![
+                DummyTxOutData::new_with_amount(100),
+                DummyTxOutData::new_with_amount(200),
+            ],
             spent_coins: vec![TxOutId::new(TxId(0), 0)],
         };
         let tx2 = DummyTxData {
             id: TxId(2),
-            outputs_amounts: vec![300],
+            outputs: vec![DummyTxOutData::new_with_amount(300)],
             spent_coins: vec![TxOutId::new(TxId(0), 1)],
         };
         index.add_tx(Arc::new(prev_tx));
