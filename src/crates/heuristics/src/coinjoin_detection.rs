@@ -2,7 +2,7 @@ use std::{any::TypeId, collections::HashMap};
 
 use tx_indexer_primitives::{
     abstract_types::EnumerateOutputValueInArbitraryOrder,
-    datalog::{IsCoinJoinRel, Rule, TransactionInput, TxRel},
+    datalog::{IsCoinJoinRel, Rule, TransactionInput, TxAnnotation, TxRel},
     storage::{FactStore, MemStore},
 };
 
@@ -11,7 +11,7 @@ use tx_indexer_primitives::{
 pub struct NaiveCoinjoinDetection;
 
 impl NaiveCoinjoinDetection {
-    pub fn is_coinjoin(&self, tx: &impl EnumerateOutputValueInArbitraryOrder) -> bool {
+    pub fn is_coinjoin(&self, tx: &impl EnumerateOutputValueInArbitraryOrder) -> TxAnnotation {
         // If there are >= 3 outputs of the same value, tag as coinjoin.
         // TODO: impl actual detection
         let mut counts = HashMap::new();
@@ -19,13 +19,17 @@ impl NaiveCoinjoinDetection {
             *counts.entry(value).or_insert(0) += 1;
         }
 
-        counts.values().any(|&count| count >= 3)
+        if counts.values().any(|&count| count >= 3) {
+            TxAnnotation::CoinJoin
+        } else {
+            TxAnnotation::NotCoinJoin
+        }
     }
 }
 
-pub fn coinjoin_detection_filter_pass_fn(tx: &impl EnumerateOutputValueInArbitraryOrder) -> bool {
-    !NaiveCoinjoinDetection.is_coinjoin(tx)
-}
+// pub fn coinjoin_detection_filter_pass_fn(tx: &impl EnumerateOutputValueInArbitraryOrder) -> bool {
+//     !NaiveCoinjoinDetection.is_coinjoin(tx)
+// }
 
 pub struct CoinJoinRule;
 
@@ -75,7 +79,10 @@ mod tests {
             ],
             spent_coins: vec![],
         };
-        assert_eq!(coinjoin_detection.is_coinjoin(&not_coinjoin), false);
+        assert_eq!(
+            coinjoin_detection.is_coinjoin(&not_coinjoin),
+            TxAnnotation::NotCoinJoin
+        );
 
         let coinjoin = DummyTxData {
             id: TxId(1),
@@ -92,6 +99,9 @@ mod tests {
             ],
             spent_coins: vec![],
         };
-        assert_eq!(coinjoin_detection.is_coinjoin(&coinjoin), true);
+        assert_eq!(
+            coinjoin_detection.is_coinjoin(&coinjoin),
+            TxAnnotation::CoinJoin
+        );
     }
 }

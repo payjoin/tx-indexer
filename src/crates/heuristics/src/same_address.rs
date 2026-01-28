@@ -2,7 +2,9 @@ use std::any::TypeId;
 
 use tx_indexer_primitives::{
     abstract_types::EnumerateSpentTxOuts,
-    datalog::{ChangeIdentificationRel, ClusterRel, Rule, TransactionInput, TxRel},
+    datalog::{
+        ChangeIdentificationRel, ClusterRel, Rule, TransactionInput, TxOutAnnotation, TxRel,
+    },
     disjoint_set::{DisJointSet, SparseDisjointSet},
     loose::TxOutId,
     storage::{FactStore, MemStore},
@@ -52,7 +54,7 @@ impl Rule for SameAddressRule {
                         if tx_handle.inputs_are_clustered()
                             && other_tx_handle.inputs_are_clustered()
                             // TODO: should be a helper on tx handle or txout handle
-                            && store.contains::<ChangeIdentificationRel>(&(tx_out_id, true))
+                            && store.contains::<ChangeIdentificationRel>(&(tx_out_id, TxOutAnnotation::Change))
                         {
                             // Shared spk output can be clustered with the inputs of the other transactions
                             let other_first_input = other_tx_handle.spent_coins().next().expect(
@@ -77,7 +79,9 @@ impl Rule for SameAddressRule {
 #[cfg(test)]
 mod tests {
     use tx_indexer_primitives::{
-        datalog::{ChangeIdentificationRel, ClusterRel, EngineBuilder, RawTxRel, TxRel},
+        datalog::{
+            ChangeIdentificationRel, ClusterRel, EngineBuilder, RawTxRel, TxOutAnnotation, TxRel,
+        },
         disjoint_set::{DisJointSet, SparseDisjointSet},
         loose::{TxId, TxOutId},
         storage::{FactStore, InMemoryIndex, MemStore},
@@ -116,8 +120,10 @@ mod tests {
             .union(TxOutId::new(TxId(0), 0), TxOutId::new(TxId(0), 1));
 
         // Add id label to the only txout of tx1
-        store.insert::<ChangeIdentificationRel>((TxOutId::new(TxId(2), 0), true));
-        store.insert::<ChangeIdentificationRel>((TxOutId::new(TxId(3), 0), true));
+        store
+            .insert::<ChangeIdentificationRel>((TxOutId::new(TxId(2), 0), TxOutAnnotation::Change));
+        store
+            .insert::<ChangeIdentificationRel>((TxOutId::new(TxId(3), 0), TxOutAnnotation::Change));
         store.insert::<RawTxRel>(tx1.into());
 
         let mut engine = EngineBuilder::new()

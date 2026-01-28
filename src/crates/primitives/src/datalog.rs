@@ -26,10 +26,15 @@ impl Relation for TxRel {
     const NAME: &'static str = "Tx";
 }
 
+#[derive(Clone, Eq, PartialEq, Copy, Debug)]
+pub enum TxAnnotation {
+    NotCoinJoin,
+    CoinJoin,
+}
+
 pub struct IsCoinJoinRel;
 impl Relation for IsCoinJoinRel {
-    // TODO Replace bool with enum
-    type Fact = (TxId, bool);
+    type Fact = (TxId, TxAnnotation);
     const NAME: &'static str = "IsCoinJoin";
 }
 
@@ -39,9 +44,15 @@ impl Relation for ClusterRel {
     const NAME: &'static str = "Cluster";
 }
 
+#[derive(Clone, Eq, PartialEq, Copy, Debug)]
+pub enum TxOutAnnotation {
+    Change,
+    NotChange,
+}
+
 pub struct ChangeIdentificationRel;
 impl Relation for ChangeIdentificationRel {
-    type Fact = (TxOutId, bool);
+    type Fact = (TxOutId, TxOutAnnotation);
     const NAME: &'static str = "ChangeIdentification";
 }
 
@@ -235,11 +246,11 @@ impl RuleInput for ClusterInput {
 
 /// Iterator-based input for rules that process transaction annotations
 pub struct TransactionAnnotationInput {
-    annotations: Vec<(TxId, bool)>,
+    annotations: Vec<(TxId, TxAnnotation)>,
 }
 
 impl TransactionAnnotationInput {
-    pub fn iter(&self) -> impl Iterator<Item = (TxId, bool)> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = (TxId, TxAnnotation)> + '_ {
         self.annotations.iter().copied()
     }
 }
@@ -255,7 +266,8 @@ impl RuleInput for TransactionAnnotationInput {
 
         for &rel_type_id in relations {
             if rel_type_id == TypeId::of::<IsCoinJoinRel>() {
-                let delta: Vec<(TxId, bool)> = cursors.read_delta::<IsCoinJoinRel>(rule_id, store);
+                let delta: Vec<(TxId, TxAnnotation)> =
+                    cursors.read_delta::<IsCoinJoinRel>(rule_id, store);
                 annotations.extend(delta);
             }
         }

@@ -2,27 +2,23 @@ use std::any::TypeId;
 
 use tx_indexer_primitives::{
     abstract_types::{EnumerateSpentTxOuts, OutputCount, TxConstituent},
-    datalog::{ChangeIdentificationRel, ClusterRel, GlobalClusteringRel, Rule, TxRel},
+    datalog::{
+        ChangeIdentificationRel, ClusterRel, GlobalClusteringRel, Rule, TxOutAnnotation, TxRel,
+    },
     disjoint_set::{DisJointSet, SparseDisjointSet},
     loose::{TxHandle, TxOutId},
     storage::{FactStore, MemStore},
 };
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum ChangeIdentificationResult {
-    Change,
-    NotChange,
-}
-
 pub struct NaiveChangeIdentificationHueristic;
 
 impl NaiveChangeIdentificationHueristic {
-    pub fn is_change(txout: impl TxConstituent<Handle: OutputCount>) -> ChangeIdentificationResult {
+    pub fn is_change(txout: impl TxConstituent<Handle: OutputCount>) -> TxOutAnnotation {
         let constituent_tx = txout.containing_tx();
         if constituent_tx.output_count() - 1 == txout.vout() {
-            ChangeIdentificationResult::Change
+            TxOutAnnotation::Change
         } else {
-            ChangeIdentificationResult::NotChange
+            TxOutAnnotation::NotChange
         }
     }
 }
@@ -97,9 +93,8 @@ impl Rule for ChangeIdentificationRule {
             for txout_handle in tx_handle.outputs() {
                 let txout_id = txout_handle.id();
                 let is_change = NaiveChangeIdentificationHueristic::is_change(txout_handle);
-                let is_change_bool = is_change == ChangeIdentificationResult::Change;
-                change_annotations.push((txout_id, is_change_bool));
-                if is_change_bool {
+                change_annotations.push((txout_id, is_change));
+                if is_change == TxOutAnnotation::Change {
                     change_outputs.push(txout_id);
                 }
             }
@@ -160,7 +155,7 @@ mod tests {
         };
         assert_eq!(
             NaiveChangeIdentificationHueristic::is_change(txout),
-            ChangeIdentificationResult::Change
+            TxOutAnnotation::Change
         );
     }
 
@@ -191,8 +186,14 @@ mod tests {
         let mut rule = ChangeIdentificationRule;
         rule.step(input, &mut store);
 
-        assert!(store.contains::<ChangeIdentificationRel>(&(TxOutId::new(TxId(1), 0), false)));
-        assert!(store.contains::<ChangeIdentificationRel>(&(TxOutId::new(TxId(1), 1), true)));
+        assert!(store.contains::<ChangeIdentificationRel>(&(
+            TxOutId::new(TxId(1), 0),
+            TxOutAnnotation::NotChange
+        )));
+        assert!(store.contains::<ChangeIdentificationRel>(&(
+            TxOutId::new(TxId(1), 1),
+            TxOutAnnotation::Change
+        )));
     }
 
     #[test]
@@ -250,7 +251,10 @@ mod tests {
         let mut rule = ChangeIdentificationRule;
         rule.step(input, &mut store);
 
-        assert!(store.contains::<ChangeIdentificationRel>(&(TxOutId::new(TxId(1), 1), true)));
+        assert!(store.contains::<ChangeIdentificationRel>(&(
+            TxOutId::new(TxId(1), 1),
+            TxOutAnnotation::Change
+        )));
 
         let clusters: Vec<_> = store.read_range::<ClusterRel>(0, store.len::<ClusterRel>());
         assert!(clusters.len() == 1);
@@ -291,7 +295,10 @@ mod tests {
         let mut rule = ChangeIdentificationRule;
         rule.step(input, &mut store);
 
-        assert!(store.contains::<ChangeIdentificationRel>(&(TxOutId::new(TxId(1), 1), true)));
+        assert!(store.contains::<ChangeIdentificationRel>(&(
+            TxOutId::new(TxId(1), 1),
+            TxOutAnnotation::Change
+        )));
 
         let clusters: Vec<_> = store.read_range::<ClusterRel>(0, store.len::<ClusterRel>());
         assert_eq!(clusters.len(), 0);
@@ -334,8 +341,17 @@ mod tests {
         let mut rule = ChangeIdentificationRule;
         rule.step(input, &mut store);
 
-        assert!(store.contains::<ChangeIdentificationRel>(&(TxOutId::new(TxId(1), 0), false)));
-        assert!(store.contains::<ChangeIdentificationRel>(&(TxOutId::new(TxId(1), 1), true)));
-        assert!(store.contains::<ChangeIdentificationRel>(&(TxOutId::new(TxId(2), 0), true)));
+        assert!(store.contains::<ChangeIdentificationRel>(&(
+            TxOutId::new(TxId(1), 0),
+            TxOutAnnotation::NotChange
+        )));
+        assert!(store.contains::<ChangeIdentificationRel>(&(
+            TxOutId::new(TxId(1), 1),
+            TxOutAnnotation::Change
+        )));
+        assert!(store.contains::<ChangeIdentificationRel>(&(
+            TxOutId::new(TxId(2), 0),
+            TxOutAnnotation::Change
+        )));
     }
 }

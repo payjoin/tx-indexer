@@ -2,7 +2,7 @@ use std::any::TypeId;
 
 use tx_indexer_primitives::{
     abstract_types::EnumerateSpentTxOuts,
-    datalog::{ClusterRel, IsCoinJoinRel, Rule, TransactionInput, TxRel},
+    datalog::{ClusterRel, IsCoinJoinRel, Rule, TransactionInput, TxAnnotation, TxRel},
     disjoint_set::{DisJointSet, SparseDisjointSet},
     loose::TxOutId,
     storage::{FactStore, MemStore},
@@ -43,7 +43,7 @@ impl Rule for MihRule {
     fn step(&mut self, input: Self::Input, store: &mut MemStore) -> usize {
         let mut out = 0;
         for tx_id in input.iter() {
-            if store.contains::<IsCoinJoinRel>(&(tx_id, true)) {
+            if store.contains::<IsCoinJoinRel>(&(tx_id, TxAnnotation::CoinJoin)) {
                 continue;
             }
 
@@ -64,7 +64,10 @@ impl Rule for MihRule {
 mod tests {
     use tx_indexer_primitives::{
         abstract_types::AbstractTxWrapper,
-        datalog::{ClusterRel, EngineBuilder, GlobalClusteringRel, IsCoinJoinRel, RawTxRel, TxRel},
+        datalog::{
+            ClusterRel, EngineBuilder, GlobalClusteringRel, IsCoinJoinRel, RawTxRel, TxAnnotation,
+            TxRel,
+        },
         disjoint_set::{DisJointSet, SparseDisjointSet},
         loose::{TxId, TxOutId},
         storage::{FactStore, InMemoryIndex, MemStore},
@@ -163,7 +166,7 @@ mod tests {
         store.initialize::<IsCoinJoinRel>();
         store.initialize::<ClusterRel>();
 
-        store.insert::<IsCoinJoinRel>((coinjoin_tx.id, true));
+        store.insert::<IsCoinJoinRel>((coinjoin_tx.id, TxAnnotation::CoinJoin));
         let tx_wrapper = AbstractTxWrapper::new(coinjoin_tx.clone().into());
         store.insert::<RawTxRel>(tx_wrapper);
 
