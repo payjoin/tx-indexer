@@ -22,7 +22,11 @@ pub trait TxInIndex {
     fn spending_txin(&self, tx: &TxOutId) -> Option<TxInId>;
 }
 
-pub trait IndexedGraph: PrevOutIndex + TxInIndex {}
+pub trait ScriptPubkeyIndex {
+    fn script_pubkey_to_txout_ids(&self, script_pubkey: &ScriptPubkeyHash) -> BTreeSet<TxOutId>;
+}
+
+pub trait IndexedGraph: PrevOutIndex + TxInIndex + ScriptPubkeyIndex {}
 
 impl IndexedGraph for InMemoryIndex {}
 
@@ -122,6 +126,15 @@ impl PrevOutIndex for InMemoryIndex {
 impl TxInIndex for InMemoryIndex {
     fn spending_txin(&self, tx_out: &TxOutId) -> Option<TxInId> {
         self.spending_txins.get(tx_out).cloned()
+    }
+}
+
+impl ScriptPubkeyIndex for InMemoryIndex {
+    fn script_pubkey_to_txout_ids(&self, script_pubkey: &ScriptPubkeyHash) -> BTreeSet<TxOutId> {
+        self.spk_to_txout_ids
+            .get(script_pubkey)
+            .cloned()
+            .unwrap_or_default()
     }
 }
 

@@ -7,8 +7,6 @@ Armin TODOs:
 
 - Make tests better / more assertions. nothingmuch should not Edit existing tests but not adding to avoid conflicts     -> @armin
 - Finish id handled and import macros from sim
-- Basic change identification heuristics
-- Need abstract types for txout and txix. 
 - Traits for abstract fingerprints
 - Current index should be moved to its own crate and unified with the test utils after every works with abstract types
 
