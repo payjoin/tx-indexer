@@ -1,10 +1,10 @@
 use std::any::TypeId;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::abstract_types::AbstractTxWrapper;
 use crate::disjoint_set::SparseDisjointSet;
 use crate::loose::{TxId, TxOutId};
-use crate::storage::{FactStore, MemStore};
+use crate::storage::{FactStore, InMemoryIndex, MemStore};
 
 /// A named set of facts of the same shape.
 /// Facts can either be base facts or derived facts.
@@ -74,7 +74,6 @@ pub enum RuleInputEnum {
     Transaction(TransactionInput),
     Cluster(ClusterInput),
     TransactionAnnotation(TransactionAnnotationInput),
-    TxOut(TxOutInput),
     RawTransaction(RawTransactionInput),
 }
 
@@ -100,10 +99,6 @@ impl RuleInputEnum {
                     relations, store, cursors, rule_id,
                 ),
             )
-        } else if input_type == TypeId::of::<TxOutInput>() {
-            RuleInputEnum::TxOut(TxOutInput::collect_from_relations(
-                relations, store, cursors, rule_id,
-            ))
         } else if input_type == TypeId::of::<RawTransactionInput>() {
             RuleInputEnum::RawTransaction(RawTransactionInput::collect_from_relations(
                 relations, store, cursors, rule_id,
@@ -114,14 +109,54 @@ impl RuleInputEnum {
     }
 }
 
+/// Convert clustering sets to affected transaction IDs.
+///
+/// For each clustering set, extracts:
+/// - Containing transaction IDs: transactions that contain the txouts in the clusters
+/// - Spending transaction IDs: transactions that spend those txouts
+///
+/// This is a reusable conversion function that defines how to transform
+/// GlobalClusteringRel facts (SparseDisjointSet<TxOutId>) into affected TxIds.
+fn affected_txids_from_clustering_sets(
+    clustering_sets: Vec<SparseDisjointSet<TxOutId>>,
+    index: &InMemoryIndex,
+) -> HashSet<TxId> {
+    let mut affected_txids = HashSet::new();
+
+    for cluster_set in clustering_sets {
+        // Get all parent IDs (roots) in this clustering set
+        let parent_ids: Vec<_> = cluster_set.iter_parent_ids().collect();
+
+        // For each parent, get all elements in that set
+        for parent_id in parent_ids {
+            for txout_id in cluster_set.iter_set(parent_id) {
+                // Add containing transaction ID
+                affected_txids.insert(txout_id.txid);
+
+                // Add spending transaction IDs
+                if let Some(txin_id) = index.spending_txins.get(&txout_id) {
+                    affected_txids.insert(txin_id.txid());
+                }
+            }
+        }
+    }
+
+    affected_txids
+}
+
 /// Iterator-based input for rules that process transactions
 pub struct TransactionInput {
-    txids: Vec<TxId>,
+    // TODO should this be a vec of refrences to the fact store?
+    txids: HashSet<TxId>,
 }
 
 impl TransactionInput {
     pub fn iter(&self) -> impl Iterator<Item = TxId> + '_ {
         self.txids.iter().copied()
+    }
+
+    pub fn new(txids: HashSet<TxId>) -> Self {
+        Self { txids }
     }
 }
 
@@ -132,13 +167,17 @@ impl RuleInput for TransactionInput {
         cursors: &mut CursorBook,
         rule_id: usize,
     ) -> Self {
-        use std::collections::HashSet;
         let mut txids = HashSet::new();
 
         for &rel_type_id in relations {
             if rel_type_id == TypeId::of::<TxRel>() {
                 let delta: Vec<TxId> = cursors.read_delta::<TxRel>(rule_id, store);
                 txids.extend(delta);
+            } else if rel_type_id == TypeId::of::<GlobalClusteringRel>() {
+                let delta: Vec<SparseDisjointSet<TxOutId>> =
+                    cursors.read_delta::<GlobalClusteringRel>(rule_id, store);
+                let affected = affected_txids_from_clustering_sets(delta, store.index());
+                txids.extend(affected);
             }
         }
 
@@ -244,40 +283,6 @@ impl TxOutInput {
 
     pub fn new(txouts: Vec<TxOutId>) -> Self {
         Self { txouts }
-    }
-}
-
-impl RuleInput for TxOutInput {
-    fn collect_from_relations(
-        relations: &[TypeId],
-        store: &MemStore,
-        cursors: &mut CursorBook,
-        rule_id: usize,
-    ) -> Self {
-        use std::collections::HashSet;
-        let mut txouts = HashSet::new();
-
-        for &rel_type_id in relations {
-            // New transactions fact in general needs to be collected here.
-            if rel_type_id == TypeId::of::<GlobalClusteringRel>() {
-                let delta: Vec<SparseDisjointSet<TxOutId>> =
-                    cursors.read_delta::<GlobalClusteringRel>(rule_id, store);
-                for cluster in delta {
-                    txouts.extend(cluster.iter_parent_ids());
-                }
-            }
-        }
-
-        Self {
-            txouts: txouts.into_iter().collect(),
-        }
-    }
-
-    fn from_enum(input: RuleInputEnum) -> Option<Self> {
-        match input {
-            RuleInputEnum::TxOut(i) => Some(i),
-            _ => None,
-        }
     }
 }
 

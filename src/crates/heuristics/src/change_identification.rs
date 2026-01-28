@@ -1,10 +1,10 @@
-use std::{any::TypeId, collections::HashSet};
+use std::any::TypeId;
 
 use tx_indexer_primitives::{
     abstract_types::{EnumerateSpentTxOuts, OutputCount, TxConstituent},
     datalog::{ChangeIdentificationRel, ClusterRel, GlobalClusteringRel, Rule, TxRel},
     disjoint_set::{DisJointSet, SparseDisjointSet},
-    loose::{ClusterHandle, TxHandle, TxOutId},
+    loose::{TxHandle, TxOutId},
     storage::{FactStore, MemStore},
 };
 
@@ -64,7 +64,7 @@ impl ChangeIdentificationRule {
 }
 
 impl Rule for ChangeIdentificationRule {
-    type Input = tx_indexer_primitives::datalog::TxOutInput;
+    type Input = tx_indexer_primitives::datalog::TransactionInput;
 
     fn name(&self) -> &'static str {
         "change_identification"
@@ -76,39 +76,15 @@ impl Rule for ChangeIdentificationRule {
     }
 
     fn step(&mut self, input: Self::Input, store: &mut MemStore) -> usize {
-        // Transactions that have been affected by clustering or they were just ingested
-        let mut affected_txs = HashSet::new();
-
-        // TODO: All this data wrangling should be done in the engine (or just not in the rule)
-        // This change rule just needs to subscribe to the txs that were affected by clustering or ingestion or spent txouts (where MIH does not hold otherwise it would covered by clustering)
-        for txout_id in input.iter() {
-            // Get the transaction that directly contains this txout
-            let tx_handle = txout_id.txid.with(store.index());
-            affected_txs.insert(tx_handle.id());
-
-            // Also get all transactions containing txouts in the same cluster
-            let cluster_handle = ClusterHandle::new(txout_id, store.index());
-            for cluster_txout in cluster_handle.iter_txouts() {
-                let tx_handle = cluster_txout.tx();
-                affected_txs.insert(tx_handle.id());
-            }
-
-            // For all the txs that spend those txouts, add them to the affected_txs set
-            store
-                .index()
-                .spending_txins
-                .get(&txout_id)
-                .iter()
-                .for_each(|txin_id| {
-                    affected_txs.insert(txin_id.txid());
-                });
-        }
+        // The engine has already computed all affected transaction IDs from:
+        // - TxRel: newly ingested transactions
+        // - GlobalClusteringRel: transactions containing or spending txouts in updated clusters
 
         // Collect all change annotations first to avoid borrowing headaches
         let mut change_annotations = Vec::new();
-        let mut clustering_sets: Vec<SparseDisjointSet<TxOutId>> = Vec::new();
+        let mut clustering_sets = Vec::new();
 
-        for tx_id in affected_txs {
+        for tx_id in input.iter() {
             let tx_handle = tx_id.with(store.index());
 
             // Skip coinbases - they don't have "change"
@@ -153,9 +129,9 @@ impl Rule for ChangeIdentificationRule {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{collections::HashSet, sync::Arc};
     use tx_indexer_primitives::{
-        datalog::TxOutInput,
+        datalog::TransactionInput,
         loose::{TxId, TxOutId},
         storage::{FactStore, InMemoryIndex, MemStore},
         test_utils::{DummyTxData, DummyTxOutData},
@@ -210,7 +186,7 @@ mod tests {
         let mut store = setup_store(index);
         store.insert::<TxRel>(TxId(1));
 
-        let input = TxOutInput::new(vec![TxOutId::new(TxId(1), 0)]);
+        let input = TransactionInput::new(HashSet::from([TxId(1)]));
 
         let mut rule = ChangeIdentificationRule;
         rule.step(input, &mut store);
@@ -235,7 +211,7 @@ mod tests {
         let mut store = setup_store(index);
         store.insert::<TxRel>(TxId(1));
 
-        let input = TxOutInput::new(vec![TxOutId::new(TxId(1), 0)]);
+        let input = TransactionInput::new(HashSet::from([TxId(1)]));
 
         let mut rule = ChangeIdentificationRule;
         rule.step(input, &mut store);
@@ -269,7 +245,7 @@ mod tests {
         let mut store = setup_store(index);
         store.insert::<TxRel>(TxId(1));
 
-        let input = TxOutInput::new(vec![TxOutId::new(TxId(1), 0)]);
+        let input = TransactionInput::new(HashSet::from([TxId(1)]));
 
         let mut rule = ChangeIdentificationRule;
         rule.step(input, &mut store);
@@ -310,7 +286,7 @@ mod tests {
         let mut store = setup_store(index);
         store.insert::<TxRel>(TxId(1));
 
-        let input = TxOutInput::new(vec![TxOutId::new(TxId(1), 0)]);
+        let input = TransactionInput::new(HashSet::from([TxId(1)]));
 
         let mut rule = ChangeIdentificationRule;
         rule.step(input, &mut store);
@@ -353,7 +329,7 @@ mod tests {
         store.insert::<TxRel>(TxId(1));
         store.insert::<TxRel>(TxId(2));
 
-        let input = TxOutInput::new(vec![TxOutId::new(TxId(1), 0), TxOutId::new(TxId(2), 0)]);
+        let input = TransactionInput::new(HashSet::from([TxId(1), TxId(2)]));
 
         let mut rule = ChangeIdentificationRule;
         rule.step(input, &mut store);
