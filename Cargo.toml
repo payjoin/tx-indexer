@@ -3,7 +3,7 @@ name = "bitcoin-transaction-indexer"
 version = "0.1.0"
 edition = "2024"
 resolver = "3"
-members = ["src/crates/heuristics", "src/crates/primitives"]
+members = ["src/crates/heuristics", "src/crates/primitives", "src/crates/pipeline"]
 
 [workspace.dependencies]
 bitcoin = { version = "0.32.8", features = ["rand"] }

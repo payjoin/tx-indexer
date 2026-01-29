@@ -3,6 +3,9 @@ pub mod coinjoin_detection;
 pub mod common_input;
 pub mod same_address;
 
+/// AST-based heuristics for the pipeline DSL.
+pub mod ast;
+
 use std::any::TypeId;
 
 use tx_indexer_primitives::{
