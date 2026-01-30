@@ -175,7 +175,6 @@ mod tests {
 
         // Unify the placeholder with the MIH clustering
         placeholder.unify(mih_clustering);
-        engine.run_to_fixpoint();
 
         let result = engine.eval(&is_unilateral_mask);
 
