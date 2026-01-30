@@ -19,7 +19,7 @@ use crate::value::TxSet;
 pub struct AllTxsNode;
 
 impl Node for AllTxsNode {
-    type Value = TxSet;
+    type OutputValue = TxSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         // Source node - no dependencies

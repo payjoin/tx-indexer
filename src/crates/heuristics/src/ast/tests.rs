@@ -161,6 +161,29 @@ mod tests {
     }
 
     #[test]
+    fn test_updated_unilateral_detection() {
+        // Test that we get updated unilateral detection when the clustering changes
+        let (index, spending_tx, _payment_output, _change_output) = setup_test_fixture();
+
+        let ctx = Arc::new(PipelineContext::new());
+        let mut engine = Engine::new(ctx.clone(), Arc::new(index));
+
+        let all_txs = AllTxs::new(&ctx);
+        let placeholder = Placeholder::<Clustering>::new(&ctx);
+        let mih_clustering = MultiInputHeuristic::new(all_txs.clone());
+        let is_unilateral_mask = IsUnilateral::with_clustering(all_txs, placeholder.as_expr());
+
+        // Unify the placeholder with the MIH clustering
+        placeholder.unify(mih_clustering);
+        engine.run_to_fixpoint();
+
+        let result = engine.eval(&is_unilateral_mask);
+
+        // The spending tx should be unilateral
+        assert_eq!(result.get(&spending_tx.id), Some(&true));
+    }
+
+    #[test]
     fn test_full_pipeline() {
         let (index, spending_tx, payment_output, change_output) = setup_test_fixture();
 

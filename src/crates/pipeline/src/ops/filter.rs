@@ -27,7 +27,7 @@ impl<T: ExprValue, K: Eq + Hash + Clone + Send + Sync + 'static> FilterWithMaskN
 
 // Implementation for filtering TxSet with a TxId mask
 impl Node for FilterWithMaskNode<TxSet, TxId> {
-    type Value = TxSet;
+    type OutputValue = TxSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id(), self.mask.id()]
@@ -52,7 +52,7 @@ impl Node for FilterWithMaskNode<TxSet, TxId> {
 
 // Implementation for filtering TxOutSet with a TxOutId mask
 impl Node for FilterWithMaskNode<TxOutSet, TxOutId> {
-    type Value = TxOutSet;
+    type OutputValue = TxOutSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id(), self.mask.id()]
@@ -111,7 +111,7 @@ impl<T: ExprValue, K: Eq + Hash + Clone + Send + Sync + 'static> FilterExcludeNo
 }
 
 impl Node for FilterExcludeNode<TxSet, TxId> {
-    type Value = TxSet;
+    type OutputValue = TxSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id(), self.mask.id()]
@@ -132,9 +132,8 @@ impl Node for FilterExcludeNode<TxSet, TxId> {
         "FilterExclude<TxSet>"
     }
 }
-
 impl Node for FilterExcludeNode<TxOutSet, TxOutId> {
-    type Value = TxOutSet;
+    type OutputValue = TxOutSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id(), self.mask.id()]

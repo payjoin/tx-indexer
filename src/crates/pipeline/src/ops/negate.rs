@@ -22,7 +22,7 @@ impl<K: Eq + Hash + Clone + Send + Sync + 'static> NegateMaskNode<K> {
 }
 
 impl<K: Eq + Hash + Clone + Send + Sync + 'static> Node for NegateMaskNode<K> {
-    type Value = Mask<K>;
+    type OutputValue = Mask<K>;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id()]

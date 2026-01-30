@@ -60,7 +60,7 @@ impl fmt::Display for NodeId {
 /// ```
 pub trait Node: Send + Sync + 'static {
     /// The value type this node produces when evaluated.
-    type Value: ExprValue;
+    type OutputValue: ExprValue;
 
     /// Return the IDs of nodes this node depends on.
     ///
@@ -73,7 +73,7 @@ pub trait Node: Send + Sync + 'static {
     /// The `EvalContext` provides access to:
     /// - Results of dependency nodes via `ctx.get(&expr)`
     /// - The underlying index via `ctx.index()`
-    fn evaluate(&self, ctx: &EvalContext) -> <Self::Value as ExprValue>::Output;
+    fn evaluate(&self, ctx: &EvalContext) -> <Self::OutputValue as ExprValue>::Output;
 
     /// Optional: provide a human-readable name for debugging.
     fn name(&self) -> &'static str {
@@ -112,7 +112,7 @@ impl<N: Node> AnyNode for N {
     }
 
     fn value_type_id(&self) -> std::any::TypeId {
-        std::any::TypeId::of::<<N::Value as ExprValue>::Output>()
+        std::any::TypeId::of::<<N::OutputValue as ExprValue>::Output>()
     }
 
     fn name(&self) -> &'static str {

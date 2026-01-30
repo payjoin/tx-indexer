@@ -23,7 +23,7 @@ impl ChangeIdentificationNode {
 }
 
 impl Node for ChangeIdentificationNode {
-    type Value = Mask<TxOutId>;
+    type OutputValue = Mask<TxOutId>;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id()]
@@ -89,7 +89,7 @@ impl IsUnilateralNode {
 }
 
 impl Node for IsUnilateralNode {
-    type Value = Mask<TxId>;
+    type OutputValue = Mask<TxId>;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.txs.id(), self.clustering.id()]
@@ -116,6 +116,7 @@ impl Node for IsUnilateralNode {
                 } else if inputs.len() == 1 {
                     true // Single input is trivially unilateral
                 } else {
+                    // TODO: update to use the util on tx handle
                     // Check if all inputs are in the same cluster
                     let first_root = clustering.find(inputs[0]);
                     inputs
@@ -165,7 +166,7 @@ impl ChangeClusteringNode {
 }
 
 impl Node for ChangeClusteringNode {
-    type Value = Clustering;
+    type OutputValue = Clustering;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.txs.id(), self.change_mask.id()]

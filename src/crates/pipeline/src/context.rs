@@ -61,7 +61,7 @@ impl PipelineContext {
     ///
     /// let expr: Expr<TxSet> = ctx.register(MyNode { ... });
     /// ```
-    pub fn register<N: Node>(self: &Arc<Self>, node: N) -> Expr<N::Value> {
+    pub fn register<N: Node>(self: &Arc<Self>, node: N) -> Expr<N::OutputValue> {
         let id = NodeId(self.next_id.fetch_add(1, Ordering::SeqCst));
 
         {

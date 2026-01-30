@@ -159,7 +159,7 @@ impl<T: ExprValue> Node for PlaceholderNode<T>
 where
     T::Output: Default,
 {
-    type Value = T;
+    type OutputValue = T;
 
     fn dependencies(&self) -> Vec<NodeId> {
         // If unified, we depend on the target.

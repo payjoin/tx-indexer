@@ -23,7 +23,7 @@ impl MultiInputHeuristicNode {
 }
 
 impl Node for MultiInputHeuristicNode {
-    type Value = Clustering;
+    type OutputValue = Clustering;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id()]

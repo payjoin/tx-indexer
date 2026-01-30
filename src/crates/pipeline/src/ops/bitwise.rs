@@ -25,7 +25,7 @@ impl<K: Eq + Hash + Clone + Send + Sync + 'static> AndMasksNode<K> {
 }
 
 impl<K: Eq + Hash + Clone + Send + Sync + 'static> Node for AndMasksNode<K> {
-    type Value = Mask<K>;
+    type OutputValue = Mask<K>;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.left.id(), self.right.id()]
@@ -73,7 +73,7 @@ impl<K: Eq + Hash + Clone + Send + Sync + 'static> OrMasksNode<K> {
 }
 
 impl<K: Eq + Hash + Clone + Send + Sync + 'static> Node for OrMasksNode<K> {
-    type Value = Mask<K>;
+    type OutputValue = Mask<K>;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.left.id(), self.right.id()]

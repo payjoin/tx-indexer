@@ -26,7 +26,7 @@ impl OutputsNode {
 }
 
 impl Node for OutputsNode {
-    type Value = TxOutSet;
+    type OutputValue = TxOutSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id()]
@@ -65,7 +65,7 @@ impl TxsNode {
 }
 
 impl Node for TxsNode {
-    type Value = TxSet;
+    type OutputValue = TxSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id()]
@@ -98,7 +98,7 @@ impl JoinClusteringNode {
 }
 
 impl Node for JoinClusteringNode {
-    type Value = Clustering;
+    type OutputValue = Clustering;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.left.id(), self.right.id()]

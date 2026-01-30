@@ -23,7 +23,7 @@ impl IsCoinJoinNode {
 }
 
 impl Node for IsCoinJoinNode {
-    type Value = Mask<TxId>;
+    type OutputValue = Mask<TxId>;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id()]
