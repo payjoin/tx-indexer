@@ -28,6 +28,47 @@ pub trait EnumerateOutputValueInArbitraryOrder: AbstractTransaction {
     fn output_values(&self) -> impl Iterator<Item = Amount>;
 }
 
+// Blanket implementation for Arc<dyn AbstractTransaction> to bridge with the heuristics
+impl<T: AbstractTransaction + ?Sized> EnumerateSpentTxOuts for Arc<T> {
+    fn spent_coins(&self) -> impl Iterator<Item = TxOutId> {
+        self.inputs().map(|input| input.prev_txout_id())
+    }
+}
+
+impl<T: AbstractTransaction + ?Sized> EnumerateOutputValueInArbitraryOrder for Arc<T> {
+    fn output_values(&self) -> impl Iterator<Item = Amount> {
+        self.outputs().map(|output| output.value())
+    }
+}
+
+impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Arc<T> {
+    fn txid(&self) -> TxId {
+        (**self).txid()
+    }
+
+    fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn>> + '_> {
+        (**self).inputs()
+    }
+
+    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut>> + '_> {
+        (**self).outputs()
+    }
+
+    fn output_len(&self) -> usize {
+        (**self).output_len()
+    }
+
+    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>> {
+        (**self).output_at(index)
+    }
+}
+
+impl<T: AbstractTransaction + ?Sized> OutputCount for Arc<T> {
+    fn output_count(&self) -> usize {
+        self.output_len()
+    }
+}
+
 // Abstract transaction types for type erasure
 
 /// Trait for transaction inputs

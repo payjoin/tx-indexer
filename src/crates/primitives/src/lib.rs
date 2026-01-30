@@ -1,12 +1,12 @@
 pub mod abstract_types;
-pub mod datalog;
 pub mod disjoint_set;
 pub mod loose;
-pub mod pass;
 pub mod storage;
 
 pub type ScriptPubkeyHash = [u8; 20];
 
+// Not used anymore. Maybe useful for some future design choice.
+// pub mod pass;
 pub mod test_utils {
 
     use bitcoin::Amount;

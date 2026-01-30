@@ -188,6 +188,8 @@ impl Engine {
     ///
     /// Returns the number of iterations performed.
     pub fn run_to_fixpoint(&mut self) -> usize {
+        // TODO: make this configurable
+        // TODO: if the 
         let max_iterations = 100;
         let mut iteration = 0;
 
@@ -314,14 +316,9 @@ impl Engine {
         self.evaluating.clear();
     }
 
-    /// Get direct access to storage (for advanced use cases).
+    /// Get direct access to storage
     pub fn storage(&self) -> &NodeStorage {
         &self.storage
-    }
-
-    /// Get mutable access to storage (for advanced use cases).
-    pub fn storage_mut(&mut self) -> &mut NodeStorage {
-        &mut self.storage
     }
 }
 

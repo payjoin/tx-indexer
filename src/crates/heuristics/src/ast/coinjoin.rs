@@ -8,6 +8,8 @@ use pipeline::node::{Node, NodeId};
 use pipeline::value::{Mask, TxSet};
 use tx_indexer_primitives::loose::TxId;
 
+use crate::coinjoin_detection::NaiveCoinjoinDetection;
+
 /// Node that detects CoinJoin transactions.
 ///
 /// Uses a naive heuristic: if there are >= 3 outputs of the same value,
@@ -32,18 +34,12 @@ impl Node for IsCoinJoinNode {
     fn evaluate(&self, ctx: &EvalContext) -> HashMap<TxId, bool> {
         let tx_ids = ctx.get(&self.input);
         let index = ctx.index();
+        let detector = NaiveCoinjoinDetection::default();
 
         let mut result = HashMap::new();
         for &tx_id in tx_ids {
             let is_coinjoin = if let Some(tx) = index.txs.get(&tx_id) {
-                // Count output values
-                let mut value_counts: HashMap<u64, usize> = HashMap::new();
-                for output in tx.outputs() {
-                    let value = output.value().to_sat();
-                    *value_counts.entry(value).or_insert(0) += 1;
-                }
-                // If any value appears >= 3 times, it's a CoinJoin
-                value_counts.values().any(|&count| count >= 3)
+                detector.is_coinjoin(tx)
             } else {
                 false
             };

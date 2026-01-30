@@ -477,3 +477,229 @@ impl CursorBook {
         delta
     }
 }
+
+pub struct TransactionIngestionRule;
+
+impl Rule for TransactionIngestionRule {
+    type Input = RawTransactionInput;
+
+    fn name(&self) -> &'static str {
+        "transaction_ingestion"
+    }
+
+    fn inputs(&self) -> &'static [TypeId] {
+        const INS: &[TypeId] = &[TypeId::of::<RawTxRel>()];
+        INS
+    }
+
+    fn step(&mut self, input: Self::Input, store: &mut MemStore) -> usize {
+        let mut count = 0;
+        for tx_wrapper in input.iter() {
+            let tx_arc = tx_wrapper.clone().into_arc();
+            let tx_id = tx_arc.txid();
+
+            let _ = store.index_mut().add_tx(tx_arc);
+
+            // Emit TxId to TxRel
+            store.insert::<TxRel>(tx_id);
+            count += 1;
+        }
+
+        count
+    }
+}
+
+pub struct GlobalClustering;
+
+impl Rule for GlobalClustering {
+    type Input = tx_indexer_primitives::datalog::ClusterInput;
+
+    fn name(&self) -> &'static str {
+        "global_clustering"
+    }
+
+    fn inputs(&self) -> &'static [TypeId] {
+        const INS: &[TypeId] = &[TypeId::of::<ClusterRel>()];
+        INS
+    }
+
+    fn step(&mut self, input: Self::Input, store: &mut MemStore) -> usize {
+        let clusters: Vec<_> = input.iter().collect();
+        if clusters.is_empty() {
+            return 0;
+        }
+
+        let unified_cluster = clusters
+            .into_iter()
+            .cloned()
+            .reduce(|acc, cluster| acc.join(&cluster))
+            .unwrap();
+
+        if unified_cluster.is_empty() {
+            return 0;
+        }
+
+        let old_global = store.index().global_clustering.clone();
+        let new_global = old_global.join(&unified_cluster);
+
+        // TODO: this is a expensive hack to know if global clustering has made progress.
+        // Alternatively we could see if the incoming cluster has new or different clusters before joining and then skip this check
+        if unified_cluster_has_new_info(&unified_cluster, &old_global) {
+            store.index_mut().global_clustering = new_global;
+            store.insert::<GlobalClusteringRel>(unified_cluster.clone());
+            1
+        } else {
+            0
+        }
+    }
+}
+
+fn unified_cluster_has_new_info(
+    unified_cluster: &SparseDisjointSet<TxOutId>,
+    global_clustering: &SparseDisjointSet<TxOutId>,
+) -> bool {
+    if unified_cluster.is_empty() {
+        return false;
+    }
+
+    let roots: Vec<_> = unified_cluster.iter_parent_ids().collect();
+    if roots.is_empty() {
+        return false;
+    }
+
+    let mut all_elements = Vec::new();
+    for &root in &roots {
+        all_elements.extend(unified_cluster.iter_set(root));
+    }
+
+    if all_elements.len() < 2 {
+        return false;
+    }
+
+    let unified_root = unified_cluster.find(all_elements[0]);
+    for &elem in &all_elements {
+        if unified_cluster.find(elem) != unified_root {
+            continue;
+        }
+        if global_clustering.find(elem) != global_clustering.find(all_elements[0]) {
+            return true;
+        }
+    }
+
+    false
+}
+
+
+
+pub trait FactStore {
+    fn insert<R: Relation>(&mut self, fact: R::Fact) -> bool;
+    fn len<R: Relation>(&self) -> usize;
+    fn read_range<R: Relation>(&self, start: usize, end: usize) -> Vec<R::Fact>;
+    fn contains<R: Relation>(&self, fact: &R::Fact) -> bool;
+}
+
+pub struct MemStore {
+    index: InMemoryIndex,
+    /// Map of relational type ids and their state
+    rels: HashMap<TypeId, Box<dyn RelBox>>,
+}
+
+impl MemStore {
+    pub fn new(index: InMemoryIndex) -> Self {
+        Self {
+            index,
+            rels: HashMap::new(),
+        }
+    }
+
+    pub fn index(&self) -> &InMemoryIndex {
+        &self.index
+    }
+
+    pub fn index_mut(&mut self) -> &mut InMemoryIndex {
+        &mut self.index
+    }
+
+    // TODO: placeholder hack should remove later
+    pub fn initialize<R: Relation>(&mut self) {
+        let tid = TypeId::of::<R>();
+        self.rels
+            .entry(tid)
+            .or_insert_with(|| Box::new(RelState::<R::Fact>::new()));
+    }
+
+    fn get_or_init<R: Relation>(&mut self) -> &mut RelState<R::Fact> {
+        let tid = TypeId::of::<R>();
+        self.rels
+            .entry(tid)
+            .or_insert_with(|| Box::new(RelState::<R::Fact>::new()));
+        self.rels
+            .get_mut(&tid)
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<RelState<R::Fact>>()
+            .expect("relation state type mismatch")
+    }
+
+    fn get<R: Relation>(&self) -> &RelState<R::Fact> {
+        let tid = TypeId::of::<R>();
+        self.rels
+            .get(&tid)
+            .expect("relation not initialized")
+            .as_any()
+            .downcast_ref::<RelState<R::Fact>>()
+            .expect("relation state type mismatch")
+    }
+}
+
+trait RelBox {
+    fn as_any(&self) -> &dyn std::any::Any;
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+}
+
+struct RelState<F: Clone + Eq + 'static> {
+    log: Vec<F>,
+}
+
+impl<F: Clone + Eq + 'static> RelBox for RelState<F> {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+}
+
+impl<F: Clone + Eq + 'static> RelState<F> {
+    fn new() -> Self {
+        Self { log: Vec::new() }
+    }
+
+    fn insert(&mut self, fact: F) -> bool {
+        self.log.push(fact);
+        true
+    }
+}
+
+impl FactStore for MemStore {
+    fn insert<R: Relation>(&mut self, fact: R::Fact) -> bool {
+        self.get_or_init::<R>().insert(fact)
+    }
+
+    fn len<R: Relation>(&self) -> usize {
+        self.get::<R>().log.len()
+    }
+
+    fn read_range<R: Relation>(&self, start: usize, end: usize) -> Vec<R::Fact> {
+        let st = self.get::<R>();
+        let end = end.min(st.log.len());
+        if start >= end {
+            return Vec::new();
+        }
+        st.log[start..end].to_vec()
+    }
+
+    fn contains<R: Relation>(&self, fact: &R::Fact) -> bool {
+        self.get::<R>().log.contains(fact)
+    }
+}

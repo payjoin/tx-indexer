@@ -1,17 +1,20 @@
-use std::{any::TypeId, collections::HashMap};
+use std::collections::HashMap;
 
-use tx_indexer_primitives::{
-    abstract_types::EnumerateOutputValueInArbitraryOrder,
-    datalog::{IsCoinJoinRel, Rule, TransactionInput, TxAnnotation, TxRel},
-    storage::{FactStore, MemStore},
-};
+use tx_indexer_primitives::abstract_types::EnumerateOutputValueInArbitraryOrder;
+
+#[derive(Debug, PartialEq, Eq)]
+// TODO: use this instead of bool
+pub enum TxCoinjoinAnnotation {
+    CoinJoin,
+    NotCoinJoin,
+}
 
 /// This is a super naive implementation that should be replace with a more sophisticated one.
 #[derive(Default, Debug)]
 pub struct NaiveCoinjoinDetection;
 
 impl NaiveCoinjoinDetection {
-    pub fn is_coinjoin(&self, tx: &impl EnumerateOutputValueInArbitraryOrder) -> TxAnnotation {
+    pub fn is_coinjoin(&self, tx: &impl EnumerateOutputValueInArbitraryOrder) -> bool {
         // If there are >= 3 outputs of the same value, tag as coinjoin.
         // TODO: impl actual detection
         let mut counts = HashMap::new();
@@ -19,41 +22,7 @@ impl NaiveCoinjoinDetection {
             *counts.entry(value).or_insert(0) += 1;
         }
 
-        if counts.values().any(|&count| count >= 3) {
-            TxAnnotation::CoinJoin
-        } else {
-            TxAnnotation::NotCoinJoin
-        }
-    }
-}
-
-// pub fn coinjoin_detection_filter_pass_fn(tx: &impl EnumerateOutputValueInArbitraryOrder) -> bool {
-//     !NaiveCoinjoinDetection.is_coinjoin(tx)
-// }
-
-pub struct CoinJoinRule;
-
-impl Rule for CoinJoinRule {
-    type Input = TransactionInput;
-
-    fn name(&self) -> &'static str {
-        "coinjoin detection"
-    }
-
-    fn inputs(&self) -> &'static [TypeId] {
-        const INS: &[TypeId] = &[TypeId::of::<TxRel>()];
-        INS
-    }
-
-    fn step(&mut self, input: Self::Input, store: &mut MemStore) -> usize {
-        let mut count = 0;
-        for tx_id in input.iter() {
-            let tx_handle = tx_id.with(store.index());
-            let is_coinjoin = NaiveCoinjoinDetection.is_coinjoin(&tx_handle);
-            store.insert::<IsCoinJoinRel>((tx_id, is_coinjoin));
-            count += 1;
-        }
-        count
+        counts.values().any(|&count| count >= 3)
     }
 }
 
@@ -79,10 +48,7 @@ mod tests {
             ],
             spent_coins: vec![],
         };
-        assert_eq!(
-            coinjoin_detection.is_coinjoin(&not_coinjoin),
-            TxAnnotation::NotCoinJoin
-        );
+        assert!(!coinjoin_detection.is_coinjoin(&not_coinjoin));
 
         let coinjoin = DummyTxData {
             id: TxId(1),
@@ -99,9 +65,6 @@ mod tests {
             ],
             spent_coins: vec![],
         };
-        assert_eq!(
-            coinjoin_detection.is_coinjoin(&coinjoin),
-            TxAnnotation::CoinJoin
-        );
+        assert!(coinjoin_detection.is_coinjoin(&coinjoin));
     }
 }

@@ -4,8 +4,10 @@ use pipeline::engine::EvalContext;
 use pipeline::expr::Expr;
 use pipeline::node::{Node, NodeId};
 use pipeline::value::{Clustering, TxSet};
-use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
+use tx_indexer_primitives::disjoint_set::SparseDisjointSet;
 use tx_indexer_primitives::loose::TxOutId;
+
+use crate::common_input::MultiInputHeuristic as MIHImpl;
 
 /// Node that implements the Multi-Input Heuristic.
 ///
@@ -32,23 +34,14 @@ impl Node for MultiInputHeuristicNode {
     fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<TxOutId> {
         let tx_ids = ctx.get(&self.input);
         let index = ctx.index();
+        let heuristic = MIHImpl;
 
-        let clustering = SparseDisjointSet::new();
+        let mut clustering = SparseDisjointSet::new();
 
         for &tx_id in tx_ids {
             if let Some(tx) = index.txs.get(&tx_id) {
-                // Get all inputs (spent outputs)
-                let inputs: Vec<_> = tx
-                    .inputs()
-                    .map(|input| TxOutId::new(input.prev_txid(), input.prev_vout()))
-                    .collect();
-
-                // Union all inputs together
-                if inputs.len() >= 2 {
-                    for window in inputs.windows(2) {
-                        clustering.union(window[0], window[1]);
-                    }
-                }
+                let tx_clustering = heuristic.merge_prevouts(tx);
+                clustering = clustering.join(&tx_clustering);
             }
         }
 

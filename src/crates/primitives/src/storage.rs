@@ -3,14 +3,10 @@ use std::sync::Arc;
 
 use crate::ScriptPubkeyHash;
 use crate::abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut};
-use crate::datalog::Relation;
 use crate::disjoint_set::SparseDisjointSet;
 use crate::loose::{TxHandle, TxId, TxInId, TxOutId};
+use std::collections::{BTreeSet, HashMap};
 use std::hash::{DefaultHasher, Hasher};
-use std::{
-    any::TypeId,
-    collections::{BTreeSet, HashMap},
-};
 
 pub trait PrevOutIndex {
     // TODO: consider handle wrappers converting ids to the actual types.
@@ -236,118 +232,5 @@ impl AbstractTransaction for BitcoinTransactionWrapper {
 impl From<bitcoin::Transaction> for Box<dyn AbstractTransaction + Send + Sync> {
     fn from(val: bitcoin::Transaction) -> Self {
         Box::new(BitcoinTransactionWrapper { tx: val })
-    }
-}
-
-pub trait FactStore {
-    fn insert<R: Relation>(&mut self, fact: R::Fact) -> bool;
-    fn len<R: Relation>(&self) -> usize;
-    fn read_range<R: Relation>(&self, start: usize, end: usize) -> Vec<R::Fact>;
-    fn contains<R: Relation>(&self, fact: &R::Fact) -> bool;
-}
-
-pub struct MemStore {
-    index: InMemoryIndex,
-    /// Map of relational type ids and their state
-    rels: HashMap<TypeId, Box<dyn RelBox>>,
-}
-
-impl MemStore {
-    pub fn new(index: InMemoryIndex) -> Self {
-        Self {
-            index,
-            rels: HashMap::new(),
-        }
-    }
-
-    pub fn index(&self) -> &InMemoryIndex {
-        &self.index
-    }
-
-    pub fn index_mut(&mut self) -> &mut InMemoryIndex {
-        &mut self.index
-    }
-
-    // TODO: placeholder hack should remove later
-    pub fn initialize<R: Relation>(&mut self) {
-        let tid = TypeId::of::<R>();
-        self.rels
-            .entry(tid)
-            .or_insert_with(|| Box::new(RelState::<R::Fact>::new()));
-    }
-
-    fn get_or_init<R: Relation>(&mut self) -> &mut RelState<R::Fact> {
-        let tid = TypeId::of::<R>();
-        self.rels
-            .entry(tid)
-            .or_insert_with(|| Box::new(RelState::<R::Fact>::new()));
-        self.rels
-            .get_mut(&tid)
-            .unwrap()
-            .as_any_mut()
-            .downcast_mut::<RelState<R::Fact>>()
-            .expect("relation state type mismatch")
-    }
-
-    fn get<R: Relation>(&self) -> &RelState<R::Fact> {
-        let tid = TypeId::of::<R>();
-        self.rels
-            .get(&tid)
-            .expect("relation not initialized")
-            .as_any()
-            .downcast_ref::<RelState<R::Fact>>()
-            .expect("relation state type mismatch")
-    }
-}
-
-trait RelBox {
-    fn as_any(&self) -> &dyn std::any::Any;
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-}
-
-struct RelState<F: Clone + Eq + 'static> {
-    log: Vec<F>,
-}
-
-impl<F: Clone + Eq + 'static> RelBox for RelState<F> {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-}
-
-impl<F: Clone + Eq + 'static> RelState<F> {
-    fn new() -> Self {
-        Self { log: Vec::new() }
-    }
-
-    fn insert(&mut self, fact: F) -> bool {
-        self.log.push(fact);
-        true
-    }
-}
-
-impl FactStore for MemStore {
-    fn insert<R: Relation>(&mut self, fact: R::Fact) -> bool {
-        self.get_or_init::<R>().insert(fact)
-    }
-
-    fn len<R: Relation>(&self) -> usize {
-        self.get::<R>().log.len()
-    }
-
-    fn read_range<R: Relation>(&self, start: usize, end: usize) -> Vec<R::Fact> {
-        let st = self.get::<R>();
-        let end = end.min(st.log.len());
-        if start >= end {
-            return Vec::new();
-        }
-        st.log[start..end].to_vec()
-    }
-
-    fn contains<R: Relation>(&self, fact: &R::Fact) -> bool {
-        self.get::<R>().log.contains(fact)
     }
 }

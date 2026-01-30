@@ -9,6 +9,8 @@ use pipeline::value::{Clustering, Mask, TxSet};
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
 use tx_indexer_primitives::loose::{TxId, TxOutId};
 
+use crate::change_identification::NaiveChangeIdentificationHueristic;
+
 /// Node that identifies change outputs in transactions.
 ///
 /// Uses a naive heuristic: the last output of a transaction is assumed to be change.
@@ -43,10 +45,10 @@ impl Node for ChangeIdentificationNode {
                     continue;
                 }
 
-                // Mark each output: last output is change, others are not
+                // Mark each output using the naive change identification heuristic
                 for vout in 0..output_count {
                     let txout_id = TxOutId::new(tx_id, vout as u32);
-                    let is_change = vout == output_count - 1;
+                    let is_change = NaiveChangeIdentificationHueristic::is_change_vout(tx, vout);
                     result.insert(txout_id, is_change);
                 }
             }
