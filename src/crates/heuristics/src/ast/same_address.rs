@@ -57,11 +57,11 @@ impl SameAddressClustering {
 mod tests {
     use std::sync::Arc;
 
-    use pipeline::{Engine, PipelineContext};
     use pipeline::ops::AllTxs;
-    use tx_indexer_primitives::test_utils::{DummyTxData, DummyTxOutData};
+    use pipeline::{Engine, PipelineContext};
     use tx_indexer_primitives::loose::TxId;
     use tx_indexer_primitives::storage::InMemoryIndex;
+    use tx_indexer_primitives::test_utils::{DummyTxData, DummyTxOutData};
 
     use super::*;
 
@@ -125,9 +125,15 @@ mod tests {
         let result = engine.eval(&clustering);
 
         // Same spk should be clustered together
-        assert_eq!(result.find(TxOutId::new(TxId(2), 1)), result.find(TxOutId::new(TxId(3), 1)));
+        assert_eq!(
+            result.find(TxOutId::new(TxId(2), 1)),
+            result.find(TxOutId::new(TxId(3), 1))
+        );
 
         // Other outputs should not be clustered together
-        assert_ne!(result.find(TxOutId::new(TxId(2), 0)), result.find(TxOutId::new(TxId(3), 0)));
+        assert_ne!(
+            result.find(TxOutId::new(TxId(2), 0)),
+            result.find(TxOutId::new(TxId(3), 0))
+        );
     }
 }

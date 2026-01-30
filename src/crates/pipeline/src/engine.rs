@@ -189,7 +189,7 @@ impl Engine {
     /// Returns the number of iterations performed.
     pub fn run_to_fixpoint(&mut self) -> usize {
         // TODO: make this configurable
-        // TODO: if the 
+        // TODO: if the
         let max_iterations = 100;
         let mut iteration = 0;
 

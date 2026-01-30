@@ -5,7 +5,7 @@ use crate::ScriptPubkeyHash;
 use crate::abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut};
 use crate::disjoint_set::SparseDisjointSet;
 use crate::loose::{TxHandle, TxId, TxInId, TxOutId};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hasher};
 
 pub trait PrevOutIndex {
@@ -19,7 +19,7 @@ pub trait TxInIndex {
 }
 
 pub trait ScriptPubkeyIndex {
-    fn script_pubkey_to_txout_ids(&self, script_pubkey: &ScriptPubkeyHash) -> BTreeSet<TxOutId>;
+    fn script_pubkey_to_txout_ids(&self, script_pubkey: &ScriptPubkeyHash) -> HashSet<TxOutId>;
 }
 
 pub trait IndexedGraph: PrevOutIndex + TxInIndex + ScriptPubkeyIndex {}
@@ -33,7 +33,7 @@ pub struct InMemoryIndex {
     pub txs: HashMap<TxId, Arc<dyn AbstractTransaction + Send + Sync>>,
     pub global_clustering: SparseDisjointSet<TxOutId>,
     /// Index mapping script pubkey hash (20 bytes) to set of transaction IDs that use it
-    pub spk_to_txout_ids: HashMap<ScriptPubkeyHash, BTreeSet<TxOutId>>,
+    pub spk_to_txout_ids: HashMap<ScriptPubkeyHash, HashSet<TxOutId>>,
 }
 
 impl std::fmt::Debug for InMemoryIndex {
@@ -126,7 +126,7 @@ impl TxInIndex for InMemoryIndex {
 }
 
 impl ScriptPubkeyIndex for InMemoryIndex {
-    fn script_pubkey_to_txout_ids(&self, script_pubkey: &ScriptPubkeyHash) -> BTreeSet<TxOutId> {
+    fn script_pubkey_to_txout_ids(&self, script_pubkey: &ScriptPubkeyHash) -> HashSet<TxOutId> {
         self.spk_to_txout_ids
             .get(script_pubkey)
             .cloned()
