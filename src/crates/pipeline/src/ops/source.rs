@@ -15,8 +15,7 @@ use crate::node::{Node, NodeId};
 use crate::value::TxSet;
 
 /// Node that returns all known transaction IDs from the index.
-///
-/// This is typically the entry point for analysis pipelines.
+// TODO: this is mostly scaffolding for tests. In practice, we will likely have different types of sources.
 pub struct AllTxsNode;
 
 impl Node for AllTxsNode {

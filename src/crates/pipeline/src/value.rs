@@ -19,9 +19,7 @@ pub trait ExprValue: 'static {
     type Output: Clone + Send + Sync + 'static;
 }
 
-// =============================================================================
 // Built-in Value Types
-// =============================================================================
 
 /// Marker type for a set of transaction IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,12 +62,12 @@ impl ExprValue for Clustering {
     type Output = SparseDisjointSet<TxOutId>;
 }
 
-// =============================================================================
 // Value Type Aliases for convenience
-// =============================================================================
 
 /// A mask over transaction IDs.
 pub type TxMask = Mask<TxId>;
 
 /// A mask over transaction output IDs.
 pub type TxOutMask = Mask<TxOutId>;
+
+pub type TxOutCluster = SparseDisjointSet<TxOutId>;

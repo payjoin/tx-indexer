@@ -34,8 +34,9 @@ impl Node for FilterWithMaskNode<TxSet, TxId> {
     }
 
     fn evaluate(&self, ctx: &EvalContext) -> HashSet<TxId> {
+        // Use get_or_default for mask since it might be part of a cycle
         let input_set = ctx.get(&self.input);
-        let mask = ctx.get(&self.mask);
+        let mask = ctx.get_or_default(&self.mask);
 
         input_set
             .iter()
@@ -58,8 +59,9 @@ impl Node for FilterWithMaskNode<TxOutSet, TxOutId> {
     }
 
     fn evaluate(&self, ctx: &EvalContext) -> HashSet<TxOutId> {
+        // Use get_or_default for mask since it might be part of a cycle
         let input_set = ctx.get(&self.input);
-        let mask = ctx.get(&self.mask);
+        let mask = ctx.get_or_default(&self.mask);
 
         input_set
             .iter()
@@ -79,7 +81,8 @@ impl Expr<TxSet> {
     ///
     /// Keeps transactions where the mask value is `true`.
     pub fn filter_with_mask(&self, mask: Expr<Mask<TxId>>) -> Expr<TxSet> {
-        self.ctx.register(FilterWithMaskNode::new(self.clone(), mask))
+        self.ctx
+            .register(FilterWithMaskNode::new(self.clone(), mask))
     }
 }
 
@@ -89,7 +92,8 @@ impl Expr<TxOutSet> {
     ///
     /// Keeps outputs where the mask value is `true`.
     pub fn filter_with_mask(&self, mask: Expr<Mask<TxOutId>>) -> Expr<TxOutSet> {
-        self.ctx.register(FilterWithMaskNode::new(self.clone(), mask))
+        self.ctx
+            .register(FilterWithMaskNode::new(self.clone(), mask))
     }
 }
 

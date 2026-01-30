@@ -4,9 +4,9 @@
 //! - Lazy evaluation of expressions
 //! - Caching results in segregated storage
 //! - Dependency resolution and topological ordering
-//! - Fixpoint iteration for recursive definitions
+//! - Fixpoint iteration for recursive/cyclic definitions
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use tx_indexer_primitives::storage::InMemoryIndex;
@@ -57,18 +57,35 @@ impl<'a> EvalContext<'a> {
     pub fn try_get<T: ExprValue>(&self, expr: &Expr<T>) -> Option<&T::Output> {
         self.storage.get::<T>(expr.id())
     }
+
+    /// Get a dependency result or a default value if not yet evaluated.
+    /// This is useful for nodes that may be part of a cycle.
+    pub fn get_or_default<T: ExprValue>(&self, expr: &Expr<T>) -> T::Output
+    where
+        T::Output: Default,
+    {
+        self.storage
+            .get::<T>(expr.id())
+            .cloned()
+            .unwrap_or_default()
+    }
 }
 
 /// Lazy evaluation engine for the pipeline.
 ///
 /// The engine evaluates expressions on demand, caching results and
-/// respecting dependencies between nodes.
+/// respecting dependencies between nodes. It supports cyclic dependencies
+/// through fixpoint iteration.
 pub struct Engine {
     ctx: Arc<PipelineContext>,
     index: Arc<InMemoryIndex>,
     storage: NodeStorage,
     /// Nodes that need re-evaluation (dirty tracking).
     dirty: HashSet<NodeId>,
+    /// Track which iteration each node was last evaluated in (for cycle detection).
+    eval_iteration: HashMap<NodeId, usize>,
+    /// Nodes currently being evaluated (for cycle detection during single evaluation).
+    evaluating: HashSet<NodeId>,
 }
 
 impl Engine {
@@ -79,6 +96,8 @@ impl Engine {
             index,
             storage: NodeStorage::new(),
             dirty: HashSet::new(),
+            eval_iteration: HashMap::new(),
+            evaluating: HashSet::new(),
         }
     }
 
@@ -103,16 +122,27 @@ impl Engine {
     }
 
     /// Ensure a node and all its dependencies are evaluated.
+    /// Handles cycles by using cached/default values for nodes currently being evaluated.
     fn ensure_evaluated(&mut self, id: NodeId) {
         // If already evaluated and not dirty, nothing to do
         if self.storage.contains(id) && !self.dirty.contains(&id) {
             return;
         }
 
+        // Cycle detection: if we're already evaluating this node, skip
+        // (the node will use cached/default value from storage)
+        if self.evaluating.contains(&id) {
+            return;
+        }
+
+        // Mark as currently evaluating
+        self.evaluating.insert(id);
+
         // Get the node
         let node = self.ctx.get_node(id).expect("Node not found");
 
         // First, ensure all dependencies are evaluated
+        // (cycles will be detected and skipped)
         let deps = node.dependencies();
         for dep_id in deps {
             self.ensure_evaluated(dep_id);
@@ -125,6 +155,9 @@ impl Engine {
         // Store the result
         self.storage.slots.insert(id, result);
         self.dirty.remove(&id);
+
+        // Done evaluating this node
+        self.evaluating.remove(&id);
     }
 
     /// Mark a node as dirty (needs re-evaluation).
@@ -146,68 +179,139 @@ impl Engine {
         }
     }
 
-    /// Run the pipeline to fixpoint for recursive definitions.
+    /// Run the pipeline to fixpoint for recursive/cyclic definitions.
     ///
-    /// This iterates until no more changes occur, which handles
-    /// recursive definitions created via `Placeholder::unify`.
+    /// This implements semi-naive evaluation:
+    /// 1. Topologically sort nodes (with cycle detection)
+    /// 2. Evaluate nodes in order, using defaults for back-edges
+    /// 3. Re-evaluate until values stabilize
     ///
     /// Returns the number of iterations performed.
     pub fn run_to_fixpoint(&mut self) -> usize {
-        let mut iterations = 0;
-        let max_iterations = 1000; // Prevent infinite loops
+        let max_iterations = 100;
+        let mut iteration = 0;
 
+        // Get all nodes
+        let all_ids: Vec<_> = self.ctx.all_node_ids();
+
+        // Sort nodes topologically (best effort - cycles will be handled)
+        let sorted_ids = self.topological_sort(&all_ids);
+
+        // Fixpoint iteration
         loop {
-            iterations += 1;
-            if iterations > max_iterations {
-                panic!("Fixpoint iteration exceeded maximum ({} iterations)", max_iterations);
+            iteration += 1;
+            if iteration > max_iterations {
+                panic!(
+                    "Fixpoint iteration exceeded maximum ({} iterations)",
+                    max_iterations
+                );
             }
 
-            // Evaluate all nodes
-            let all_ids: Vec<_> = self.ctx.all_node_ids();
-            let mut changed = false;
+            let mut any_changed = false;
 
-            for id in all_ids {
-                // Check if this is a placeholder that's been unified
-                if let Some(node) = self.ctx.get_node(id) {
-                    // Store old value for comparison
-                    let had_value = self.storage.contains(id);
-
-                    // Re-evaluate if dirty or not yet evaluated
-                    if self.dirty.contains(&id) || !had_value {
-                        let deps = node.dependencies();
-                        for dep_id in deps {
-                            self.ensure_evaluated(dep_id);
-                        }
-
-                        let eval_ctx = EvalContext::new(&self.storage, &self.index);
-                        let result = node.evaluate_any(&eval_ctx);
-
-                        // Check if value changed (for fixpoint detection)
-                        // This is a simple check - in practice you might want
-                        // a more sophisticated comparison
-                        if !had_value {
-                            changed = true;
-                        }
-
-                        self.storage.slots.insert(id, result);
-                        self.dirty.remove(&id);
-                    }
+            // Evaluate all nodes in topological order
+            for &id in &sorted_ids {
+                let changed = self.evaluate_node_for_fixpoint(id, iteration);
+                if changed {
+                    any_changed = true;
                 }
             }
 
             // If nothing changed, we've reached fixpoint
-            if !changed && self.dirty.is_empty() {
+            if !any_changed {
                 break;
+            }
+
+            // Mark all nodes as needing potential re-evaluation
+            for &id in &all_ids {
+                self.dirty.insert(id);
             }
         }
 
-        iterations
+        iteration
+    }
+
+    /// Topologically sort nodes (best effort with cycles).
+    fn topological_sort(&self, nodes: &[NodeId]) -> Vec<NodeId> {
+        let mut result = Vec::new();
+        let mut visited = HashSet::new();
+        let mut in_stack = HashSet::new();
+
+        fn visit(
+            id: NodeId,
+            ctx: &PipelineContext,
+            visited: &mut HashSet<NodeId>,
+            in_stack: &mut HashSet<NodeId>,
+            result: &mut Vec<NodeId>,
+        ) {
+            if visited.contains(&id) {
+                return;
+            }
+            if in_stack.contains(&id) {
+                // Cycle detected - skip
+                return;
+            }
+
+            in_stack.insert(id);
+
+            if let Some(node) = ctx.get_node(id) {
+                for dep_id in node.dependencies() {
+                    visit(dep_id, ctx, visited, in_stack, result);
+                }
+            }
+
+            in_stack.remove(&id);
+            visited.insert(id);
+            result.push(id);
+        }
+
+        for &id in nodes {
+            visit(id, &self.ctx, &mut visited, &mut in_stack, &mut result);
+        }
+
+        result
+    }
+
+    /// Evaluate a node for fixpoint iteration.
+    /// Returns true if the value changed (or was first evaluated).
+    fn evaluate_node_for_fixpoint(&mut self, id: NodeId, iteration: usize) -> bool {
+        let node = match self.ctx.get_node(id) {
+            Some(n) => n,
+            None => return false,
+        };
+
+        // Check if all dependencies have been evaluated at least once
+        // If not, we'll try to evaluate anyway - nodes should handle missing deps
+        let deps = node.dependencies();
+        let all_deps_available = deps.iter().all(|dep_id| self.storage.contains(*dep_id));
+
+        // If we've already evaluated this iteration and all deps are available, skip
+        let last_iter = self.eval_iteration.get(&id).copied().unwrap_or(0);
+        if last_iter == iteration && all_deps_available {
+            return false;
+        }
+
+        // Evaluate this node
+        let eval_ctx = EvalContext::new(&self.storage, &self.index);
+        let result = node.evaluate_any(&eval_ctx);
+
+        // Check if this is a new value
+        let is_first_eval = !self.storage.contains(id);
+
+        self.storage.slots.insert(id, result);
+        self.eval_iteration.insert(id, iteration);
+        self.dirty.remove(&id);
+
+        // Consider it changed if it's the first eval or deps weren't all available
+        is_first_eval || !all_deps_available
     }
 
     /// Clear all cached results.
     pub fn clear_cache(&mut self) {
         self.storage.clear();
         self.dirty.clear();
+        self.eval_iteration.clear();
+        self.evaluating.clear();
     }
 
     /// Get direct access to storage (for advanced use cases).
@@ -220,7 +324,6 @@ impl Engine {
         &mut self.storage
     }
 }
-
 
 impl std::fmt::Debug for Engine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

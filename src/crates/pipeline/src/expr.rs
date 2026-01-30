@@ -26,7 +26,7 @@ use crate::value::ExprValue;
 /// ```ignore
 /// let txs: Expr<TxSet> = AllTxs::new(&ctx);
 /// let mask: Expr<Mask<TxId>> = IsCoinJoin::new(txs.clone());
-/// let filtered: Expr<TxSet> = txs.filter_with_mask(mask.negate());
+/// let not_conjoins: Expr<TxSet> = txs.filter_with_mask(mask.negate());
 /// ```
 pub struct Expr<T: ExprValue> {
     pub(crate) id: NodeId,

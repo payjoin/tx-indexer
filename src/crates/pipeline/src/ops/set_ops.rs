@@ -105,9 +105,10 @@ impl Node for JoinClusteringNode {
     }
 
     fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<TxOutId> {
-        let left = ctx.get(&self.left);
-        let right = ctx.get(&self.right);
-        left.join(right)
+        // Use get_or_default since either side might be part of a cycle
+        let left = ctx.get_or_default(&self.left);
+        let right = ctx.get_or_default(&self.right);
+        left.join(&right)
     }
 
     fn name(&self) -> &'static str {

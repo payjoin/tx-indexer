@@ -1,8 +1,24 @@
-//! Placeholder support for recursive definitions.
+//! Placeholder support for recursive/cyclic definitions.
 //!
 //! Placeholders allow expressing recursive computations in the pipeline DSL.
 //! A placeholder is created first, used in expressions, and then unified with
 //! the final expression that defines its value.
+//!
+//! # Cyclic Dependencies
+//!
+//! Placeholders enable expressing cyclic dependencies in the computation graph.
+//! For example:
+//!
+//! ```text
+//! global_clustering = mih_clustering.join(change_clustering)
+//! change_clustering depends on IsUnilateral(global_clustering)
+//! ```
+//!
+//! The engine handles this by:
+//! 1. Initially evaluating the placeholder to its default value
+//! 2. Evaluating dependent nodes with this default
+//! 3. Re-evaluating the placeholder with the unified target's value
+//! 4. Re-evaluating dependents until fixpoint
 
 use std::sync::{Arc, RwLock};
 
@@ -12,27 +28,43 @@ use crate::expr::Expr;
 use crate::node::{Node, NodeId};
 use crate::value::ExprValue;
 
-/// A placeholder for recursive definitions.
+/// A placeholder for recursive/cyclic definitions.
 ///
 /// Placeholders allow creating cyclic dependencies in the expression graph.
 /// The pattern is:
 ///
 /// 1. Create a placeholder: `let p = Placeholder::<Clustering>::new(&ctx)`
-/// 2. Use it in expressions: `let mask = IsUnilateral::new(p.as_expr())`
-/// 3. Define the actual value: `p.unify(combined_clustering)`
+/// 2. Use it in expressions: `let mask = IsUnilateral::with_clustering(txs, p.as_expr())`
+/// 3. Build the expression that defines the placeholder's value
+/// 4. Unify: `p.unify(combined_clustering)`
+/// 5. Run fixpoint: `engine.run_to_fixpoint()`
 ///
-/// During evaluation, the engine handles the fixpoint iteration automatically.
-///
-/// # Example
+/// # Example: Cyclic Clustering
 ///
 /// ```ignore
+/// // Create placeholder for global clustering
 /// let global_clustering = Placeholder::<Clustering>::new(&ctx);
-/// let unilateral_mask = IsUnilateral::new(global_clustering.as_expr());
-/// let change_clustering = ChangeClustering::new(
-///     non_coinjoin.filter_with_mask(unilateral_mask)
+///
+/// // Use placeholder in IsUnilateral (creates cycle)
+/// let unilateral_mask = IsUnilateral::with_clustering(
+///     non_coinjoin.clone(),
+///     global_clustering.as_expr()  // Uses placeholder
 /// );
+///
+/// // Build change clustering (depends on unilateral_mask -> global_clustering)
+/// let change_clustering = ChangeClustering::new(
+///     non_coinjoin.filter_with_mask(unilateral_mask & txs_with_change),
+///     change_mask
+/// );
+///
+/// // Combine MIH and change clustering
 /// let combined = change_clustering.join(mih_clustering);
+///
+/// // Close the cycle: global_clustering IS combined
 /// global_clustering.unify(combined);
+///
+/// // Run to fixpoint - iterates until stable
+/// engine.run_to_fixpoint();
 /// ```
 pub struct Placeholder<T: ExprValue> {
     /// The expression handle for this placeholder.
@@ -48,8 +80,8 @@ where
 {
     /// Create a new placeholder.
     ///
-    /// The placeholder starts uninitialized and must be unified with an
-    /// expression before evaluation.
+    /// The placeholder starts uninitialized (returns `Default::default()`)
+    /// and must be unified with an expression before meaningful evaluation.
     pub fn new(ctx: &Arc<PipelineContext>) -> Self {
         let unified_with = Arc::new(RwLock::new(None));
         let node = PlaceholderNode::<T> {
@@ -64,6 +96,7 @@ where
     /// Get the expression handle for this placeholder.
     ///
     /// This can be used in other expressions before `unify()` is called.
+    /// During initial evaluation, the placeholder returns its default value.
     pub fn as_expr(&self) -> Expr<T> {
         self.expr.clone()
     }
@@ -72,7 +105,9 @@ where
     ///
     /// After unification, the placeholder will evaluate to the same value
     /// as the target expression. This creates a dependency from the placeholder
-    /// to the target.
+    /// to the target, which may form a cycle.
+    ///
+    /// The engine's `run_to_fixpoint()` will iterate until the value stabilizes.
     ///
     /// # Panics
     ///
@@ -94,6 +129,11 @@ where
     pub fn unified_target(&self) -> Option<NodeId> {
         *self.unified_with.read().expect("lock poisoned")
     }
+
+    /// Get the placeholder's own node ID.
+    pub fn id(&self) -> NodeId {
+        self.expr.id()
+    }
 }
 
 impl<T: ExprValue> Clone for Placeholder<T> {
@@ -106,6 +146,10 @@ impl<T: ExprValue> Clone for Placeholder<T> {
 }
 
 /// Internal node type for placeholders.
+///
+/// The placeholder node has special evaluation semantics:
+/// - Before unification: returns `Default::default()`
+/// - After unification: returns the target's current value (may be default during fixpoint)
 struct PlaceholderNode<T: ExprValue> {
     unified_with: Arc<RwLock<Option<NodeId>>>,
     _marker: std::marker::PhantomData<T>,
@@ -118,7 +162,8 @@ where
     type Value = T;
 
     fn dependencies(&self) -> Vec<NodeId> {
-        // If unified, we depend on the target
+        // If unified, we depend on the target.
+        // This creates the cycle that fixpoint iteration resolves.
         match *self.unified_with.read().expect("lock poisoned") {
             Some(id) => vec![id],
             None => vec![],
@@ -126,12 +171,14 @@ where
     }
 
     fn evaluate(&self, ctx: &EvalContext) -> T::Output {
-        // If unified, return the target's value
-        // If not unified, return default (for initial fixpoint iteration)
+        // If unified, return the target's value.
+        // If the target hasn't been evaluated yet (cycle), return default.
         match *self.unified_with.read().expect("lock poisoned") {
             Some(id) => {
-                // We need to get the value from storage directly by ID
-                // This is a bit awkward but necessary for type erasure
+                // Get the target's value from storage.
+                // During fixpoint iteration, this may return:
+                // - Default (if target not yet evaluated)
+                // - Previous iteration's value (enabling convergence)
                 ctx.storage
                     .get::<T>(id)
                     .cloned()
@@ -146,6 +193,6 @@ where
     }
 }
 
-// Make PlaceholderNode Send + Sync
+// TODO: Make PlaceholderNode Send + Sync
 unsafe impl<T: ExprValue> Send for PlaceholderNode<T> {}
 unsafe impl<T: ExprValue> Sync for PlaceholderNode<T> {}

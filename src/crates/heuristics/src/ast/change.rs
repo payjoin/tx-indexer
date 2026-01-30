@@ -9,10 +9,6 @@ use pipeline::value::{Clustering, Mask, TxSet};
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
 use tx_indexer_primitives::loose::{TxId, TxOutId};
 
-// =============================================================================
-// Change Identification
-// =============================================================================
-
 /// Node that identifies change outputs in transactions.
 ///
 /// Uses a naive heuristic: the last output of a transaction is assumed to be change.
@@ -34,12 +30,13 @@ impl Node for ChangeIdentificationNode {
     }
 
     fn evaluate(&self, ctx: &EvalContext) -> HashMap<TxOutId, bool> {
-        let tx_ids = ctx.get(&self.input);
+        // Use get_or_default since input might be part of a cycle
+        let tx_ids = ctx.get_or_default(&self.input);
         let index = ctx.index();
 
         let mut result = HashMap::new();
 
-        for &tx_id in tx_ids {
+        for &tx_id in &tx_ids {
             if let Some(tx) = index.txs.get(&tx_id) {
                 let output_count = tx.output_len();
                 if output_count == 0 {
@@ -76,10 +73,6 @@ impl ChangeIdentification {
     }
 }
 
-// =============================================================================
-// Is Unilateral (all inputs are clustered)
-// =============================================================================
-
 /// Node that checks if a transaction's inputs are all in the same cluster.
 ///
 /// This is used to gate change clustering - we only cluster change with inputs
@@ -104,7 +97,9 @@ impl Node for IsUnilateralNode {
 
     fn evaluate(&self, ctx: &EvalContext) -> HashMap<TxId, bool> {
         let tx_ids = ctx.get(&self.txs);
-        let clustering = ctx.get(&self.clustering);
+        // Use get_or_default for clustering since it might be part of a cycle
+        // During initial fixpoint iteration, this will return an empty clustering
+        let clustering = ctx.get_or_default(&self.clustering);
         let index = ctx.index();
 
         let mut result = HashMap::new();
@@ -123,7 +118,9 @@ impl Node for IsUnilateralNode {
                 } else {
                     // Check if all inputs are in the same cluster
                     let first_root = clustering.find(inputs[0]);
-                    inputs.iter().all(|&input| clustering.find(input) == first_root)
+                    inputs
+                        .iter()
+                        .all(|&input| clustering.find(input) == first_root)
                 };
 
                 result.insert(tx_id, is_unilateral);
@@ -152,10 +149,6 @@ impl IsUnilateral {
     }
 }
 
-// =============================================================================
-// Change Clustering
-// =============================================================================
-
 /// Node that clusters change outputs with their transaction's inputs.
 ///
 /// For each transaction, if inputs are unilateral (all in same cluster) and has change outputs,
@@ -179,13 +172,14 @@ impl Node for ChangeClusteringNode {
     }
 
     fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<TxOutId> {
-        let tx_ids = ctx.get(&self.txs);
-        let change_mask = ctx.get(&self.change_mask);
+        // Use get_or_default since txs and change_mask might be part of a cycle
+        let tx_ids = ctx.get_or_default(&self.txs);
+        let change_mask = ctx.get_or_default(&self.change_mask);
         let index = ctx.index();
 
         let clustering = SparseDisjointSet::new();
 
-        for &tx_id in tx_ids {
+        for &tx_id in &tx_ids {
             if let Some(tx) = index.txs.get(&tx_id) {
                 // Get first input (if any)
                 let first_input: Option<TxOutId> = tx
