@@ -19,49 +19,61 @@ mod tests {
         IsUnilateral, MultiInputHeuristic,
     };
 
+    struct TestFixture;
+
+    impl TestFixture {
+        fn spending_tx() -> DummyTxData {
+            DummyTxData {
+                id: TxId(2),
+                outputs: vec![
+                    // Payment output
+                    DummyTxOutData::new(100, [1u8; 20]),
+                    // Change output
+                    DummyTxOutData::new(150, [1u8; 20]),
+                ],
+                spent_coins: vec![TxOutId::new(TxId(0), 0), TxOutId::new(TxId(1), 0)],
+                n_locktime: 0,
+            }
+        }
+
+        fn coinbase1() -> DummyTxData {
+            DummyTxData {
+                id: TxId(0),
+                outputs: vec![
+                    DummyTxOutData::new(100, [1u8; 20]),
+                    DummyTxOutData::new(150, [1u8; 20]),
+                ],
+                spent_coins: vec![],
+                n_locktime: 0,
+            }
+        }
+
+        fn coinbase2() -> DummyTxData {
+            DummyTxData {
+                id: TxId(1),
+                outputs: vec![DummyTxOutData::new(150, [1u8; 20])],
+                spent_coins: vec![],
+                n_locktime: 0,
+            }
+        }
+
+        fn payment_output() -> TxOutId {
+            TxOutId::new(TxId(2), 0)
+        }
+
+        fn change_output() -> TxOutId {
+            TxOutId::new(TxId(2), 1)
+        }
+    }
+
     /// Test fixture: two coinbase txs, a spending tx with two inputs and two outputs
-    fn setup_test_fixture() -> (InMemoryIndex, DummyTxData, TxOutId, TxOutId) {
-        let spk_hash = [1u8; 20];
-
-        // Coinbase 1
-        let coinbase1 = DummyTxData {
-            id: TxId(0),
-            outputs: vec![
-                DummyTxOutData::new(100, spk_hash),
-                DummyTxOutData::new(200, spk_hash),
-            ],
-            spent_coins: vec![],
-            n_locktime: 0,
-        };
-
-        // Coinbase 2
-        let coinbase2 = DummyTxData {
-            id: TxId(1),
-            outputs: vec![DummyTxOutData::new(150, spk_hash)],
-            spent_coins: vec![],
-            n_locktime: 0,
-        };
-
-        // Spending tx: spends from both coinbases, has payment and change outputs
-        let spending_tx = DummyTxData {
-            id: TxId(2),
-            outputs: vec![
-                DummyTxOutData::new(100, spk_hash), // payment
-                DummyTxOutData::new(50, spk_hash),  // change (last output)
-            ],
-            spent_coins: vec![TxOutId::new(TxId(0), 0), TxOutId::new(TxId(1), 0)],
-            n_locktime: 0,
-        };
-
-        let payment_output = TxOutId::new(TxId(2), 0);
-        let change_output = TxOutId::new(TxId(2), 1);
-
+    fn setup_test_fixture() -> InMemoryIndex {
         let mut index = InMemoryIndex::new();
-        index.add_tx(Arc::new(coinbase1));
-        index.add_tx(Arc::new(coinbase2));
-        index.add_tx(Arc::new(spending_tx.clone()));
+        index.add_tx(Arc::new(TestFixture::coinbase1()));
+        index.add_tx(Arc::new(TestFixture::coinbase2()));
+        index.add_tx(Arc::new(TestFixture::spending_tx()));
 
-        (index, spending_tx, payment_output, change_output)
+        index
     }
 
     #[test]
@@ -109,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_multi_input_heuristic() {
-        let (index, spending_tx, _payment, _change) = setup_test_fixture();
+        let index = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
         let mut engine = Engine::new(ctx.clone(), Arc::new(index));
@@ -122,14 +134,41 @@ mod tests {
         let result = engine.eval(&mih_clustering);
 
         // The two inputs of spending_tx should be in the same cluster
-        let input1 = spending_tx.spent_coins[0];
-        let input2 = spending_tx.spent_coins[1];
+        let input1 = TestFixture::spending_tx().spent_coins[0];
+        let input2 = TestFixture::spending_tx().spent_coins[1];
+        assert_eq!(result.find(input1), result.find(input2));
+    }
+
+    /// MIH clustering with the fixture txs added in inverse order. Same conditions as
+    /// `test_multi_input_heuristic`; results must be the same (order-independent).
+    #[test]
+    fn test_multi_input_heuristic_inverse_order() {
+        // new index with txs in inverse order
+        let mut index = InMemoryIndex::new();
+        index.add_tx(Arc::new(TestFixture::spending_tx()));
+        index.add_tx(Arc::new(TestFixture::coinbase2()));
+        index.add_tx(Arc::new(TestFixture::coinbase1()));
+
+        let ctx = Arc::new(PipelineContext::new());
+        let mut engine = Engine::new(ctx.clone(), Arc::new(index));
+
+        let all_txs = AllTxs::new(&ctx);
+        let coinjoin_mask = IsCoinJoin::new(all_txs.clone());
+        let non_coinjoin = all_txs.filter_with_mask(coinjoin_mask.negate());
+        let mih_clustering = MultiInputHeuristic::new(non_coinjoin);
+
+        let result = engine.eval(&mih_clustering);
+
+        // Same assertion as test_multi_input_heuristic: the two inputs of spending_tx
+        // should be in the same cluster regardless of insertion order
+        let input1 = TestFixture::spending_tx().spent_coins[0];
+        let input2 = TestFixture::spending_tx().spent_coins[1];
         assert_eq!(result.find(input1), result.find(input2));
     }
 
     #[test]
     fn test_change_identification() {
-        let (index, _spending_tx, payment_output, change_output) = setup_test_fixture();
+        let index = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
         let mut engine = Engine::new(ctx.clone(), Arc::new(index));
@@ -140,14 +179,14 @@ mod tests {
         let result = engine.eval(&change_mask);
 
         // Payment output (vout=0) should not be change
-        assert_eq!(result.get(&payment_output), Some(&false));
+        assert_eq!(result.get(&TestFixture::payment_output()), Some(&false));
         // Change output (vout=1, last output) should be change
-        assert_eq!(result.get(&change_output), Some(&true));
+        assert_eq!(result.get(&TestFixture::change_output()), Some(&true));
     }
 
     #[test]
     fn test_unilateral_detection() {
-        let (index, _spending_tx, _payment_output, _change_output) = setup_test_fixture();
+        let index = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
         let mut engine = Engine::new(ctx.clone(), Arc::new(index));
@@ -169,7 +208,7 @@ mod tests {
     #[test]
     fn test_updated_unilateral_detection() {
         // Test that we get updated unilateral detection when the clustering changes
-        let (index, spending_tx, _payment_output, _change_output) = setup_test_fixture();
+        let index = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
         let mut engine = Engine::new(ctx.clone(), Arc::new(index));
@@ -185,16 +224,16 @@ mod tests {
         let result = engine.eval(&is_unilateral_mask);
 
         // The spending tx should be unilateral
-        assert_eq!(result.get(&spending_tx.id), Some(&true));
+        assert_eq!(result.get(&TestFixture::spending_tx().id), Some(&true));
     }
 
     #[test]
     fn test_full_pipeline() {
-        let (index, spending_tx, payment_output, change_output) = setup_test_fixture();
+        let index = setup_test_fixture();
 
         // Pre-cluster the inputs so IsUnilateral passes
-        let input1 = spending_tx.spent_coins[0];
-        let input2 = spending_tx.spent_coins[1];
+        let input1 = TestFixture::spending_tx().spent_coins[0];
+        let input2 = TestFixture::spending_tx().spent_coins[1];
         index.global_clustering.union(input1, input2);
 
         let ctx = Arc::new(PipelineContext::new());
@@ -233,15 +272,21 @@ mod tests {
         assert_eq!(result.find(input1), result.find(input2));
 
         // Change output should be clustered with inputs (change clustering)
-        assert_eq!(result.find(change_output), result.find(input1));
+        assert_eq!(
+            result.find(TestFixture::change_output()),
+            result.find(input1)
+        );
 
         // Payment output should NOT be in the same cluster
-        assert_ne!(result.find(payment_output), result.find(input1));
+        assert_ne!(
+            result.find(TestFixture::payment_output()),
+            result.find(input1)
+        );
     }
 
     #[test]
     fn test_pipeline_with_placeholder() {
-        let (index, spending_tx, _payment_output, _change_output) = setup_test_fixture();
+        let index = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
         let mut engine = Engine::new(ctx.clone(), Arc::new(index));
@@ -264,8 +309,8 @@ mod tests {
         let result = engine.eval(&global_clustering.as_expr());
 
         // The two inputs should be clustered
-        let input1 = spending_tx.spent_coins[0];
-        let input2 = spending_tx.spent_coins[1];
+        let input1 = TestFixture::spending_tx().spent_coins[0];
+        let input2 = TestFixture::spending_tx().spent_coins[1];
         assert_eq!(result.find(input1), result.find(input2));
     }
 
@@ -436,7 +481,7 @@ mod tests {
     // TODO: test is undeterministic
     #[test]
     fn test_user_example_pattern() {
-        let (index, spending_tx, payment_output, change_output) = setup_test_fixture();
+        let index = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
         let mut engine = Engine::new(ctx.clone(), Arc::new(index));
@@ -479,17 +524,23 @@ mod tests {
         // Verify
         let result = engine.eval(&global_clustering.as_expr());
 
-        let input1 = spending_tx.spent_coins[0];
-        let input2 = spending_tx.spent_coins[1];
+        let input1 = TestFixture::spending_tx().spent_coins[0];
+        let input2 = TestFixture::spending_tx().spent_coins[1];
 
         // MIH should cluster the two inputs
         assert_eq!(result.find(input1), result.find(input2));
 
         // Change should be clustered with inputs (after MIH makes it unilateral)
-        assert_eq!(result.find(change_output), result.find(input1));
+        assert_eq!(
+            result.find(TestFixture::change_output()),
+            result.find(input1)
+        );
 
         // Payment should NOT be clustered
-        assert_ne!(result.find(payment_output), result.find(input1));
+        assert_ne!(
+            result.find(TestFixture::payment_output()),
+            result.find(input1)
+        );
     }
 
     /// Coinbase -> spending tx (payment + change) -> tx that spends the change.
