@@ -1,5 +1,3 @@
-//! CoinJoin detection heuristic for the pipeline DSL.
-
 use std::collections::HashMap;
 
 use pipeline::engine::EvalContext;

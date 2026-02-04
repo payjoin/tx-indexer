@@ -1,3 +1,4 @@
+pub mod abstract_fingerprints;
 pub mod abstract_types;
 pub mod disjoint_set;
 pub mod loose;
@@ -5,17 +6,17 @@ pub mod storage;
 
 pub type ScriptPubkeyHash = [u8; 20];
 
-// Not used anymore. Maybe useful for some future design choice.
-// pub mod pass;
+// TODO: should be configured for testing only
 pub mod test_utils {
 
     use bitcoin::Amount;
 
     use crate::{
         ScriptPubkeyHash,
+        abstract_fingerprints::HasNLockTime,
         abstract_types::{
-            AbstractTransaction, AbstractTxIn, AbstractTxOut, AbstractTxWrapper,
-            EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts, OutputCount, TxConstituent,
+            AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
+            EnumerateSpentTxOuts, OutputCount, TxConstituent,
         },
         loose::{TxId, TxOutId},
     };
@@ -26,11 +27,28 @@ pub mod test_utils {
         pub outputs: Vec<DummyTxOutData>,
         /// The outputs that are spent by this transaction
         pub spent_coins: Vec<TxOutId>,
+        pub n_locktime: u32,
     }
 
-    impl Into<AbstractTxWrapper> for DummyTxData {
-        fn into(self) -> AbstractTxWrapper {
-            AbstractTxWrapper::new(Box::new(self))
+    impl DummyTxData {
+        pub fn new(
+            id: TxId,
+            outputs: Vec<DummyTxOutData>,
+            spent_coins: Vec<TxOutId>,
+            n_locktime: u32,
+        ) -> Self {
+            Self {
+                id,
+                outputs,
+                spent_coins,
+                n_locktime,
+            }
+        }
+    }
+
+    impl HasNLockTime for DummyTxData {
+        fn n_locktime(&self) -> u32 {
+            self.n_locktime
         }
     }
 
@@ -81,7 +99,7 @@ pub mod test_utils {
     }
 
     impl AbstractTransaction for DummyTxData {
-        fn txid(&self) -> TxId {
+        fn id(&self) -> TxId {
             self.id
         }
 
@@ -118,6 +136,10 @@ pub mod test_utils {
             self.outputs
                 .get(index)
                 .map(|output| Box::new(output.clone()) as Box<dyn AbstractTxOut>)
+        }
+
+        fn locktime(&self) -> u32 {
+            self.n_locktime
         }
     }
 

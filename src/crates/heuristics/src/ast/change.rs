@@ -1,5 +1,3 @@
-//! Change identification and clustering heuristics for the pipeline DSL.
-
 use std::collections::HashMap;
 
 use pipeline::engine::EvalContext;
@@ -9,7 +7,9 @@ use pipeline::value::{Clustering, Mask, TxSet};
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
 use tx_indexer_primitives::loose::{TxId, TxOutId};
 
-use crate::change_identification::NaiveChangeIdentificationHueristic;
+use crate::change_identification::{
+    NLockTimeChangeIdentification, NaiveChangeIdentificationHueristic, TxOutChangeAnnotation,
+};
 
 /// Node that identifies change outputs in transactions.
 ///
@@ -75,6 +75,65 @@ impl ChangeIdentification {
     }
 }
 
+/// Factory for creating a fingerprint-aware change identification expression.
+///
+/// Uses spending-tx fingerprints (e.g. n_locktime) to classify outputs as change or not:
+/// when both the containing tx and the spending tx share a fingerprint (e.g. n_locktime > 0),
+/// the output is classified as change.
+pub struct FingerPrintChangeIdentification;
+
+impl FingerPrintChangeIdentification {
+    pub fn new(input: Expr<TxSet>) -> Expr<Mask<TxOutId>> {
+        let ctx = input.context().clone();
+        ctx.register(FingerPrintChangeIdentificationNode::new(input))
+    }
+}
+
+pub struct FingerPrintChangeIdentificationNode {
+    input: Expr<TxSet>,
+}
+
+impl FingerPrintChangeIdentificationNode {
+    pub fn new(input: Expr<TxSet>) -> Self {
+        Self { input }
+    }
+}
+
+impl Node for FingerPrintChangeIdentificationNode {
+    type OutputValue = Mask<TxOutId>;
+
+    fn dependencies(&self) -> Vec<NodeId> {
+        vec![self.input.id()]
+    }
+
+    fn evaluate(&self, ctx: &EvalContext) -> HashMap<TxOutId, bool> {
+        // Use get_or_default since input might be part of a cycle
+        let tx_ids = ctx.get_or_default(&self.input);
+        let index = ctx.index();
+
+        let mut result = HashMap::new();
+
+        for &tx_id in &tx_ids {
+            let tx_handle = tx_id.with(index);
+            for output in tx_handle.outputs() {
+                if let Some(spending_tx) = output.spent_by() {
+                    let spending_tx_handle = spending_tx.tx();
+                    let output_id = output.id();
+                    let is_change =
+                        NLockTimeChangeIdentification::is_change(output, spending_tx_handle);
+                    result.insert(output_id, is_change == TxOutChangeAnnotation::Change);
+                }
+            }
+        }
+
+        result
+    }
+
+    fn name(&self) -> &'static str {
+        "FingerPrintChangeIdentification"
+    }
+}
+
 /// Node that checks if a transaction's inputs are all in the same cluster.
 ///
 /// This is used to gate change clustering - we only cluster change with inputs
@@ -110,7 +169,7 @@ impl Node for IsUnilateralNode {
             if let Some(tx) = index.txs.get(&tx_id) {
                 let inputs: Vec<_> = tx
                     .inputs()
-                    .map(|input| TxOutId::new(input.prev_txid(), input.prev_vout()))
+                    .map(|input| input.prev_txout_id())
                     .collect();
 
                 let is_unilateral = if inputs.is_empty() {

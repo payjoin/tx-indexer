@@ -1,5 +1,3 @@
-//! Multi-Input Heuristic (Common Input Ownership) for the pipeline DSL.
-
 use pipeline::engine::EvalContext;
 use pipeline::expr::Expr;
 use pipeline::node::{Node, NodeId};

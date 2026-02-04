@@ -40,6 +40,7 @@ mod tests {
                 TxOutId::new(TxId(2), 1),
                 TxOutId::new(TxId(3), 0),
             ],
+            n_locktime: 0,
         };
 
         let heuristic = MultiInputHeuristic;

@@ -47,6 +47,7 @@ mod tests {
                 DummyTxOutData::new_with_amount(300),
             ],
             spent_coins: vec![],
+            n_locktime: 0,
         };
         assert!(!coinjoin_detection.is_coinjoin(&not_coinjoin));
 
@@ -64,6 +65,7 @@ mod tests {
                 DummyTxOutData::new_with_amount(300),
             ],
             spent_coins: vec![],
+            n_locktime: 0,
         };
         assert!(coinjoin_detection.is_coinjoin(&coinjoin));
     }

@@ -15,7 +15,8 @@ mod tests {
     use tx_indexer_primitives::test_utils::{DummyTxData, DummyTxOutData};
 
     use crate::ast::{
-        ChangeClustering, ChangeIdentification, IsCoinJoin, IsUnilateral, MultiInputHeuristic,
+        ChangeClustering, ChangeIdentification, FingerPrintChangeIdentification, IsCoinJoin,
+        IsUnilateral, MultiInputHeuristic,
     };
 
     /// Test fixture: two coinbase txs, a spending tx with two inputs and two outputs
@@ -30,6 +31,7 @@ mod tests {
                 DummyTxOutData::new(200, spk_hash),
             ],
             spent_coins: vec![],
+            n_locktime: 0,
         };
 
         // Coinbase 2
@@ -37,6 +39,7 @@ mod tests {
             id: TxId(1),
             outputs: vec![DummyTxOutData::new(150, spk_hash)],
             spent_coins: vec![],
+            n_locktime: 0,
         };
 
         // Spending tx: spends from both coinbases, has payment and change outputs
@@ -47,6 +50,7 @@ mod tests {
                 DummyTxOutData::new(50, spk_hash),  // change (last output)
             ],
             spent_coins: vec![TxOutId::new(TxId(0), 0), TxOutId::new(TxId(1), 0)],
+            n_locktime: 0,
         };
 
         let payment_output = TxOutId::new(TxId(2), 0);
@@ -72,6 +76,7 @@ mod tests {
                 DummyTxOutData::new(200, spk_hash),
             ],
             spent_coins: vec![],
+            n_locktime: 0,
         };
 
         // Coinjoin tx (3+ outputs with same value)
@@ -83,6 +88,7 @@ mod tests {
                 DummyTxOutData::new(100, spk_hash),
             ],
             spent_coins: vec![],
+            n_locktime: 0,
         };
 
         let mut index = InMemoryIndex::new();
@@ -298,6 +304,7 @@ mod tests {
             id: TxId(0),
             outputs: vec![DummyTxOutData::new(1000, spk_hash)],
             spent_coins: vec![],
+            n_locktime: 0,
         };
 
         // tx1: spends coinbase, creates payment + change
@@ -308,6 +315,7 @@ mod tests {
                 DummyTxOutData::new(300, spk_hash), // change (vout=1, last)
             ],
             spent_coins: vec![TxOutId::new(TxId(0), 0)],
+            n_locktime: 0,
         };
 
         // tx2: spends the change output of tx1 along with another input
@@ -317,6 +325,7 @@ mod tests {
             id: TxId(2),
             outputs: vec![DummyTxOutData::new(500, spk_hash)],
             spent_coins: vec![],
+            n_locktime: 0,
         };
 
         let tx2 = DummyTxData {
@@ -329,6 +338,7 @@ mod tests {
                 TxOutId::new(TxId(1), 1), // spends tx1's change
                 TxOutId::new(TxId(2), 0), // spends coinbase2
             ],
+            n_locktime: 0,
         };
 
         let mut index = InMemoryIndex::new();
@@ -480,5 +490,76 @@ mod tests {
 
         // Payment should NOT be clustered
         assert_ne!(result.find(payment_output), result.find(input1));
+    }
+
+    /// Coinbase -> spending tx (payment + change) -> tx that spends the change.
+    /// Uses fingerprint-aware change heuristic (n_locktime): both the spending tx and the
+    /// tx that spends the change have n_locktime > 0, so the change output is classified as change.
+    #[test]
+    fn test_fingerprint_change_coinbase_spend_change_spend() {
+        let spk_hash = [1u8; 20];
+
+        // Coinbase
+        let coinbase = DummyTxData {
+            id: TxId(0),
+            outputs: vec![DummyTxOutData::new(1000, spk_hash)],
+            spent_coins: vec![],
+            n_locktime: 0,
+        };
+
+        // Spending tx: spends coinbase, creates payment (vout 0) and change (vout 1)
+        let spending_tx = DummyTxData {
+            id: TxId(1),
+            outputs: vec![
+                DummyTxOutData::new(700, spk_hash), // payment
+                DummyTxOutData::new(300, spk_hash), // change
+            ],
+            spent_coins: vec![TxOutId::new(TxId(0), 0)],
+            n_locktime: 1, // fingerprint: same as child so change is classified as change
+        };
+        let change_output = TxOutId::new(TxId(1), 1);
+        let payment_output = TxOutId::new(TxId(1), 0);
+
+        // Tx that spends the change output (vout 1 of spending_tx)
+        let change_spend_tx = DummyTxData {
+            id: TxId(2),
+            outputs: vec![DummyTxOutData::new(300, spk_hash)],
+            spent_coins: vec![change_output],
+            n_locktime: 1, // matches spending_tx -> fingerprint says change
+        };
+
+        let payment_spend_tx = DummyTxData {
+            id: TxId(3),
+            outputs: vec![DummyTxOutData::new(700, spk_hash)],
+            spent_coins: vec![payment_output],
+            n_locktime: 0,
+        };
+
+        let mut index = InMemoryIndex::new();
+        index.add_tx(Arc::new(coinbase));
+        index.add_tx(Arc::new(spending_tx));
+        index.add_tx(Arc::new(change_spend_tx));
+        index.add_tx(Arc::new(payment_spend_tx));
+
+        let ctx = Arc::new(PipelineContext::new());
+        let mut engine = Engine::new(ctx.clone(), Arc::new(index));
+
+        let all_txs = AllTxs::new(&ctx);
+        let change_mask = FingerPrintChangeIdentification::new(all_txs);
+
+        let result = engine.eval(&change_mask);
+
+        // Change output (vout 1, spent by tx2 with matching n_locktime) is change
+        assert_eq!(
+            result.get(&change_output),
+            Some(&true),
+            "change output should be identified as change by fingerprint heuristic"
+        );
+
+        assert_eq!(
+            result.get(&payment_output),
+            Some(&false),
+            "payment output should not be identified as change by fingerprint heuristic"
+        );
     }
 }

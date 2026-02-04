@@ -13,7 +13,8 @@ mod tests;
 
 pub use change::{
     ChangeClustering, ChangeClusteringNode, ChangeIdentification, ChangeIdentificationNode,
-    IsUnilateral, IsUnilateralNode,
+    FingerPrintChangeIdentification, FingerPrintChangeIdentificationNode, IsUnilateral,
+    IsUnilateralNode,
 };
 pub use coinjoin::{IsCoinJoin, IsCoinJoinNode};
 pub use common_input::{MultiInputHeuristic, MultiInputHeuristicNode};

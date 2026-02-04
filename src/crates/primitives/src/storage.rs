@@ -1,4 +1,5 @@
 use bitcoin::consensus::Encodable;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use crate::ScriptPubkeyHash;
@@ -68,7 +69,7 @@ impl InMemoryIndex {
         &'a mut self,
         tx: Arc<dyn AbstractTransaction + Send + Sync>,
     ) -> TxHandle<'a> {
-        let tx_id = tx.txid();
+        let tx_id = tx.id();
 
         // Process inputs to build the index before storing
         // Collect inputs into a vector to avoid lifetime issues
@@ -134,6 +135,8 @@ impl ScriptPubkeyIndex for InMemoryIndex {
     }
 }
 
+/* Concrete rust bitcoin transaction types */
+
 // Wrapper types for implementing abstract traits on bitcoin types
 // These own their data to avoid lifetime issues when stored
 struct BitcoinTxInWrapper {
@@ -174,19 +177,24 @@ fn extract_script_pubkey_hash(script: &bitcoin::ScriptBuf) -> ScriptPubkeyHash {
     hash
 }
 
-struct BitcoinTransactionWrapper {
-    tx: bitcoin::Transaction,
+struct BitcoinTransactionWrapper(bitcoin::Transaction);
+
+impl Deref for BitcoinTransactionWrapper {
+    type Target = bitcoin::Transaction;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl AbstractTransaction for BitcoinTransactionWrapper {
-    fn txid(&self) -> TxId {
-        InMemoryIndex::compute_txid(self.tx.compute_txid())
+    fn id(&self) -> TxId {
+        InMemoryIndex::compute_txid(self.compute_txid())
     }
 
     fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn>> + '_> {
         // Collect into a vector to avoid lifetime issues with the iterator
         let inputs: Vec<Box<dyn AbstractTxIn>> = self
-            .tx
             .input
             .iter()
             .map(|txin| {
@@ -202,7 +210,6 @@ impl AbstractTransaction for BitcoinTransactionWrapper {
     fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut>> + '_> {
         // Collect into a vector to avoid lifetime issues with the iterator
         let outputs: Vec<Box<dyn AbstractTxOut>> = self
-            .tx
             .output
             .iter()
             .map(|txout| {
@@ -216,21 +223,25 @@ impl AbstractTransaction for BitcoinTransactionWrapper {
     }
 
     fn output_len(&self) -> usize {
-        self.tx.output.len()
+        self.output.len()
     }
 
     fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>> {
-        self.tx.output.get(index).map(|txout| {
+        self.output.get(index).map(|txout| {
             Box::new(BitcoinTxOutWrapper {
                 value: txout.value,
                 script_pubkey: txout.script_pubkey.clone(),
             }) as Box<dyn AbstractTxOut>
         })
     }
+
+    fn locktime(&self) -> u32 {
+        self.lock_time.to_consensus_u32()
+    }
 }
 
 impl From<bitcoin::Transaction> for Box<dyn AbstractTransaction + Send + Sync> {
     fn from(val: bitcoin::Transaction) -> Self {
-        Box::new(BitcoinTransactionWrapper { tx: val })
+        Box::new(BitcoinTransactionWrapper(val))
     }
 }

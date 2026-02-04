@@ -42,8 +42,8 @@ impl<T: AbstractTransaction + ?Sized> EnumerateOutputValueInArbitraryOrder for A
 }
 
 impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Arc<T> {
-    fn txid(&self) -> TxId {
-        (**self).txid()
+    fn id(&self) -> TxId {
+        (**self).id()
     }
 
     fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn>> + '_> {
@@ -60,6 +60,10 @@ impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Arc<T> {
 
     fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>> {
         (**self).output_at(index)
+    }
+
+    fn locktime(&self) -> u32 {
+        (**self).locktime()
     }
 }
 
@@ -96,11 +100,7 @@ pub trait AbstractTxOut {
 /// Trait for complete transactions
 pub trait AbstractTransaction {
     /// Returns the transaction ID
-    fn txid(&self) -> TxId;
-    /// Returns the transaction ID (alias for txid for backward compatibility)
-    fn id(&self) -> TxId {
-        self.txid()
-    }
+    fn id(&self) -> TxId;
     /// Returns an iterator over transaction inputs
     fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn>> + '_>;
     /// Returns an iterator over transaction outputs
@@ -109,57 +109,6 @@ pub trait AbstractTransaction {
     fn output_len(&self) -> usize;
     /// Returns the output at the given index, if it exists
     fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>>;
-}
 
-/// Wrapper for AbstractTransaction that implements Clone + Eq
-#[derive(Clone)]
-pub struct AbstractTxWrapper(Arc<dyn AbstractTransaction + Send + Sync>);
-
-impl AbstractTxWrapper {
-    pub fn new(tx: Box<dyn AbstractTransaction + Send + Sync>) -> Self {
-        Self(Arc::from(tx))
-    }
-
-    pub fn as_ref(&self) -> &dyn AbstractTransaction {
-        self.0.as_ref()
-    }
-
-    /// Get the Arc for adding to index
-    pub fn into_arc(self) -> Arc<dyn AbstractTransaction + Send + Sync> {
-        self.0
-    }
-}
-
-impl PartialEq for AbstractTxWrapper {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.txid() == other.0.txid()
-    }
-}
-
-impl Eq for AbstractTxWrapper {}
-
-impl AbstractTransaction for AbstractTxWrapper {
-    fn txid(&self) -> TxId {
-        self.0.txid()
-    }
-
-    fn inputs(
-        &self,
-    ) -> Box<dyn Iterator<Item = Box<dyn crate::abstract_types::AbstractTxIn>> + '_> {
-        self.0.inputs()
-    }
-
-    fn outputs(
-        &self,
-    ) -> Box<dyn Iterator<Item = Box<dyn crate::abstract_types::AbstractTxOut>> + '_> {
-        self.0.outputs()
-    }
-
-    fn output_len(&self) -> usize {
-        self.0.output_len()
-    }
-
-    fn output_at(&self, index: usize) -> Option<Box<dyn crate::abstract_types::AbstractTxOut>> {
-        self.0.output_at(index)
-    }
+    fn locktime(&self) -> u32;
 }

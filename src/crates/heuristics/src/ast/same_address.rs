@@ -76,6 +76,7 @@ mod tests {
             id: TxId(0),
             outputs: vec![DummyTxOutData::new(10_000, unique_spk1)],
             spent_coins: vec![],
+            n_locktime: 0,
         };
 
         // Coinbase 2
@@ -83,6 +84,7 @@ mod tests {
             id: TxId(1),
             outputs: vec![DummyTxOutData::new(10_000, unique_spk2)],
             spent_coins: vec![],
+            n_locktime: 0,
         };
 
         // Spend coinbase 1, make payment + change (change spk is shared)
@@ -93,6 +95,7 @@ mod tests {
                 DummyTxOutData::new(4_000, unique_spk1), // payment
                 DummyTxOutData::new(5_000, shared_spk),  // change (shared with spend2)
             ],
+            n_locktime: 0,
         };
 
         // Spend coinbase 2, make payment + change (change spk is shared)
@@ -103,6 +106,7 @@ mod tests {
                 DummyTxOutData::new(4_000, unique_spk2), // payment
                 DummyTxOutData::new(5_000, shared_spk),  // change (shared with spend1)
             ],
+            n_locktime: 0,
         };
 
         let mut index = InMemoryIndex::new();
