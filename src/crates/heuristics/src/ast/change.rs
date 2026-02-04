@@ -167,10 +167,7 @@ impl Node for IsUnilateralNode {
 
         for &tx_id in tx_ids {
             if let Some(tx) = index.txs.get(&tx_id) {
-                let inputs: Vec<_> = tx
-                    .inputs()
-                    .map(|input| input.prev_txout_id())
-                    .collect();
+                let inputs: Vec<_> = tx.inputs().map(|input| input.prev_txout_id()).collect();
 
                 let is_unilateral = if inputs.is_empty() {
                     false // Coinbase - no inputs to cluster

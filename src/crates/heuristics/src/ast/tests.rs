@@ -10,8 +10,8 @@ mod tests {
     use pipeline::ops::source::AllTxs;
     use pipeline::value::Clustering;
     use tx_indexer_primitives::disjoint_set::DisJointSet;
+    use tx_indexer_primitives::loose::storage::InMemoryIndex;
     use tx_indexer_primitives::loose::{TxId, TxOutId};
-    use tx_indexer_primitives::storage::InMemoryIndex;
     use tx_indexer_primitives::test_utils::{DummyTxData, DummyTxOutData};
 
     use crate::ast::{

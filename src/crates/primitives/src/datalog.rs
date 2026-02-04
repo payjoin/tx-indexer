@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use crate::abstract_types::AbstractTxWrapper;
 use crate::disjoint_set::SparseDisjointSet;
 use crate::loose::{TxId, TxOutId};
-use crate::storage::{FactStore, InMemoryIndex, MemStore};
+use crate::loose::storage::InMemoryIndex;
 
 /// A named set of facts of the same shape.
 /// Facts can either be base facts or derived facts.

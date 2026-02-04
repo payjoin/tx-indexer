@@ -4,7 +4,7 @@ use pipeline::node::Node;
 use pipeline::value::TxSet;
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
 use tx_indexer_primitives::loose::TxOutId;
-use tx_indexer_primitives::storage::ScriptPubkeyIndex;
+use tx_indexer_primitives::loose::storage::ScriptPubkeyIndex;
 
 pub struct SameAddressClusteringNode {
     txs: Expr<TxSet>,
@@ -60,7 +60,7 @@ mod tests {
     use pipeline::ops::AllTxs;
     use pipeline::{Engine, PipelineContext};
     use tx_indexer_primitives::loose::TxId;
-    use tx_indexer_primitives::storage::InMemoryIndex;
+    use tx_indexer_primitives::loose::storage::InMemoryIndex;
     use tx_indexer_primitives::test_utils::{DummyTxData, DummyTxOutData};
 
     use super::*;

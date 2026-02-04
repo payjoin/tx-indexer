@@ -2,10 +2,10 @@ use bitcoin::consensus::Encodable;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use super::{TxHandle, TxId, TxInId, TxOutId};
 use crate::ScriptPubkeyHash;
 use crate::abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut};
 use crate::disjoint_set::SparseDisjointSet;
-use crate::loose::{TxHandle, TxId, TxInId, TxOutId};
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hasher};
 

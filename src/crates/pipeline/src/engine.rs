@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tx_indexer_primitives::storage::InMemoryIndex;
+use tx_indexer_primitives::loose::storage::InMemoryIndex;
 
 use crate::context::PipelineContext;
 use crate::expr::Expr;

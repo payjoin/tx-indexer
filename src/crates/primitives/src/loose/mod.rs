@@ -8,7 +8,9 @@ use crate::abstract_types::EnumerateSpentTxOuts;
 use crate::abstract_types::OutputCount;
 use crate::abstract_types::TxConstituent;
 use crate::disjoint_set::DisJointSet;
-use crate::storage::InMemoryIndex;
+pub mod storage;
+
+use crate::loose::storage::InMemoryIndex;
 
 // Type defintions for loose txs and their ids
 

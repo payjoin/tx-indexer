@@ -2,7 +2,6 @@ pub mod abstract_fingerprints;
 pub mod abstract_types;
 pub mod disjoint_set;
 pub mod loose;
-pub mod storage;
 
 pub type ScriptPubkeyHash = [u8; 20];
 
