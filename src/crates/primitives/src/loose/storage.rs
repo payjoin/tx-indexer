@@ -20,7 +20,8 @@ pub trait TxInIndex {
 }
 
 pub trait ScriptPubkeyIndex {
-    fn script_pubkey_to_txout_ids(&self, script_pubkey: &ScriptPubkeyHash) -> HashSet<TxOutId>;
+    /// Returns the first transaction output ID that uses the given script pubkey.
+    fn script_pubkey_to_txout_id(&self, script_pubkey: &ScriptPubkeyHash) -> Option<TxOutId>;
 }
 
 pub trait IndexedGraph: PrevOutIndex + TxInIndex + ScriptPubkeyIndex {}
@@ -34,7 +35,7 @@ pub struct InMemoryIndex {
     pub txs: HashMap<TxId, Arc<dyn AbstractTransaction + Send + Sync>>,
     pub global_clustering: SparseDisjointSet<TxOutId>,
     /// Index mapping script pubkey hash (20 bytes) to set of transaction IDs that use it
-    pub spk_to_txout_ids: HashMap<ScriptPubkeyHash, HashSet<TxOutId>>,
+    pub spk_to_txout_ids: HashMap<ScriptPubkeyHash, TxOutId>,
 }
 
 impl std::fmt::Debug for InMemoryIndex {
@@ -84,13 +85,14 @@ impl InMemoryIndex {
         }
 
         // Process outputs to build SPK index
+        // Only keep track of the first transaction output ID that uses the given script pubkey.
+        // The rest can be clustered via same address clustering.
         let outputs: Vec<_> = tx.outputs().collect();
         for (vout_idx, output) in outputs.iter().enumerate() {
             let spk_hash = output.script_pubkey_hash();
             self.spk_to_txout_ids
                 .entry(spk_hash)
-                .or_default()
-                .insert(TxOutId::new(tx_id, vout_idx as u32));
+                .or_insert_with(|| TxOutId::new(tx_id, vout_idx as u32));
         }
 
         let result = self.txs.insert(tx_id, tx);
@@ -127,11 +129,8 @@ impl TxInIndex for InMemoryIndex {
 }
 
 impl ScriptPubkeyIndex for InMemoryIndex {
-    fn script_pubkey_to_txout_ids(&self, script_pubkey: &ScriptPubkeyHash) -> HashSet<TxOutId> {
-        self.spk_to_txout_ids
-            .get(script_pubkey)
-            .cloned()
-            .unwrap_or_default()
+    fn script_pubkey_to_txout_id(&self, script_pubkey: &ScriptPubkeyHash) -> Option<TxOutId> {
+        self.spk_to_txout_ids.get(script_pubkey).cloned()
     }
 }
 

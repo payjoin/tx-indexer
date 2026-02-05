@@ -90,7 +90,7 @@ pub trait AnyNode: Send + Sync + 'static {
     fn dependencies(&self) -> Vec<NodeId>;
 
     /// Evaluate this node and return the result plus whether it changed from `previous`.
-    /// The node does a single typed downcast of `previous` to compare; the engine does no casting.
+    /// The node does a single typed downcast of `previous` to compare
     fn evaluate_any(
         &self,
         ctx: &EvalContext,

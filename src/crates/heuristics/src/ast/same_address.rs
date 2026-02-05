@@ -31,12 +31,11 @@ impl Node for SameAddressClusteringNode {
         for &tx_id in txs.iter() {
             for output in tx_id.with(index).outputs() {
                 let txout_id = output.id();
-                index
-                    .script_pubkey_to_txout_ids(&output.script_pubkey_hash())
-                    .iter()
-                    .for_each(|related_txout| {
-                        clustering.union(txout_id, *related_txout);
-                    });
+                if let Some(first_txout) =
+                    index.script_pubkey_to_txout_id(&output.script_pubkey_hash())
+                {
+                    clustering.union(txout_id, first_txout);
+                }
             }
         }
 

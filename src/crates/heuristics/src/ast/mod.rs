@@ -8,7 +8,6 @@ mod coinjoin;
 mod common_input;
 mod same_address;
 
-#[cfg(test)]
 mod tests;
 
 pub use change::{
