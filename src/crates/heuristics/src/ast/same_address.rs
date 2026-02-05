@@ -126,6 +126,7 @@ mod tests {
 
         let all_txs = AllTxs::new(&ctx);
         let clustering = SameAddressClustering::new(all_txs);
+        engine.run_to_fixpoint();
         let result = engine.eval(&clustering);
 
         // Same spk should be clustered together

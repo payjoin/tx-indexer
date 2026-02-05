@@ -34,8 +34,8 @@ impl Node for FilterWithMaskNode<TxSet, TxId> {
     }
 
     fn evaluate(&self, ctx: &EvalContext) -> HashSet<TxId> {
-        // Use get_or_default for mask since it might be part of a cycle
-        let input_set = ctx.get(&self.input);
+        // Use get_or_default for both; input or mask may not be ready yet in cyclic pipelines
+        let input_set = ctx.get_or_default(&self.input);
         let mask = ctx.get_or_default(&self.mask);
 
         input_set
@@ -59,8 +59,8 @@ impl Node for FilterWithMaskNode<TxOutSet, TxOutId> {
     }
 
     fn evaluate(&self, ctx: &EvalContext) -> HashSet<TxOutId> {
-        // Use get_or_default for mask since it might be part of a cycle
-        let input_set = ctx.get(&self.input);
+        // Use get_or_default for both; input or mask may not be ready yet in cyclic pipelines
+        let input_set = ctx.get_or_default(&self.input);
         let mask = ctx.get_or_default(&self.mask);
 
         input_set

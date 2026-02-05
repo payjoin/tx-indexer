@@ -6,6 +6,7 @@
 
 use std::any::Any;
 use std::collections::HashMap;
+use std::sync::RwLock;
 
 use crate::node::NodeId;
 use crate::value::ExprValue;
@@ -21,8 +22,9 @@ use crate::value::ExprValue;
 /// `NodeStorage` is not thread-safe by itself. The `Engine` is responsible
 /// for ensuring proper synchronization when accessing storage.
 pub struct NodeStorage {
-    /// Map from NodeId to the stored result (type-erased).
-    pub(crate) slots: HashMap<NodeId, Box<dyn Any + Send + Sync>>,
+    /// Map from NodeId to the stored results (type-erased).
+    pub(crate) slots: HashMap<NodeId, Vec<Box<dyn Any + Send + Sync>>>,
+    cursor: RwLock<HashMap<(NodeId, NodeId), usize>>,
 }
 
 impl Default for NodeStorage {
@@ -36,34 +38,68 @@ impl NodeStorage {
     pub fn new() -> Self {
         Self {
             slots: HashMap::new(),
+            cursor: RwLock::new(HashMap::new()),
         }
     }
 
-    /// Insert a value for a node.
-    ///
-    /// The value type must match the expression's value type.
-    pub fn insert<T: ExprValue>(&mut self, id: NodeId, value: T::Output) {
-        self.slots.insert(id, Box::new(value));
+    /// Append a value for a node.
+    pub fn append(&mut self, id: NodeId, value: Box<dyn Any + Send + Sync>) {
+        self.slots.entry(id).or_insert(vec![]).push(value);
+    }
+
+    /// Reference to the last stored value for a node (for fixpoint no-progress check).
+    pub fn get_last(&self, id: NodeId) -> Option<&(dyn Any + Send + Sync)> {
+        self.slots
+            .get(&id)
+            .and_then(|v| v.last())
+            .map(|b| b.as_ref())
+    }
+
+    pub fn non_volatile_get<T: ExprValue>(&self, id: NodeId) -> Option<Vec<&T::Output>> {
+        self.slots.get(&id).map(|slot_vec| {
+            slot_vec
+                .iter()
+                .map(|boxed| {
+                    boxed
+                        .as_ref()
+                        .downcast_ref::<T::Output>()
+                        .expect("correct type")
+                })
+                .collect::<Vec<&T::Output>>()
+        })
     }
 
     /// Get a reference to a stored value.
     ///
     /// Returns `None` if the node hasn't been evaluated yet or if the
     /// type doesn't match.
-    pub fn get<T: ExprValue>(&self, id: NodeId) -> Option<&T::Output> {
-        self.slots
-            .get(&id)
-            .and_then(|boxed| boxed.downcast_ref::<T::Output>())
+    pub fn get<T: ExprValue>(&self, producer: NodeId, dependent: NodeId) -> Option<&T::Output> {
+        let index = self.last_read_index(dependent, producer);
+        let res = self.slots.get(&producer).and_then(|slot_vec| {
+            slot_vec
+                .get(index)
+                .and_then(|boxed| boxed.as_ref().downcast_ref::<T::Output>())
+        });
+
+        // Only advance the read cursor when we actually consumed a value.
+        // Otherwise dependents never see new facts when a producer appends later (e.g. in cycles).
+        if res.is_some() {
+            self.cursor
+                .write()
+                .expect("lock poisoned")
+                .insert((dependent, producer), index + 1);
+        }
+
+        res
     }
 
-    /// Get a mutable reference to a stored value.
-    ///
-    /// Returns `None` if the node hasn't been evaluated yet or if the
-    /// type doesn't match.
-    pub fn get_mut<T: ExprValue>(&mut self, id: NodeId) -> Option<&mut T::Output> {
-        self.slots
-            .get_mut(&id)
-            .and_then(|boxed| boxed.downcast_mut::<T::Output>())
+    pub fn last_read_index(&self, dependent: NodeId, producer: NodeId) -> usize {
+        self.cursor
+            .read()
+            .expect("lock poisoned")
+            .get(&(dependent, producer))
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Check if a value exists for a node.
@@ -71,39 +107,12 @@ impl NodeStorage {
         self.slots.contains_key(&id)
     }
 
-    /// Remove a value for a node.
-    ///
-    /// Returns the removed value if it existed and matched the type.
-    pub fn remove<T: ExprValue>(&mut self, id: NodeId) -> Option<T::Output> {
+    /// Get the size of slots produced by a node
+    pub fn slot_count(&self, producer: NodeId) -> usize {
         self.slots
-            .remove(&id)
-            .and_then(|boxed| boxed.downcast::<T::Output>().ok())
-            .map(|b| *b)
-    }
-
-    /// Remove a value without type checking (for invalidation).
-    pub fn remove_any(&mut self, id: NodeId) -> bool {
-        self.slots.remove(&id).is_some()
-    }
-
-    /// Clear all stored values.
-    pub fn clear(&mut self) {
-        self.slots.clear();
-    }
-
-    /// Get the number of stored values.
-    pub fn len(&self) -> usize {
-        self.slots.len()
-    }
-
-    /// Check if storage is empty.
-    pub fn is_empty(&self) -> bool {
-        self.slots.is_empty()
-    }
-
-    /// Get all stored node IDs.
-    pub fn node_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.slots.keys().copied()
+            .get(&producer)
+            .map(|boxed| boxed.len())
+            .unwrap_or(0)
     }
 }
 

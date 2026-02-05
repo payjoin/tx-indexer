@@ -30,14 +30,15 @@ impl Node for MultiInputHeuristicNode {
     }
 
     fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<TxOutId> {
-        let tx_ids = ctx.get(&self.input);
+        // Use get_or_default since input may not be ready yet in cyclic pipelines
+        let tx_ids = ctx.get_or_default(&self.input);
         let index = ctx.index();
         let heuristic = MIHImpl;
 
         let mut clustering = SparseDisjointSet::new();
 
-        for &tx_id in tx_ids {
-            if let Some(tx) = index.txs.get(&tx_id) {
+        for tx_id in &tx_ids {
+            if let Some(tx) = index.txs.get(tx_id) {
                 let tx_clustering = heuristic.merge_prevouts(tx);
                 clustering = clustering.join(&tx_clustering);
             }

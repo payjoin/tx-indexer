@@ -157,15 +157,14 @@ impl Node for IsUnilateralNode {
     }
 
     fn evaluate(&self, ctx: &EvalContext) -> HashMap<TxId, bool> {
-        let tx_ids = ctx.get(&self.txs);
-        // Use get_or_default for clustering since it might be part of a cycle
-        // During initial fixpoint iteration, this will return an empty clustering
+        // Use get_or_default for both; txs or clustering may not be ready yet in cyclic pipelines
+        let tx_ids = ctx.get_or_default(&self.txs);
         let clustering = ctx.get_or_default(&self.clustering);
         let index = ctx.index();
 
         let mut result = HashMap::new();
 
-        for &tx_id in tx_ids {
+        for tx_id in &tx_ids {
             if let Some(tx) = index.txs.get(&tx_id) {
                 let inputs: Vec<_> = tx.inputs().map(|input| input.prev_txout_id()).collect();
 
@@ -182,7 +181,7 @@ impl Node for IsUnilateralNode {
                         .all(|&input| clustering.find(input) == first_root)
                 };
 
-                result.insert(tx_id, is_unilateral);
+                result.insert(*tx_id, is_unilateral);
             }
         }
 

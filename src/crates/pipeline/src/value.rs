@@ -16,7 +16,12 @@ use tx_indexer_primitives::loose::{TxId, TxOutId};
 /// Users can define their own value types by implementing this trait.
 pub trait ExprValue: 'static {
     /// The concrete Rust type that this expression produces when evaluated.
-    type Output: Clone + Send + Sync + 'static;
+    type Output: Clone + Default + PartialEq + Send + Sync + 'static;
+
+    /// Combine multiple facts (e.g. from fixpoint iterations) into a single value.
+    /// Empty slice returns `Default::default()`. Implementations should clone at most
+    /// once (the first fact or accumulator) and merge the rest by reference.
+    fn combine_facts(facts: &[&Self::Output]) -> Self::Output;
 }
 
 // Built-in Value Types
@@ -27,6 +32,17 @@ pub struct TxSet;
 
 impl ExprValue for TxSet {
     type Output = HashSet<TxId>;
+
+    fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
+        if facts.is_empty() {
+            return Default::default();
+        }
+        let mut acc = facts[0].clone();
+        for rest in &facts[1..] {
+            acc.extend(rest.iter().copied());
+        }
+        acc
+    }
 }
 
 /// Marker type for a set of transaction output IDs.
@@ -35,6 +51,17 @@ pub struct TxOutSet;
 
 impl ExprValue for TxOutSet {
     type Output = HashSet<TxOutId>;
+
+    fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
+        if facts.is_empty() {
+            return Default::default();
+        }
+        let mut acc = facts[0].clone();
+        for rest in &facts[1..] {
+            acc.extend(rest.iter().copied());
+        }
+        acc
+    }
 }
 
 /// Marker type for a boolean mask over items of type `K`.
@@ -52,6 +79,17 @@ impl<K> Default for Mask<K> {
 
 impl<K: Eq + Hash + Clone + Send + Sync + 'static> ExprValue for Mask<K> {
     type Output = HashMap<K, bool>;
+
+    fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
+        if facts.is_empty() {
+            return Default::default();
+        }
+        let mut acc = facts[0].clone();
+        for rest in &facts[1..] {
+            acc.extend(rest.iter().map(|(k, v)| (k.clone(), *v)));
+        }
+        acc
+    }
 }
 
 /// Marker type for clustering (disjoint set union of transaction outputs).
@@ -60,6 +98,20 @@ pub struct Clustering;
 
 impl ExprValue for Clustering {
     type Output = SparseDisjointSet<TxOutId>;
+
+    fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
+        if facts.is_empty() {
+            return Default::default();
+        }
+        if facts.len() == 1 {
+            return facts[0].clone();
+        }
+        let mut acc = facts[0].clone();
+        for next in &facts[1..] {
+            acc = acc.join(next);
+        }
+        acc
+    }
 }
 
 // Value Type Aliases for convenience

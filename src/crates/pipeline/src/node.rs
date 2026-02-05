@@ -89,38 +89,40 @@ pub trait AnyNode: Send + Sync + 'static {
     /// Get the dependencies of this node.
     fn dependencies(&self) -> Vec<NodeId>;
 
-    /// Evaluate this node and return the result as a boxed Any.
-    fn evaluate_any(&self, ctx: &EvalContext) -> Box<dyn Any + Send + Sync>;
-
-    /// Get the TypeId of the value this node produces.
-    fn value_type_id(&self) -> std::any::TypeId;
+    /// Evaluate this node and return the result plus whether it changed from `previous`.
+    /// The node does a single typed downcast of `previous` to compare; the engine does no casting.
+    fn evaluate_any(
+        &self,
+        ctx: &EvalContext,
+        previous: Option<&(dyn Any + Send + Sync)>,
+    ) -> (Box<dyn Any + Send + Sync>, bool);
 
     /// Get the name of this node for debugging.
     fn name(&self) -> &'static str;
-
-    /// Downcast to a concrete node type (for debugging/introspection).
-    fn as_any(&self) -> &dyn Any;
 }
 
-impl<N: Node> AnyNode for N {
+impl<N: Node> AnyNode for N
+where
+    <N::OutputValue as ExprValue>::Output: Send + Sync,
+{
     fn dependencies(&self) -> Vec<NodeId> {
         Node::dependencies(self)
     }
 
-    fn evaluate_any(&self, ctx: &EvalContext) -> Box<dyn Any + Send + Sync> {
-        Box::new(self.evaluate(ctx))
-    }
-
-    fn value_type_id(&self) -> std::any::TypeId {
-        std::any::TypeId::of::<<N::OutputValue as ExprValue>::Output>()
+    fn evaluate_any(
+        &self,
+        ctx: &EvalContext,
+        other: Option<&(dyn Any + Send + Sync)>,
+    ) -> (Box<dyn Any + Send + Sync>, bool) {
+        let out = self.evaluate(ctx);
+        let changed = other
+            .and_then(|p| p.downcast_ref::<<N::OutputValue as ExprValue>::Output>())
+            .map_or(true, |prev| prev != &out);
+        (Box::new(out), changed)
     }
 
     fn name(&self) -> &'static str {
         Node::name(self)
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 

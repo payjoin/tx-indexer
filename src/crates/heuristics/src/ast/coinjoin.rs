@@ -51,13 +51,9 @@ impl Node for IsCoinJoinNode {
     }
 }
 
-/// Factory for creating an IsCoinJoin expression.
 pub struct IsCoinJoin;
 
 impl IsCoinJoin {
-    /// Create a new CoinJoin detection mask over the given transactions.
-    ///
-    /// Returns a mask where `true` indicates the transaction is a CoinJoin.
     pub fn new(input: Expr<TxSet>) -> Expr<Mask<TxId>> {
         let ctx = input.context().clone();
         ctx.register(IsCoinJoinNode::new(input))

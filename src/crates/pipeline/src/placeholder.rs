@@ -180,7 +180,7 @@ where
                 // - Default (if target not yet evaluated)
                 // - Previous iteration's value (enabling convergence)
                 ctx.storage
-                    .get::<T>(id)
+                    .get::<T>(id, ctx.node_id)
                     .cloned()
                     .unwrap_or_else(T::Output::default)
             }
