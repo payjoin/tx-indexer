@@ -38,10 +38,9 @@ impl Node for MultiInputHeuristicNode {
         let mut clustering = SparseDisjointSet::new();
 
         for tx_id in &tx_ids {
-            if let Some(tx) = index.txs.get(tx_id) {
-                let tx_clustering = heuristic.merge_prevouts(tx);
-                clustering = clustering.join(&tx_clustering);
-            }
+            let tx = tx_id.with(index);
+            let tx_clustering = heuristic.merge_prevouts(&tx);
+            clustering = clustering.join(&tx_clustering);
         }
 
         clustering

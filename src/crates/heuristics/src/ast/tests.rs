@@ -233,7 +233,6 @@ mod tests {
         // Pre-cluster the inputs so IsUnilateral passes
         let input1 = TestFixture::spending_tx().spent_coins[0];
         let input2 = TestFixture::spending_tx().spent_coins[1];
-        index.global_clustering.union(input1, input2);
 
         let ctx = Arc::new(PipelineContext::new());
         let mut engine = Engine::new(ctx.clone(), Arc::new(index));
@@ -252,15 +251,13 @@ mod tests {
             IsUnilateral::with_clustering(non_coinjoin.clone(), mih_clustering.clone());
 
         // Get outputs that are marked as change
-        let change_outputs = non_coinjoin.outputs().filter_with_mask(change_mask);
+        let change_outputs = non_coinjoin.outputs().filter_with_mask(change_mask.clone());
         let txs_with_change = change_outputs.txs();
 
         // Filter to unilateral txs with change
         let unilateral_with_change = txs_with_change.filter_with_mask(unilateral_mask);
 
-        // Get change mask for these txs
-        let filtered_change_mask = ChangeIdentification::new(unilateral_with_change.clone());
-        let change_clustering = ChangeClustering::new(unilateral_with_change, filtered_change_mask);
+        let change_clustering = ChangeClustering::new(unilateral_with_change, change_mask);
 
         let combined = change_clustering.join(mih_clustering);
 
@@ -428,7 +425,6 @@ mod tests {
         // Close the cycle
         global_clustering.unify(combined);
 
-        // === Verify results ===
         let result = engine.eval(&global_clustering.as_expr());
 
         // tx1 has single input, so MIH doesn't cluster anything for it

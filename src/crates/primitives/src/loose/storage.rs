@@ -6,7 +6,7 @@ use super::{TxHandle, TxId, TxInId, TxOutId};
 use crate::ScriptPubkeyHash;
 use crate::abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut};
 use crate::disjoint_set::SparseDisjointSet;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hasher};
 
 pub trait PrevOutIndex {
@@ -34,7 +34,7 @@ pub struct InMemoryIndex {
     // TODO: test that insertion order does not make a difference
     pub txs: HashMap<TxId, Arc<dyn AbstractTransaction + Send + Sync>>,
     pub global_clustering: SparseDisjointSet<TxOutId>,
-    /// Index mapping script pubkey hash (20 bytes) to set of transaction IDs that use it
+    /// Index mapping script pubkey hash (20 bytes) and the first transaction output ID that uses it
     pub spk_to_txout_ids: HashMap<ScriptPubkeyHash, TxOutId>,
 }
 

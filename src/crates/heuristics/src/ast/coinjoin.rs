@@ -36,12 +36,8 @@ impl Node for IsCoinJoinNode {
 
         let mut result = HashMap::new();
         for &tx_id in tx_ids {
-            let is_coinjoin = if let Some(tx) = index.txs.get(&tx_id) {
-                detector.is_coinjoin(tx)
-            } else {
-                false
-            };
-            result.insert(tx_id, is_coinjoin);
+            let tx = tx_id.with(index);
+            result.insert(tx_id, detector.is_coinjoin(&tx));
         }
         result
     }

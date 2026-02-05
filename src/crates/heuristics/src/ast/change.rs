@@ -4,6 +4,7 @@ use pipeline::engine::EvalContext;
 use pipeline::expr::Expr;
 use pipeline::node::{Node, NodeId};
 use pipeline::value::{Clustering, Mask, TxSet};
+use tx_indexer_primitives::abstract_types::EnumerateSpentTxOuts;
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
 use tx_indexer_primitives::loose::{TxId, TxOutId};
 
@@ -39,18 +40,17 @@ impl Node for ChangeIdentificationNode {
         let mut result = HashMap::new();
 
         for &tx_id in &tx_ids {
-            if let Some(tx) = index.txs.get(&tx_id) {
-                let output_count = tx.output_len();
-                if output_count == 0 {
-                    continue;
-                }
+            let tx = tx_id.with(index);
+            let output_count = tx.output_count();
+            if output_count == 0 {
+                continue;
+            }
 
-                // Mark each output using the naive change identification heuristic
-                for vout in 0..output_count {
-                    let txout_id = TxOutId::new(tx_id, vout as u32);
-                    let is_change = NaiveChangeIdentificationHueristic::is_change_vout(tx, vout);
-                    result.insert(txout_id, is_change);
-                }
+            // Mark each output using the naive change identification heuristic
+            for vout in 0..output_count {
+                let txout_id = TxOutId::new(tx_id, vout as u32);
+                let is_change = NaiveChangeIdentificationHueristic::is_change_vout(&tx, vout);
+                result.insert(txout_id, is_change);
             }
         }
 
@@ -165,24 +165,23 @@ impl Node for IsUnilateralNode {
         let mut result = HashMap::new();
 
         for tx_id in &tx_ids {
-            if let Some(tx) = index.txs.get(&tx_id) {
-                let inputs: Vec<_> = tx.inputs().map(|input| input.prev_txout_id()).collect();
+            let tx = tx_id.with(index);
+            let inputs: Vec<_> = tx.spent_coins().collect();
 
-                let is_unilateral = if inputs.is_empty() {
-                    false // Coinbase - no inputs to cluster
-                } else if inputs.len() == 1 {
-                    true // Single input is trivially unilateral
-                } else {
-                    // TODO: update to use the util on tx handle
-                    // Check if all inputs are in the same cluster
-                    let first_root = clustering.find(inputs[0]);
-                    inputs
-                        .iter()
-                        .all(|&input| clustering.find(input) == first_root)
-                };
+            let is_unilateral = if inputs.is_empty() {
+                false // Coinbase - no inputs to cluster
+            } else if inputs.len() == 1 {
+                true // Single input is trivially unilateral
+            } else {
+                // TODO: update to use the util on tx handle
+                // Check if all inputs are in the same cluster
+                let first_root = clustering.find(inputs[0]);
+                inputs
+                    .iter()
+                    .all(|&input| clustering.find(input) == first_root)
+            };
 
-                result.insert(*tx_id, is_unilateral);
-            }
+            result.insert(*tx_id, is_unilateral);
         }
 
         result
@@ -238,25 +237,21 @@ impl Node for ChangeClusteringNode {
         let clustering = SparseDisjointSet::new();
 
         for &tx_id in &tx_ids {
-            if let Some(tx) = index.txs.get(&tx_id) {
-                // Get first input (if any)
-                let first_input: Option<TxOutId> = tx
-                    .inputs()
-                    .next()
-                    .map(|input| TxOutId::new(input.prev_txid(), input.prev_vout()));
+            let tx = tx_id.with(index);
+            // Get first input (if any)
+            let first_input: Option<TxOutId> = tx.spent_coins().next();
 
-                let Some(root_input) = first_input else {
-                    continue; // Coinbase
-                };
+            let Some(root_input) = first_input else {
+                continue; // Coinbase
+            };
 
-                // Find change outputs for this transaction
-                let output_count = tx.output_len();
-                for vout in 0..output_count {
-                    let txout_id = TxOutId::new(tx_id, vout as u32);
-                    if change_mask.get(&txout_id).copied().unwrap_or(false) {
-                        // This is a change output - cluster it with inputs
-                        clustering.union(txout_id, root_input);
-                    }
+            // Find change outputs for this transaction
+            let output_count = tx.output_count();
+            for vout in 0..output_count {
+                let txout_id = TxOutId::new(tx_id, vout as u32);
+                if change_mask.get(&txout_id).copied().unwrap_or(false) {
+                    // This is a change output - cluster it with inputs
+                    clustering.union(txout_id, root_input);
                 }
             }
         }
