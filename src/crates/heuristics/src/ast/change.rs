@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use pipeline::TxOutSet;
 use pipeline::engine::EvalContext;
 use pipeline::expr::Expr;
 use pipeline::node::{Node, NodeId};
@@ -16,11 +17,11 @@ use crate::change_identification::{
 ///
 /// Uses a naive heuristic: the last output of a transaction is assumed to be change.
 pub struct ChangeIdentificationNode {
-    input: Expr<TxSet>,
+    input: Expr<TxOutSet>,
 }
 
 impl ChangeIdentificationNode {
-    pub fn new(input: Expr<TxSet>) -> Self {
+    pub fn new(input: Expr<TxOutSet>) -> Self {
         Self { input }
     }
 }
@@ -34,24 +35,22 @@ impl Node for ChangeIdentificationNode {
 
     fn evaluate(&self, ctx: &EvalContext) -> HashMap<TxOutId, bool> {
         // Use get_or_default since input might be part of a cycle
-        let tx_ids = ctx.get_or_default(&self.input);
+        let txouts = ctx.get_or_default(&self.input);
         let index = ctx.index();
 
         let mut result = HashMap::new();
 
-        for &tx_id in &tx_ids {
-            let tx = tx_id.with(index);
+        for output in txouts.iter().map(|output| output.with(index)) {
+            let tx = output.tx();
             let output_count = tx.output_count();
             if output_count == 0 {
                 continue;
             }
 
             // Mark each output using the naive change identification heuristic
-            for vout in 0..output_count {
-                let txout_id = TxOutId::new(tx_id, vout as u32);
-                let is_change = NaiveChangeIdentificationHueristic::is_change_vout(&tx, vout);
-                result.insert(txout_id, is_change);
-            }
+            let output_id = output.id();
+            let is_change = NaiveChangeIdentificationHueristic::is_change(output);
+            result.insert(output_id, is_change == TxOutChangeAnnotation::Change);
         }
 
         result
@@ -69,7 +68,7 @@ impl ChangeIdentification {
     /// Identify change outputs in the given transactions.
     ///
     /// Returns a mask over outputs where `true` indicates the output is likely change.
-    pub fn new(input: Expr<TxSet>) -> Expr<Mask<TxOutId>> {
+    pub fn new(input: Expr<TxOutSet>) -> Expr<Mask<TxOutId>> {
         let ctx = input.context().clone();
         ctx.register(ChangeIdentificationNode::new(input))
     }
@@ -83,18 +82,18 @@ impl ChangeIdentification {
 pub struct FingerPrintChangeIdentification;
 
 impl FingerPrintChangeIdentification {
-    pub fn new(input: Expr<TxSet>) -> Expr<Mask<TxOutId>> {
+    pub fn new(input: Expr<TxOutSet>) -> Expr<Mask<TxOutId>> {
         let ctx = input.context().clone();
         ctx.register(FingerPrintChangeIdentificationNode::new(input))
     }
 }
 
 pub struct FingerPrintChangeIdentificationNode {
-    input: Expr<TxSet>,
+    input: Expr<TxOutSet>,
 }
 
 impl FingerPrintChangeIdentificationNode {
-    pub fn new(input: Expr<TxSet>) -> Self {
+    pub fn new(input: Expr<TxOutSet>) -> Self {
         Self { input }
     }
 }
@@ -108,21 +107,18 @@ impl Node for FingerPrintChangeIdentificationNode {
 
     fn evaluate(&self, ctx: &EvalContext) -> HashMap<TxOutId, bool> {
         // Use get_or_default since input might be part of a cycle
-        let tx_ids = ctx.get_or_default(&self.input);
+        let txouts = ctx.get_or_default(&self.input);
         let index = ctx.index();
 
         let mut result = HashMap::new();
 
-        for &tx_id in &tx_ids {
-            let tx_handle = tx_id.with(index);
-            for output in tx_handle.outputs() {
-                if let Some(spending_tx) = output.spent_by() {
-                    let spending_tx_handle = spending_tx.tx();
-                    let output_id = output.id();
-                    let is_change =
-                        NLockTimeChangeIdentification::is_change(output, spending_tx_handle);
-                    result.insert(output_id, is_change == TxOutChangeAnnotation::Change);
-                }
+        for output in txouts.iter().map(|output| output.with(index)) {
+            if let Some(spending_tx) = output.spent_by() {
+                let spending_tx_handle = spending_tx.tx();
+                let output_id = output.id();
+                let is_change =
+                    NLockTimeChangeIdentification::is_change(output, spending_tx_handle);
+                result.insert(output_id, is_change == TxOutChangeAnnotation::Change);
             }
         }
 

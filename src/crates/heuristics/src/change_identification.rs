@@ -14,19 +14,12 @@ pub struct NaiveChangeIdentificationHueristic;
 impl NaiveChangeIdentificationHueristic {
     /// Check if a txout is change based on its containing transaction.
     pub fn is_change(txout: impl TxConstituent<Handle: OutputCount>) -> TxOutChangeAnnotation {
-        let constituent_tx = txout.containing_tx();
-        if Self::is_change_vout(&constituent_tx, txout.vout()) {
+        let tx = txout.containing_tx();
+        if tx.output_count() > 0 && txout.vout() == tx.output_count() - 1 {
             TxOutChangeAnnotation::Change
         } else {
             TxOutChangeAnnotation::NotChange
         }
-    }
-
-    /// Check if an output at the given vout index is change.
-    ///
-    /// Uses naive heuristic: the last output of a transaction is assumed to be change.
-    pub fn is_change_vout(tx: &impl OutputCount, vout: usize) -> bool {
-        tx.output_count() > 0 && vout == tx.output_count() - 1
     }
 }
 

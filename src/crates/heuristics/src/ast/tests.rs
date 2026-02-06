@@ -172,8 +172,8 @@ mod tests {
         let ctx = Arc::new(PipelineContext::new());
         let mut engine = Engine::new(ctx.clone(), Arc::new(index));
 
-        let all_txs = AllTxs::new(&ctx);
-        let change_mask = ChangeIdentification::new(all_txs);
+        let all_txouts = AllTxs::new(&ctx).outputs();
+        let change_mask = ChangeIdentification::new(all_txouts);
 
         let result = engine.eval(&change_mask);
 
@@ -244,7 +244,7 @@ mod tests {
         let non_coinjoin = all_txs.filter_with_mask(coinjoin_mask.negate());
         let mih_clustering = MultiInputHeuristic::new(non_coinjoin.clone());
 
-        let change_mask = ChangeIdentification::new(all_txs.clone());
+        let change_mask = ChangeIdentification::new(all_txs.outputs());
 
         // For IsUnilateral, we use MIH clustering
         let unilateral_mask =
@@ -414,7 +414,7 @@ mod tests {
         let unilateral_txs = non_coinjoin.filter_with_mask(unilateral_mask);
 
         // Get change mask for unilateral txs
-        let unilateral_change_mask = ChangeIdentification::new(unilateral_txs.clone());
+        let unilateral_change_mask = ChangeIdentification::new(unilateral_txs.outputs());
 
         // Change clustering: cluster change outputs with inputs
         let change_clustering = ChangeClustering::new(unilateral_txs, unilateral_change_mask);
@@ -521,8 +521,8 @@ mod tests {
         let ctx = Arc::new(PipelineContext::new());
         let mut engine = Engine::new(ctx.clone(), Arc::new(index));
 
-        let all_txs = AllTxs::new(&ctx);
-        let change_mask = FingerPrintChangeIdentification::new(all_txs);
+        let all_txouts = AllTxs::new(&ctx).outputs();
+        let change_mask = FingerPrintChangeIdentification::new(all_txouts);
 
         let result = engine.eval(&change_mask);
 
