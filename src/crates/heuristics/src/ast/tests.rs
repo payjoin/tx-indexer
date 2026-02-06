@@ -1,13 +1,14 @@
 //! Integration tests for the AST-based pipeline DSL.
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, RwLock};
 
     use pipeline::Placeholder;
     use pipeline::context::PipelineContext;
     use pipeline::engine::Engine;
     use pipeline::ops::source::AllTxs;
     use pipeline::value::Clustering;
+    use tx_indexer_primitives::abstract_types::AbstractTransaction;
     use tx_indexer_primitives::disjoint_set::DisJointSet;
     use tx_indexer_primitives::loose::storage::InMemoryIndex;
     use tx_indexer_primitives::loose::{TxId, TxOutId};
@@ -65,14 +66,12 @@ mod tests {
         }
     }
 
-    /// Test fixture: two coinbase txs, a spending tx with two inputs and two outputs
-    fn setup_test_fixture() -> InMemoryIndex {
-        let mut index = InMemoryIndex::new();
-        index.add_tx(Arc::new(TestFixture::coinbase1()));
-        index.add_tx(Arc::new(TestFixture::coinbase2()));
-        index.add_tx(Arc::new(TestFixture::spending_tx()));
-
-        index
+    fn setup_test_fixture() -> Vec<Arc<dyn AbstractTransaction + Send + Sync>> {
+        vec![
+            Arc::new(TestFixture::coinbase1()),
+            Arc::new(TestFixture::coinbase2()),
+            Arc::new(TestFixture::spending_tx()),
+        ]
     }
 
     #[test]
@@ -102,12 +101,12 @@ mod tests {
             n_locktime: 0,
         };
 
-        let mut index = InMemoryIndex::new();
-        index.add_tx(Arc::new(normal_tx));
-        index.add_tx(Arc::new(coinjoin_tx));
+        let all_txs: Vec<Arc<dyn AbstractTransaction + Send + Sync>> =
+            vec![Arc::new(normal_tx), Arc::new(coinjoin_tx)];
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(index));
+        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        engine.add_base_facts(all_txs);
 
         let all_txs = AllTxs::new(&ctx);
         let coinjoin_mask = IsCoinJoin::new(all_txs);
@@ -120,10 +119,11 @@ mod tests {
 
     #[test]
     fn test_multi_input_heuristic() {
-        let index = setup_test_fixture();
+        let all_txs = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(index));
+        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        engine.add_base_facts(all_txs);
 
         let all_txs = AllTxs::new(&ctx);
         let coinjoin_mask = IsCoinJoin::new(all_txs.clone());
@@ -143,13 +143,11 @@ mod tests {
     #[test]
     fn test_multi_input_heuristic_inverse_order() {
         // new index with txs in inverse order
-        let mut index = InMemoryIndex::new();
-        index.add_tx(Arc::new(TestFixture::spending_tx()));
-        index.add_tx(Arc::new(TestFixture::coinbase2()));
-        index.add_tx(Arc::new(TestFixture::coinbase1()));
+        let all_txs = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(index));
+        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        engine.add_base_facts(all_txs);
 
         let all_txs = AllTxs::new(&ctx);
         let coinjoin_mask = IsCoinJoin::new(all_txs.clone());
@@ -167,10 +165,11 @@ mod tests {
 
     #[test]
     fn test_change_identification() {
-        let index = setup_test_fixture();
+        let all_txs = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(index));
+        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        engine.add_base_facts(all_txs);
 
         let all_txouts = AllTxs::new(&ctx).outputs();
         let change_mask = ChangeIdentification::new(all_txouts);
@@ -185,10 +184,11 @@ mod tests {
 
     #[test]
     fn test_unilateral_detection() {
-        let index = setup_test_fixture();
+        let all_txs = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(index));
+        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        engine.add_base_facts(all_txs);
 
         let all_txs = AllTxs::new(&ctx);
 
@@ -207,10 +207,11 @@ mod tests {
     #[test]
     fn test_updated_unilateral_detection() {
         // Test that we get updated unilateral detection when the clustering changes
-        let index = setup_test_fixture();
+        let all_txs = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(index));
+        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        engine.add_base_facts(all_txs);
 
         let all_txs = AllTxs::new(&ctx);
         let placeholder = Placeholder::<Clustering>::new(&ctx);
@@ -228,14 +229,15 @@ mod tests {
 
     #[test]
     fn test_full_pipeline() {
-        let index = setup_test_fixture();
+        let all_txs = setup_test_fixture();
 
         // Pre-cluster the inputs so IsUnilateral passes
         let input1 = TestFixture::spending_tx().spent_coins[0];
         let input2 = TestFixture::spending_tx().spent_coins[1];
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(index));
+        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        engine.add_base_facts(all_txs);
 
         // Build the pipeline (similar to the user's example)
         let all_txs = AllTxs::new(&ctx);
@@ -282,10 +284,11 @@ mod tests {
 
     #[test]
     fn test_pipeline_with_placeholder() {
-        let index = setup_test_fixture();
+        let all_txs = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(index));
+        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        engine.add_base_facts(all_txs);
 
         let all_txs = AllTxs::new(&ctx);
 
@@ -382,15 +385,16 @@ mod tests {
             ],
             n_locktime: 0,
         };
-
-        let mut index = InMemoryIndex::new();
-        index.add_tx(Arc::new(coinbase.clone()));
-        index.add_tx(Arc::new(tx1.clone()));
-        index.add_tx(Arc::new(coinbase2.clone()));
-        index.add_tx(Arc::new(tx2.clone()));
+        let all_txs: Vec<Arc<dyn AbstractTransaction + Send + Sync>> = vec![
+            Arc::new(coinbase),
+            Arc::new(tx1),
+            Arc::new(coinbase2),
+            Arc::new(tx2),
+        ];
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(index));
+        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        engine.add_base_facts(all_txs);
 
         // === Build the cyclic pipeline ===
 
@@ -512,14 +516,16 @@ mod tests {
             n_locktime: 0,
         };
 
-        let mut index = InMemoryIndex::new();
-        index.add_tx(Arc::new(coinbase));
-        index.add_tx(Arc::new(spending_tx));
-        index.add_tx(Arc::new(change_spend_tx));
-        index.add_tx(Arc::new(payment_spend_tx));
+        let all_txs: Vec<Arc<dyn AbstractTransaction + Send + Sync>> = vec![
+            Arc::new(coinbase),
+            Arc::new(spending_tx),
+            Arc::new(change_spend_tx),
+            Arc::new(payment_spend_tx),
+        ];
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(index));
+        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        engine.add_base_facts(all_txs);
 
         let all_txouts = AllTxs::new(&ctx).outputs();
         let change_mask = FingerPrintChangeIdentification::new(all_txouts);
@@ -537,6 +543,33 @@ mod tests {
             result.get(&payment_output),
             Some(&false),
             "payment output should not be identified as change by fingerprint heuristic"
+        );
+    }
+
+    #[test]
+    fn test_rerunning_engine_after_new_facts() {
+        let mut all_txs = setup_test_fixture();
+        let spending_tx = all_txs.split_off(2);
+        let ctx = Arc::new(PipelineContext::new());
+        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        engine.add_base_facts(all_txs);
+
+        let all_txs = AllTxs::new(&ctx);
+        let mih_clustering = MultiInputHeuristic::new(all_txs);
+        let result = engine.eval(&mih_clustering);
+
+        let spending_tx_fixture = TestFixture::spending_tx();
+        assert_ne!(
+            result.find(spending_tx_fixture.spent_coins[0]),
+            result.find(spending_tx_fixture.spent_coins[1])
+        );
+
+        engine.add_base_facts(spending_tx);
+
+        let result = engine.eval(&mih_clustering);
+        assert_eq!(
+            result.find(spending_tx_fixture.spent_coins[0]),
+            result.find(spending_tx_fixture.spent_coins[1])
         );
     }
 }

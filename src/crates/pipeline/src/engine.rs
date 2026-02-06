@@ -7,15 +7,51 @@
 //! - Fixpoint iteration for recursive/cyclic definitions
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
+use tx_indexer_primitives::abstract_types::AbstractTransaction;
 use tx_indexer_primitives::loose::storage::InMemoryIndex;
 
 use crate::context::PipelineContext;
 use crate::expr::Expr;
 use crate::node::NodeId;
-use crate::storage::NodeStorage;
+use crate::storage::{BaseFacts, NodeStorage};
 use crate::value::ExprValue;
+
+// TODO: make the base fact generic
+pub struct SourceNodeEvalContext<'a> {
+    pub(crate) base_facts: &'a mut BaseFacts,
+    pub(crate) index: &'a Arc<RwLock<InMemoryIndex>>,
+    #[allow(unused)]
+    pub(crate) node_id: NodeId,
+}
+
+impl<'a> SourceNodeEvalContext<'a> {
+    pub fn new(
+        base_facts: &'a mut BaseFacts,
+        index: &'a Arc<RwLock<InMemoryIndex>>,
+        node_id: NodeId,
+    ) -> Self {
+        Self {
+            base_facts,
+            index,
+            node_id,
+        }
+    }
+
+    pub fn take_base_facts(&mut self) -> Option<Vec<Arc<dyn AbstractTransaction + Send + Sync>>> {
+        self.base_facts.take_base_facts()
+    }
+
+    /// Run a closure with exclusive access to the index (e.g. for `add_tx`).
+    /// Use this instead of holding a mutable reference so the lock is released when done.
+    pub fn with_index_mut<R, F>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut InMemoryIndex) -> R,
+    {
+        f(&mut self.index.write().expect("lock poisoned"))
+    }
+}
 
 /// Context passed to nodes during evaluation.
 ///
@@ -81,27 +117,42 @@ impl<'a> EvalContext<'a> {
 /// through fixpoint iteration.
 pub struct Engine {
     ctx: Arc<PipelineContext>,
-    index: Arc<InMemoryIndex>,
+    index: Arc<RwLock<InMemoryIndex>>,
     storage: NodeStorage,
+    base_facts: BaseFacts,
     /// Track which iteration each node was last evaluated in (for cycle detection).
     eval_iteration: HashMap<NodeId, usize>,
+    iteration: usize,
 }
 
 impl Engine {
     /// Create a new engine.
-    pub fn new(ctx: Arc<PipelineContext>, index: Arc<InMemoryIndex>) -> Self {
+    ///
+    /// The index is wrapped in `RwLock` so source nodes can mutate it (e.g. `add_tx`)
+    /// while other nodes read it. Use `Arc::new(RwLock::new(index))` at call sites.
+    pub fn new(ctx: Arc<PipelineContext>, index: Arc<RwLock<InMemoryIndex>>) -> Self {
         Self {
             ctx,
             index,
             storage: NodeStorage::new(),
+            base_facts: BaseFacts::default(),
             eval_iteration: HashMap::new(),
+            iteration: 0,
         }
     }
 
+    // TODO: not used. Would we ever want a collection of just raw facts
     pub fn evaluated_facts<T: ExprValue>(&mut self, expr: &Expr<T>) -> Vec<&T::Output> {
         self.storage
             .non_volatile_get::<T>(expr.id())
             .unwrap_or_default()
+    }
+
+    pub fn add_base_facts(
+        &mut self,
+        facts: impl IntoIterator<Item = Arc<dyn AbstractTransaction + Send + Sync>>,
+    ) {
+        self.base_facts.set_base_facts(facts);
     }
 
     /// Evaluate an expression to a single combined value.
@@ -129,8 +180,9 @@ impl Engine {
         &self.ctx
     }
 
-    /// Get the underlying index.
-    pub fn index(&self) -> &Arc<InMemoryIndex> {
+    /// Get the underlying index (read access). For write access in source nodes, use
+    /// the `SourceNodeEvalContext::with_index_mut` closure API.
+    pub fn index(&self) -> &Arc<RwLock<InMemoryIndex>> {
         &self.index
     }
 
@@ -145,18 +197,21 @@ impl Engine {
     pub fn run_to_fixpoint(&mut self) -> usize {
         // TODO: make this configurable
         let max_iterations = 100;
-        let mut iteration = 0;
-
         // Get all nodes
         let all_ids: Vec<_> = self.ctx.all_node_ids();
 
         // Sort nodes topologically (best effort - cycles will be handled)
         let sorted_ids = self.topological_sort(&all_ids);
 
+        // TODO: get source node ids, and handle them separately before entering the fixpoint loop
+        for &id in self.ctx.all_source_node_ids().iter() {
+            self.evaluate_source_node(id);
+        }
+
         // Fixpoint iteration
         loop {
-            iteration += 1;
-            if iteration > max_iterations {
+            self.iteration += 1;
+            if self.iteration > max_iterations {
                 panic!(
                     "Fixpoint iteration exceeded maximum ({} iterations)",
                     max_iterations
@@ -167,7 +222,7 @@ impl Engine {
 
             // Evaluate all nodes in topological order
             for &id in &sorted_ids {
-                let changed = self.evaluate_node_for_fixpoint(id, iteration);
+                let changed = self.evaluate_node_for_fixpoint(id, self.iteration);
                 if changed {
                     any_changed = true;
                 }
@@ -179,7 +234,18 @@ impl Engine {
             }
         }
 
-        iteration
+        self.iteration
+    }
+
+    fn evaluate_source_node(&mut self, id: NodeId) {
+        let node = match self.ctx.get_source_node(id) {
+            Some(n) => n,
+            None => return, // TODO: panic? This points to a bug
+        };
+
+        let mut eval_ctx = SourceNodeEvalContext::new(&mut self.base_facts, &self.index, id);
+        let result = node.evaluate_any(&mut eval_ctx);
+        self.storage.append(id, result);
     }
 
     /// Topologically sort nodes (best effort with cycles).
@@ -250,7 +316,8 @@ impl Engine {
             return false;
         }
 
-        let eval_ctx = EvalContext::new(&self.storage, &self.index, id);
+        let index_guard = self.index.read().expect("lock poisoned");
+        let eval_ctx = EvalContext::new(&self.storage, &*index_guard, id);
         let previous = self.storage.get_last(id);
         let (result, changed) = node.evaluate_any(&eval_ctx, previous);
 

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use crate::expr::Expr;
-use crate::node::{Node, NodeId, SharedNode};
+use crate::node::{Node, NodeId, SharedNode, SharedSourceNode, SourceNode};
 
 /// Central registry for the expression graph.
 ///
@@ -26,6 +26,8 @@ use crate::node::{Node, NodeId, SharedNode};
 /// let txs = AllTxs::new(&ctx);  // Registers a node and returns Expr<TxSet>
 /// ```
 pub struct PipelineContext {
+    /// Map from NodeId to the type-erased source node.
+    source_nodes: RwLock<HashMap<NodeId, SharedSourceNode>>,
     /// Map from NodeId to the type-erased node.
     nodes: RwLock<HashMap<NodeId, SharedNode>>,
     /// Counter for generating unique node IDs.
@@ -42,6 +44,7 @@ impl PipelineContext {
     /// Create a new empty pipeline context.
     pub fn new() -> Self {
         Self {
+            source_nodes: RwLock::new(HashMap::new()),
             nodes: RwLock::new(HashMap::new()),
             next_id: AtomicU64::new(0),
         }
@@ -72,12 +75,36 @@ impl PipelineContext {
         Expr::new(id, Arc::clone(self))
     }
 
+    pub fn register_source<N: SourceNode>(
+        self: &Arc<Self>,
+        source_node: N,
+    ) -> Expr<N::OutputValue> {
+        let id = NodeId(self.next_id.fetch_add(1, Ordering::SeqCst));
+
+        {
+            let mut nodes = self.source_nodes.write().expect("lock poisoned");
+            nodes.insert(id, Arc::new(source_node));
+        }
+
+        Expr::new(id, Arc::clone(self))
+    }
+
     /// Get a node by ID.
     ///
     /// Returns `None` if the node doesn't exist.
     pub fn get_node(&self, id: NodeId) -> Option<SharedNode> {
         let nodes = self.nodes.read().expect("lock poisoned");
         nodes.get(&id).cloned()
+    }
+
+    pub fn get_source_node(&self, id: NodeId) -> Option<SharedSourceNode> {
+        let nodes = self.source_nodes.read().expect("lock poisoned");
+        nodes.get(&id).cloned()
+    }
+
+    pub fn all_source_node_ids(&self) -> Vec<NodeId> {
+        let nodes = self.source_nodes.read().expect("lock poisoned");
+        nodes.keys().copied().collect()
     }
 
     /// Get all node IDs in the graph.

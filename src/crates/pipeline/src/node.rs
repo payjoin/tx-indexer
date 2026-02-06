@@ -8,7 +8,7 @@ use std::any::Any;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::engine::EvalContext;
+use crate::engine::{EvalContext, SourceNodeEvalContext};
 use crate::value::ExprValue;
 
 /// Unique identifier for a node in the expression graph.
@@ -128,3 +128,40 @@ where
 
 /// A shared reference to a type-erased node.
 pub type SharedNode = Arc<dyn AnyNode>;
+
+pub trait SourceNode: Send + Sync + 'static {
+    /// The value type this node produces when evaluated.
+    type OutputValue: ExprValue;
+
+    fn evaluate(&self, ctx: &mut SourceNodeEvalContext)
+    -> <Self::OutputValue as ExprValue>::Output;
+
+    /// Optional: provide a human-readable name for debugging.
+    fn name(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
+}
+
+pub trait AnySourceNode: Send + Sync + 'static {
+    /// Evaluate this node and return the result plus whether it changed from `previous`.
+    /// The node does a single typed downcast of `previous` to compare
+    fn evaluate_any(&self, ctx: &mut SourceNodeEvalContext) -> Box<dyn Any + Send + Sync>;
+
+    /// Get the name of this node for debugging.
+    fn name(&self) -> &'static str;
+}
+
+impl<N: SourceNode> AnySourceNode for N
+where
+    <N::OutputValue as ExprValue>::Output: Send + Sync,
+{
+    fn evaluate_any(&self, ctx: &mut SourceNodeEvalContext) -> Box<dyn Any + Send + Sync> {
+        Box::new(self.evaluate(ctx))
+    }
+
+    fn name(&self) -> &'static str {
+        SourceNode::name(self)
+    }
+}
+
+pub type SharedSourceNode = Arc<dyn AnySourceNode>;

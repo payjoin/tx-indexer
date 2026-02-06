@@ -54,17 +54,18 @@ impl SameAddressClustering {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, RwLock};
 
     use pipeline::ops::AllTxs;
     use pipeline::{Engine, PipelineContext};
+    use tx_indexer_primitives::abstract_types::AbstractTransaction;
     use tx_indexer_primitives::loose::TxId;
     use tx_indexer_primitives::loose::storage::InMemoryIndex;
     use tx_indexer_primitives::test_utils::{DummyTxData, DummyTxOutData};
 
     use super::*;
 
-    fn setup_test_fixture() -> InMemoryIndex {
+    fn setup_test_fixture() -> Vec<Arc<dyn AbstractTransaction + Send + Sync>> {
         // Fixture: two coinbase txs, spent by two txs; two outputs each, both change outputs share same spk
         let shared_spk = [42u8; 20];
         let unique_spk1 = [1u8; 20];
@@ -108,20 +109,20 @@ mod tests {
             n_locktime: 0,
         };
 
-        let mut index = InMemoryIndex::new();
-        index.add_tx(Arc::new(coinbase1));
-        index.add_tx(Arc::new(coinbase2));
-        index.add_tx(Arc::new(spend1.clone()));
-        index.add_tx(Arc::new(spend2.clone()));
-
-        index
+        vec![
+            Arc::new(coinbase1),
+            Arc::new(coinbase2),
+            Arc::new(spend1),
+            Arc::new(spend2),
+        ]
     }
 
     #[test]
     fn test_same_address_clustering() {
-        let index = setup_test_fixture();
+        let all_txs = setup_test_fixture();
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(index));
+        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        engine.add_base_facts(all_txs);
 
         let all_txs = AllTxs::new(&ctx);
         let clustering = SameAddressClustering::new(all_txs);

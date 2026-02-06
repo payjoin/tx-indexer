@@ -6,10 +6,29 @@
 
 use std::any::Any;
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
+
+use tx_indexer_primitives::abstract_types::AbstractTransaction;
 
 use crate::node::NodeId;
 use crate::value::ExprValue;
+
+#[derive(Default)]
+pub struct BaseFacts {
+    facts: Option<Vec<Arc<dyn AbstractTransaction + Send + Sync>>>,
+}
+
+impl BaseFacts {
+    pub fn set_base_facts(
+        &mut self,
+        facts: impl IntoIterator<Item = Arc<dyn AbstractTransaction + Send + Sync>>,
+    ) {
+        self.facts = Some(facts.into_iter().collect());
+    }
+    pub fn take_base_facts(&mut self) -> Option<Vec<Arc<dyn AbstractTransaction + Send + Sync>>> {
+        self.facts.take()
+    }
+}
 
 /// Segregated storage for node evaluation results.
 ///
@@ -41,7 +60,6 @@ impl NodeStorage {
             cursor: RwLock::new(HashMap::new()),
         }
     }
-
     /// Append a value for a node.
     pub fn append(&mut self, id: NodeId, value: Box<dyn Any + Send + Sync>) {
         self.slots.entry(id).or_insert(vec![]).push(value);
