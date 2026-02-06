@@ -10,11 +10,11 @@ pub enum TxCoinjoinAnnotation {
 }
 
 /// This is a super naive implementation that should be replace with a more sophisticated one.
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct NaiveCoinjoinDetection;
 
 impl NaiveCoinjoinDetection {
-    pub fn is_coinjoin(&self, tx: &impl EnumerateOutputValueInArbitraryOrder) -> bool {
+    pub fn is_coinjoin(tx: &impl EnumerateOutputValueInArbitraryOrder) -> bool {
         // If there are >= 3 outputs of the same value, tag as coinjoin.
         // TODO: impl actual detection
         let mut counts = HashMap::new();
@@ -38,7 +38,6 @@ mod tests {
 
     #[test]
     fn test_is_coinjoin_tx() {
-        let coinjoin_detection = NaiveCoinjoinDetection::default();
         let not_coinjoin = DummyTxData {
             id: TxId(0),
             outputs: vec![
@@ -49,7 +48,7 @@ mod tests {
             spent_coins: vec![],
             n_locktime: 0,
         };
-        assert!(!coinjoin_detection.is_coinjoin(&not_coinjoin));
+        assert!(!NaiveCoinjoinDetection::is_coinjoin(&not_coinjoin));
 
         let coinjoin = DummyTxData {
             id: TxId(1),
@@ -67,6 +66,6 @@ mod tests {
             spent_coins: vec![],
             n_locktime: 0,
         };
-        assert!(coinjoin_detection.is_coinjoin(&coinjoin));
+        assert!(NaiveCoinjoinDetection::is_coinjoin(&coinjoin));
     }
 }

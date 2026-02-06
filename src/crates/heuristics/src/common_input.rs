@@ -7,7 +7,7 @@ use tx_indexer_primitives::{
 pub struct MultiInputHeuristic;
 
 impl MultiInputHeuristic {
-    pub fn merge_prevouts(&self, tx: &impl EnumerateSpentTxOuts) -> SparseDisjointSet<TxOutId> {
+    pub fn merge_prevouts(tx: &impl EnumerateSpentTxOuts) -> SparseDisjointSet<TxOutId> {
         let set = SparseDisjointSet::new();
         tx.spent_coins().reduce(|a, b| {
             set.union(a, b);
@@ -43,8 +43,7 @@ mod tests {
             n_locktime: 0,
         };
 
-        let heuristic = MultiInputHeuristic;
-        let cluster = heuristic.merge_prevouts(&tx);
+        let cluster = MultiInputHeuristic::merge_prevouts(&tx);
 
         // All three inputs should be in the same cluster
         let input1 = TxOutId::new(TxId(1), 0);

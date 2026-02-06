@@ -33,13 +33,12 @@ impl Node for MultiInputHeuristicNode {
         // Use get_or_default since input may not be ready yet in cyclic pipelines
         let tx_ids = ctx.get_or_default(&self.input);
         let index = ctx.index();
-        let heuristic = MIHImpl;
 
         let mut clustering = SparseDisjointSet::new();
 
         for tx_id in &tx_ids {
             let tx = tx_id.with(index);
-            let tx_clustering = heuristic.merge_prevouts(&tx);
+            let tx_clustering = MIHImpl::merge_prevouts(&tx);
             clustering = clustering.join(&tx_clustering);
         }
 

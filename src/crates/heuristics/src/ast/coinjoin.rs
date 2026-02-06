@@ -32,14 +32,13 @@ impl Node for IsCoinJoinNode {
     fn evaluate(&self, ctx: &EvalContext) -> HashMap<TxId, bool> {
         let tx_ids = ctx.get(&self.input);
         let index = ctx.index();
-        let detector = NaiveCoinjoinDetection::default();
-
-        let mut result = HashMap::new();
-        for &tx_id in tx_ids {
-            let tx = tx_id.with(index);
-            result.insert(tx_id, detector.is_coinjoin(&tx));
-        }
-        result
+        tx_ids
+            .iter()
+            .map(|tx_id| {
+                let tx = tx_id.with(index);
+                (tx.id(), NaiveCoinjoinDetection::is_coinjoin(&tx))
+            })
+            .collect()
     }
 
     fn name(&self) -> &'static str {
