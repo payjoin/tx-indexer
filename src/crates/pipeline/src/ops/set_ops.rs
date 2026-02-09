@@ -73,7 +73,7 @@ impl Node for TxsNode {
 
     fn evaluate(&self, ctx: &EvalContext) -> HashSet<TxId> {
         let outputs = ctx.get(&self.input);
-        outputs.iter().map(|out| out.txid).collect()
+        outputs.iter().map(|out| out.txid()).collect()
     }
 
     fn name(&self) -> &'static str {

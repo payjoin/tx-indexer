@@ -1,13 +1,15 @@
 use tx_indexer_primitives::{
     abstract_types::EnumerateSpentTxOuts,
     disjoint_set::{DisJointSet, SparseDisjointSet},
-    loose::TxOutId,
 };
 
 pub struct MultiInputHeuristic;
 
 impl MultiInputHeuristic {
-    pub fn merge_prevouts(tx: &impl EnumerateSpentTxOuts) -> SparseDisjointSet<TxOutId> {
+    pub fn merge_prevouts<T: Eq + std::hash::Hash + Copy, E>(tx: &E) -> SparseDisjointSet<T>
+    where
+        E: EnumerateSpentTxOuts<TxOutId = T>,
+    {
         let set = SparseDisjointSet::new();
         tx.spent_coins().reduce(|a, b| {
             set.union(a, b);

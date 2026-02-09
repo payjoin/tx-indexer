@@ -3,7 +3,6 @@ pub mod abstract_types;
 pub mod dense;
 pub mod disjoint_set;
 pub mod graph_index;
-pub mod handle;
 pub mod loose;
 
 pub type ScriptPubkeyHash = [u8; 20];
@@ -20,7 +19,7 @@ pub mod test_utils {
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
             EnumerateSpentTxOuts, OutputCount, TxConstituent,
         },
-        loose::{TxId, TxOutId},
+        loose::{self, TxId, TxInId, TxOutId},
     };
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -61,12 +60,18 @@ pub mod test_utils {
     }
 
     impl AbstractTxIn for DummyTxInWrapper {
+        type TxId = TxId;
+        type TxOutId = TxOutId;
         fn prev_txid(&self) -> TxId {
             self.prev_txid
         }
 
         fn prev_vout(&self) -> u32 {
             self.prev_vout
+        }
+
+        fn prev_txout_id(&self) -> TxOutId {
+            TxOutId::new(self.prev_txid, self.prev_vout)
         }
     }
 
@@ -101,22 +106,31 @@ pub mod test_utils {
     }
 
     impl AbstractTransaction for DummyTxData {
+        type TxId = TxId;
+        type TxOutId = TxOutId;
+        type TxInId = TxInId;
         fn id(&self) -> TxId {
             self.id
         }
 
-        fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn>> + '_> {
+        fn inputs(
+            &self,
+        ) -> Box<
+            dyn Iterator<Item = Box<dyn AbstractTxIn<TxId = Self::TxId, TxOutId = Self::TxOutId>>>
+                + '_,
+        > {
             // Collect into a vector to avoid lifetime issues
-            let inputs: Vec<Box<dyn AbstractTxIn>> = self
-                .spent_coins
-                .iter()
-                .map(|spent| {
-                    Box::new(DummyTxInWrapper {
-                        prev_txid: spent.txid,
-                        prev_vout: spent.vout,
-                    }) as Box<dyn AbstractTxIn>
-                })
-                .collect();
+            let inputs: Vec<Box<dyn AbstractTxIn<TxId = Self::TxId, TxOutId = Self::TxOutId>>> =
+                self.spent_coins
+                    .iter()
+                    .map(|spent| {
+                        Box::new(DummyTxInWrapper {
+                            prev_txid: spent.txid(),
+                            prev_vout: spent.vout(),
+                        })
+                            as Box<dyn AbstractTxIn<TxId = Self::TxId, TxOutId = Self::TxOutId>>
+                    })
+                    .collect();
             Box::new(inputs.into_iter())
         }
 
@@ -163,28 +177,19 @@ pub mod test_utils {
         }
     }
 
-    impl From<DummyTxData> for Box<dyn AbstractTransaction + Send + Sync> {
+    impl From<DummyTxData>
+        for Box<
+            dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId> + Send + Sync,
+        >
+    {
         fn from(val: DummyTxData) -> Self {
             Box::new(val)
-        }
-    }
-
-    impl DummyTxData {
-        /// Convert DummyTxData to a boxed AbstractTransaction
-        pub fn into_abstract_tx(self) -> Box<dyn AbstractTransaction + Send + Sync> {
-            self.into()
         }
     }
 
     pub struct DummyTxOut {
         pub vout: usize,
         pub containing_tx: DummyTxData,
-    }
-
-    impl DummyTxOut {
-        pub fn id(&self) -> TxOutId {
-            self.containing_tx.id().txout_id(self.vout as u32)
-        }
     }
 
     impl TxConstituent for DummyTxOut {

@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use tx_indexer_primitives::abstract_types::AbstractTransaction;
-use tx_indexer_primitives::loose::storage::InMemoryIndex;
+use tx_indexer_primitives::loose::{TxId, TxInId, TxOutId, storage::InMemoryIndex};
 
 use crate::context::PipelineContext;
 use crate::expr::Expr;
@@ -39,7 +39,17 @@ impl<'a> SourceNodeEvalContext<'a> {
         }
     }
 
-    pub fn take_base_facts(&mut self) -> Option<Vec<Arc<dyn AbstractTransaction + Send + Sync>>> {
+    pub fn take_base_facts(
+        &mut self,
+    ) -> Option<
+        Vec<
+            Arc<
+                dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId>
+                    + Send
+                    + Sync,
+            >,
+        >,
+    > {
         self.base_facts.take_base_facts()
     }
 
@@ -115,6 +125,7 @@ impl<'a> EvalContext<'a> {
 /// The engine evaluates expressions on demand, caching results and
 /// respecting dependencies between nodes. It supports cyclic dependencies
 /// through fixpoint iteration.
+// TODO: this is hardcoded for loose txs. We need to make it generic.
 pub struct Engine {
     ctx: Arc<PipelineContext>,
     index: Arc<RwLock<InMemoryIndex>>,
@@ -135,7 +146,7 @@ impl Engine {
             ctx,
             index,
             storage: NodeStorage::new(),
-            base_facts: BaseFacts::default(),
+            base_facts: BaseFacts::new(),
             eval_iteration: HashMap::new(),
             iteration: 0,
         }
@@ -150,7 +161,13 @@ impl Engine {
 
     pub fn add_base_facts(
         &mut self,
-        facts: impl IntoIterator<Item = Arc<dyn AbstractTransaction + Send + Sync>>,
+        facts: impl IntoIterator<
+            Item = Arc<
+                dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId>
+                    + Send
+                    + Sync,
+            >,
+        >,
     ) {
         self.base_facts.set_base_facts(facts);
     }

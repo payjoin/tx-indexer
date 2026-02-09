@@ -11,7 +11,7 @@ mod tests {
     use tx_indexer_primitives::abstract_types::AbstractTransaction;
     use tx_indexer_primitives::disjoint_set::DisJointSet;
     use tx_indexer_primitives::loose::storage::InMemoryIndex;
-    use tx_indexer_primitives::loose::{TxId, TxOutId};
+    use tx_indexer_primitives::loose::{TxId, TxInId, TxOutId};
     use tx_indexer_primitives::test_utils::{DummyTxData, DummyTxOutData};
 
     use crate::ast::{
@@ -66,7 +66,9 @@ mod tests {
         }
     }
 
-    fn setup_test_fixture() -> Vec<Arc<dyn AbstractTransaction + Send + Sync>> {
+    fn setup_test_fixture() -> Vec<
+        Arc<dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId> + Send + Sync>,
+    > {
         vec![
             Arc::new(TestFixture::coinbase1()),
             Arc::new(TestFixture::coinbase2()),
@@ -101,8 +103,13 @@ mod tests {
             n_locktime: 0,
         };
 
-        let all_txs: Vec<Arc<dyn AbstractTransaction + Send + Sync>> =
-            vec![Arc::new(normal_tx), Arc::new(coinjoin_tx)];
+        let all_txs: Vec<
+            Arc<
+                dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId>
+                    + Send
+                    + Sync,
+            >,
+        > = vec![Arc::new(normal_tx), Arc::new(coinjoin_tx)];
 
         let ctx = Arc::new(PipelineContext::new());
         let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
@@ -385,7 +392,13 @@ mod tests {
             ],
             n_locktime: 0,
         };
-        let all_txs: Vec<Arc<dyn AbstractTransaction + Send + Sync>> = vec![
+        let all_txs: Vec<
+            Arc<
+                dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId>
+                    + Send
+                    + Sync,
+            >,
+        > = vec![
             Arc::new(coinbase),
             Arc::new(tx1),
             Arc::new(coinbase2),
@@ -516,7 +529,13 @@ mod tests {
             n_locktime: 0,
         };
 
-        let all_txs: Vec<Arc<dyn AbstractTransaction + Send + Sync>> = vec![
+        let all_txs: Vec<
+            Arc<
+                dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId>
+                    + Send
+                    + Sync,
+            >,
+        > = vec![
             Arc::new(coinbase),
             Arc::new(spending_tx),
             Arc::new(change_spend_tx),

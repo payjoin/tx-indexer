@@ -43,9 +43,11 @@ impl Node for SameAddressClusteringNode {
     }
 }
 
+#[allow(dead_code)]
 pub struct SameAddressClustering;
 
 impl SameAddressClustering {
+    #[allow(dead_code)]
     pub fn new(txs: Expr<TxSet>) -> Expr<Clustering> {
         let ctx = txs.context().clone();
         ctx.register(SameAddressClusteringNode::new(txs))
@@ -59,13 +61,15 @@ mod tests {
     use pipeline::ops::AllTxs;
     use pipeline::{Engine, PipelineContext};
     use tx_indexer_primitives::abstract_types::AbstractTransaction;
-    use tx_indexer_primitives::loose::TxId;
     use tx_indexer_primitives::loose::storage::InMemoryIndex;
+    use tx_indexer_primitives::loose::{TxId, TxInId};
     use tx_indexer_primitives::test_utils::{DummyTxData, DummyTxOutData};
 
     use super::*;
 
-    fn setup_test_fixture() -> Vec<Arc<dyn AbstractTransaction + Send + Sync>> {
+    fn setup_test_fixture() -> Vec<
+        Arc<dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId> + Send + Sync>,
+    > {
         // Fixture: two coinbase txs, spent by two txs; two outputs each, both change outputs share same spk
         let shared_spk = [42u8; 20];
         let unique_spk1 = [1u8; 20];
