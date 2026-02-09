@@ -3,8 +3,8 @@ use pipeline::expr::Expr;
 use pipeline::node::Node;
 use pipeline::value::TxSet;
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
+use tx_indexer_primitives::graph_index::ScriptPubkeyIndex;
 use tx_indexer_primitives::loose::TxOutId;
-use tx_indexer_primitives::loose::storage::ScriptPubkeyIndex;
 
 pub struct SameAddressClusteringNode {
     txs: Expr<TxSet>,

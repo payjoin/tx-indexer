@@ -1,30 +1,21 @@
-use bitcoin::consensus::Encodable;
-use std::ops::Deref;
-use std::sync::Arc;
-
 use super::{TxHandle, TxId, TxInId, TxOutId};
-use crate::ScriptPubkeyHash;
-use crate::abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut};
-use crate::disjoint_set::SparseDisjointSet;
-use std::collections::HashMap;
-use std::hash::{DefaultHasher, Hasher};
+use crate::{
+    ScriptPubkeyHash,
+    abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut},
+    disjoint_set::{DisJointSet, SparseDisjointSet},
+    graph_index::{
+        GlobalClusteringIndex, IndexedGraph, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex,
+    },
+};
 
-pub trait PrevOutIndex {
-    // TODO: consider handle wrappers converting ids to the actual types.
-    // justification: the heuristics may not care about the content of the data. Only access that thru the handler.
-    fn prev_txout(&self, ot: &TxInId) -> TxOutId;
-}
+use bitcoin::consensus::Encodable;
 
-pub trait TxInIndex {
-    fn spending_txin(&self, tx: &TxOutId) -> Option<TxInId>;
-}
-
-pub trait ScriptPubkeyIndex {
-    /// Returns the first transaction output ID that uses the given script pubkey.
-    fn script_pubkey_to_txout_id(&self, script_pubkey: &ScriptPubkeyHash) -> Option<TxOutId>;
-}
-
-pub trait IndexedGraph: PrevOutIndex + TxInIndex + ScriptPubkeyIndex {}
+use std::{
+    collections::HashMap,
+    hash::{DefaultHasher, Hasher},
+    ops::Deref,
+    sync::Arc,
+};
 
 impl IndexedGraph for InMemoryIndex {}
 
@@ -131,6 +122,22 @@ impl TxInIndex for InMemoryIndex {
 impl ScriptPubkeyIndex for InMemoryIndex {
     fn script_pubkey_to_txout_id(&self, script_pubkey: &ScriptPubkeyHash) -> Option<TxOutId> {
         self.spk_to_txout_ids.get(script_pubkey).cloned()
+    }
+}
+
+impl TxIndex for InMemoryIndex {
+    fn tx(&self, txid: &TxId) -> Option<Arc<dyn AbstractTransaction + Send + Sync>> {
+        self.txs.get(txid).cloned()
+    }
+}
+
+impl GlobalClusteringIndex for InMemoryIndex {
+    fn find(&self, txout_id: TxOutId) -> TxOutId {
+        self.global_clustering.find(txout_id)
+    }
+
+    fn union(&self, txout_id1: TxOutId, txout_id2: TxOutId) {
+        self.global_clustering.union(txout_id1, txout_id2);
     }
 }
 

@@ -1,24 +1,23 @@
-use crate::ScriptPubkeyHash;
-use crate::abstract_fingerprints::HasNLockTime;
-use crate::abstract_types::AbstractTransaction;
-use crate::abstract_types::EnumerateOutputValueInArbitraryOrder;
-use crate::abstract_types::EnumerateSpentTxOuts;
-use crate::abstract_types::OutputCount;
-use crate::abstract_types::TxConstituent;
-use crate::disjoint_set::DisJointSet;
-use crate::loose::TxId;
-use crate::loose::TxInId;
-use crate::loose::TxOutId;
-use crate::loose::storage::InMemoryIndex;
+use crate::{
+    ScriptPubkeyHash,
+    abstract_fingerprints::HasNLockTime,
+    abstract_types::{
+        AbstractTransaction, EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts,
+        OutputCount, TxConstituent,
+    },
+    graph_index::IndexedGraph,
+    loose::storage::InMemoryIndex,
+    loose::{TxId, TxInId, TxOutId},
+};
 
 use bitcoin::Amount;
 pub struct TxHandle<'a> {
     id: TxId,
-    index: &'a InMemoryIndex,
+    index: &'a dyn IndexedGraph,
 }
 
 impl<'a> TxHandle<'a> {
-    pub fn new(id: TxId, index: &'a InMemoryIndex) -> Self {
+    pub fn new(id: TxId, index: &'a dyn IndexedGraph) -> Self {
         Self { id, index }
     }
 
@@ -33,11 +32,10 @@ impl<'a> TxHandle<'a> {
     pub fn outputs(&self) -> impl Iterator<Item = TxOutHandle<'a>> {
         let outputs_len = self
             .index
-            .txs
-            .get(&self.id)
+            .tx(&self.id)
             .expect("If I have a handle it must exist?")
             .output_len();
-        (0..outputs_len).map(|i| self.id.txout_handle(self.index, i as u32))
+        (0..outputs_len).map(|i| self.id.txout_id(i as u32).with(self.index))
     }
 
     pub fn output_count(&self) -> usize {
@@ -57,9 +55,9 @@ impl<'a> TxHandle<'a> {
         if inputs.is_empty() {
             return false;
         }
-        let first_root = self.index.global_clustering.find(inputs[0]);
+        let first_root = self.index.find(inputs[0]);
         inputs.iter().all(|input| {
-            let other = self.index.global_clustering.find(*input);
+            let other = self.index.find(*input);
 
             other == first_root
         })
@@ -72,32 +70,34 @@ impl AbstractTransaction for TxHandle<'_> {
     }
 
     // TODO: are these expects correct when in a pruned node
+    // TODO: this hsould be returning an Arc pointer not allocated box
     fn inputs(
         &self,
     ) -> Box<dyn Iterator<Item = Box<dyn crate::abstract_types::AbstractTxIn>> + '_> {
-        // Delegate to the stored transaction in the index
-        self.index
-            .txs
-            .get(&self.id)
-            .expect("Tx should always exist if we have a handle")
-            .inputs()
+        let tx = self
+            .index
+            .tx(&self.id)
+            .expect("Tx should always exist if we have a handle");
+        let input_boxes: Vec<Box<dyn crate::abstract_types::AbstractTxIn>> = tx.inputs().collect();
+        Box::new(input_boxes.into_iter())
     }
 
+    // TODO: this should be returning an Arc pointer not allocated box
     fn outputs(
         &self,
     ) -> Box<dyn Iterator<Item = Box<dyn crate::abstract_types::AbstractTxOut>> + '_> {
-        // Delegate to the stored transaction in the index
-        self.index
-            .txs
-            .get(&self.id)
-            .expect("Tx should always exist if we have a handle")
-            .outputs()
+        let tx = self
+            .index
+            .tx(&self.id)
+            .expect("Tx should always exist if we have a handle");
+        let output_boxes: Vec<Box<dyn crate::abstract_types::AbstractTxOut>> =
+            tx.outputs().collect();
+        Box::new(output_boxes.into_iter())
     }
 
     fn output_len(&self) -> usize {
         self.index
-            .txs
-            .get(&self.id)
+            .tx(&self.id)
             .expect("Tx should always exist if we have a handle")
             .output_len()
     }
@@ -105,16 +105,14 @@ impl AbstractTransaction for TxHandle<'_> {
     fn output_at(&self, index: usize) -> Option<Box<dyn crate::abstract_types::AbstractTxOut>> {
         // Delegate to the stored transaction in the index
         self.index
-            .txs
-            .get(&self.id)
+            .tx(&self.id)
             .expect("Tx should always exist if we have a handle")
             .output_at(index)
     }
 
     fn locktime(&self) -> u32 {
         self.index
-            .txs
-            .get(&self.id)
+            .tx(&self.id)
             .expect("Tx should always exist if we have a handle")
             .locktime()
     }
@@ -153,8 +151,7 @@ impl<'a> EnumerateOutputValueInArbitraryOrder for TxHandle<'a> {
 impl<'a> HasNLockTime for TxHandle<'a> {
     fn n_locktime(&self) -> u32 {
         self.index
-            .txs
-            .get(&self.id)
+            .tx(&self.id)
             .expect("Tx should always exist if we have a handle")
             .locktime()
     }
@@ -162,11 +159,11 @@ impl<'a> HasNLockTime for TxHandle<'a> {
 
 pub struct TxInHandle<'a> {
     id: TxInId,
-    index: &'a InMemoryIndex,
+    index: &'a dyn IndexedGraph,
 }
 
 impl<'a> TxInHandle<'a> {
-    pub fn new(id: TxInId, index: &'a InMemoryIndex) -> Self {
+    pub fn new(id: TxInId, index: &'a dyn IndexedGraph) -> Self {
         Self { id, index }
     }
 
@@ -201,12 +198,12 @@ impl<'a> ClusterHandle<'a> {
 
 pub struct TxOutHandle<'a> {
     id: TxOutId,
-    index: &'a InMemoryIndex,
+    index: &'a dyn IndexedGraph,
 }
 
 impl<'a> TxOutHandle<'a> {
     // TODO: this new should exist. You always get a handle from the id.
-    pub fn new(id: TxOutId, index: &'a InMemoryIndex) -> Self {
+    pub fn new(id: TxOutId, index: &'a dyn IndexedGraph) -> Self {
         Self { id, index }
     }
 
@@ -220,8 +217,7 @@ impl<'a> TxOutHandle<'a> {
 
     pub fn amount(&self) -> Amount {
         self.index
-            .txs
-            .get(&self.id.txid)
+            .tx(&self.id.txid)
             .expect("Tx should always exist")
             .output_at(self.id.vout as usize)
             .expect("Output should always exist")
@@ -234,15 +230,13 @@ impl<'a> TxOutHandle<'a> {
 
     pub fn spent_by(&self) -> Option<TxInHandle<'a>> {
         self.index
-            .spending_txins
-            .get(&self.id)
+            .spending_txin(&self.id)
             .map(|txin_id| txin_id.with(self.index))
     }
 
     pub fn script_pubkey_hash(&self) -> ScriptPubkeyHash {
         self.index
-            .txs
-            .get(&self.id.txid)
+            .tx(&self.id.txid)
             .expect("Tx should always exist")
             .output_at(self.id.vout as usize)
             .expect("Output should always exist")

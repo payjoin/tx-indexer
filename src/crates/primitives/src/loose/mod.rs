@@ -1,9 +1,9 @@
 pub mod storage;
 
+use crate::graph_index::IndexedGraph;
 use crate::handle::TxHandle;
 use crate::handle::TxInHandle;
 use crate::handle::TxOutHandle;
-use crate::loose::storage::InMemoryIndex;
 
 // Type defintions for loose txs and their ids
 
@@ -22,7 +22,7 @@ impl TxOutId {
 }
 
 impl TxOutId {
-    pub fn with<'a>(&self, index: &'a InMemoryIndex) -> TxOutHandle<'a> {
+    pub fn with<'a>(&self, index: &'a dyn IndexedGraph) -> TxOutHandle<'a> {
         TxOutHandle::new(*self, index)
     }
 }
@@ -35,7 +35,7 @@ pub struct TxInId {
 }
 
 impl TxInId {
-    pub fn with<'a>(&self, index: &'a InMemoryIndex) -> TxInHandle<'a> {
+    pub fn with<'a>(&self, index: &'a dyn IndexedGraph) -> TxInHandle<'a> {
         TxInHandle::new(*self, index)
     }
 
@@ -52,7 +52,7 @@ impl TxInId {
 pub struct TxId(pub u32);
 
 impl TxId {
-    pub fn with<'a>(&self, index: &'a InMemoryIndex) -> TxHandle<'a> {
+    pub fn with<'a>(&self, index: &'a dyn IndexedGraph) -> TxHandle<'a> {
         TxHandle::new(*self, index)
     }
 
@@ -65,12 +65,12 @@ impl TxId {
         TxInId { txid: *self, vin }
     }
 
-    pub fn txout_handle<'a>(&self, index: &'a InMemoryIndex, vout: u32) -> TxOutHandle<'a> {
+    pub fn txout_handle<'a>(&self, index: &'a dyn IndexedGraph, vout: u32) -> TxOutHandle<'a> {
         self.txout_id(vout).with(index)
     }
 
     #[allow(unused)]
-    fn txin_handle<'a>(&self, index: &'a InMemoryIndex, vin: u32) -> TxInHandle<'a> {
+    fn txin_handle<'a>(&self, index: &'a dyn IndexedGraph, vin: u32) -> TxInHandle<'a> {
         self.txin_id(vin).with(index)
     }
 }
