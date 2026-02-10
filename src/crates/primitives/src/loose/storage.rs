@@ -1,5 +1,6 @@
 use crate::{
     ScriptPubkeyHash,
+    abstract_id::LooseIds,
     abstract_types::AbstractTransaction,
     disjoint_set::{DisJointSet, SparseDisjointSet},
     graph_index::{
@@ -16,16 +17,13 @@ use std::{
     sync::Arc,
 };
 
-impl IndexedGraph<TxId, TxInId, TxOutId> for InMemoryIndex {}
+impl IndexedGraph<LooseIds> for InMemoryIndex {}
 
 pub struct InMemoryIndex {
     pub prev_txouts: HashMap<TxInId, TxOutId>,
     pub spending_txins: HashMap<TxOutId, TxInId>,
     // TODO: test that insertion order does not make a difference
-    pub txs: HashMap<
-        TxId,
-        Arc<dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId> + Send + Sync>,
-    >,
+    pub txs: HashMap<TxId, Arc<dyn AbstractTransaction<Id = LooseIds> + Send + Sync>>,
     pub global_clustering: SparseDisjointSet<TxOutId>,
     /// Index mapping script pubkey hash (20 bytes) and the first transaction output ID that uses it
     pub spk_to_txout_ids: HashMap<ScriptPubkeyHash, TxOutId>,
@@ -62,7 +60,7 @@ impl InMemoryIndex {
     pub fn add_tx<'a>(
         &'a mut self,
         tx: Arc<
-            dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId> + Send + Sync,
+            dyn AbstractTransaction<Id = LooseIds> + Send + Sync,
         >,
     ) -> TxHandle<'a> {
         let tx_id = tx.id();
@@ -134,14 +132,12 @@ impl ScriptPubkeyIndex for InMemoryIndex {
 }
 
 impl TxIndex for InMemoryIndex {
-    type TxId = TxId;
-    type TxOutId = TxOutId;
-    type TxInId = TxInId;
+    type Id = LooseIds;
     fn tx(
         &self,
         txid: &TxId,
     ) -> Option<
-        Arc<dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId> + Send + Sync>,
+        Arc<dyn AbstractTransaction<Id = LooseIds> + Send + Sync>,
     > {
         self.txs.get(txid).cloned()
     }

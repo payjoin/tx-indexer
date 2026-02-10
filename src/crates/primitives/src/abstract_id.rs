@@ -6,6 +6,20 @@
 use crate::dense::{TxId as DenseTxId, TxInId as DenseTxInId, TxOutId as DenseTxOutId};
 use crate::loose::{TxId as LooseTxId, TxInId as LooseTxInId, TxOutId as LooseTxOutId};
 
+pub trait AbstractId {
+    type TxId: Eq + std::hash::Hash + Copy + Send + Sync + 'static;
+    type TxInId: Eq + std::hash::Hash + Copy + Send + Sync + 'static;
+    type TxOutId: Eq + std::hash::Hash + Copy + Send + Sync + 'static;
+}
+
+pub struct LooseIds;
+
+impl AbstractId for LooseIds {
+    type TxId = LooseTxId;
+    type TxInId = LooseTxInId;
+    type TxOutId = LooseTxOutId;
+}
+
 /// Abstract transaction ID that can represent any backend's concrete TxId.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum AbstractTxId {

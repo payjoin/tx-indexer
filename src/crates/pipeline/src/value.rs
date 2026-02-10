@@ -6,9 +6,39 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::marker::PhantomData;
+use std::sync::{Arc, RwLock};
 
-use tx_indexer_primitives::abstract_id::{AbstractTxId, AbstractTxOutId};
+use tx_indexer_primitives::abstract_id::{AbstractId, LooseIds};
 use tx_indexer_primitives::disjoint_set::SparseDisjointSet;
+use tx_indexer_primitives::graph_index::{IndexHandleFor, IndexedGraph};
+use tx_indexer_primitives::loose::storage::InMemoryIndex;
+
+/// Backend ties an ID family to its index handle type. Only the source (e.g. AllTxs) is concrete.
+pub trait Backend: AbstractId  + Sized + Send + Sync + 'static {
+    type IndexHandle: IndexHandleFor<Self> + Clone + Default + PartialEq + Send + Sync + 'static;
+}
+
+impl Backend for LooseIds {
+    type IndexHandle = LooseIndexHandle;
+}
+
+/// Wrapper for the loose index handle so it can implement PartialEq (by pointer equality).
+#[derive(Clone, Default)]
+pub struct LooseIndexHandle(pub Arc<RwLock<InMemoryIndex>>);
+
+impl IndexHandleFor<LooseIds> for LooseIndexHandle {
+    fn with_graph<R>(&self, f: impl for<'a> FnOnce(&'a dyn IndexedGraph<LooseIds>) -> R) -> R {
+        let guard = self.0.read().expect("lock poisoned");
+        f(&*guard)
+    }
+}
+
+impl PartialEq for LooseIndexHandle {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for LooseIndexHandle {}
 
 /// Trait for types that can be the value of an expression.
 ///
@@ -28,10 +58,16 @@ pub trait ExprValue: 'static {
 
 /// Marker type for a set of transaction IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TxSet;
+pub struct TxSet<K>(PhantomData<K>);
 
-impl ExprValue for TxSet {
-    type Output = HashSet<AbstractTxId>;
+impl<K> Default for TxSet<K> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<K: Eq + Hash + Clone + Send + Sync + 'static> ExprValue for TxSet<K> {
+    type Output = HashSet<K>;
 
     fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
         if facts.is_empty() {
@@ -39,18 +75,25 @@ impl ExprValue for TxSet {
         }
         let mut acc = facts[0].clone();
         for rest in &facts[1..] {
-            acc.extend(rest.iter().copied());
+            acc.extend(rest.iter().cloned());
         }
         acc
     }
 }
 
 /// Marker type for a set of transaction output IDs.
+// TODO: since this is generic over its input, its the same as TxSet above. can we just have one set type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TxOutSet;
+pub struct TxOutSet<K>(PhantomData<K>);
 
-impl ExprValue for TxOutSet {
-    type Output = HashSet<AbstractTxOutId>;
+impl<K> Default for TxOutSet<K> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<K: Eq + Hash + Clone + Send + Sync + 'static> ExprValue for TxOutSet<K> {
+    type Output = HashSet<K>;
 
     fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
         if facts.is_empty() {
@@ -58,7 +101,7 @@ impl ExprValue for TxOutSet {
         }
         let mut acc = facts[0].clone();
         for rest in &facts[1..] {
-            acc.extend(rest.iter().copied());
+            acc.extend(rest.iter().cloned());
         }
         acc
     }
@@ -94,10 +137,10 @@ impl<K: Eq + Hash + Clone + Send + Sync + 'static> ExprValue for Mask<K> {
 
 /// Marker type for clustering (disjoint set union of transaction outputs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Clustering;
+pub struct Clustering<K>(PhantomData<K>);
 
-impl ExprValue for Clustering {
-    type Output = SparseDisjointSet<AbstractTxOutId>;
+impl<K: Eq + Hash + Copy  + Send + Sync + 'static> ExprValue for Clustering<K> {
+    type Output = SparseDisjointSet<K>;
 
     fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
         if facts.is_empty() {
@@ -114,12 +157,56 @@ impl ExprValue for Clustering {
     }
 }
 
-// Value Type Aliases for convenience
+/// Marker type for the index expression for a backend. Output is the backend's index handle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Index<I: Backend>(PhantomData<I>);
 
-/// A mask over transaction IDs.
-pub type TxMask = Mask<AbstractTxId>;
+impl<I: Backend> Default for Index<I> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
 
-/// A mask over transaction output IDs.
-pub type TxOutMask = Mask<AbstractTxOutId>;
+impl<I: Backend + Send + Sync + 'static> ExprValue for Index<I> {
+    type Output = I::IndexHandle;
 
-pub type TxOutCluster = SparseDisjointSet<AbstractTxOutId>;
+    fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
+        if facts.is_empty() {
+            return Default::default();
+        }
+        facts[0].clone()
+    }
+}
+
+/// Alias for the loose backend index. Nodes take `Expr<Index<I>>`; for I = LooseIds this is LooseIndex.
+pub type LooseIndex = Index<LooseIds>;
+
+/// Output of the AllTxs source node: the set of transaction IDs and the index handle.
+/// Use projection nodes to obtain `Expr<TxSet<I::TxId>>` and `Expr<Index<I>>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AllTxsOutput<I: Backend> {
+    _marker: PhantomData<I>,
+}
+
+impl<I: Backend> Default for AllTxsOutput<I> {
+    fn default() -> Self {
+        Self {
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<I: Backend + Send + Sync + 'static> ExprValue for AllTxsOutput<I>
+where
+    I::TxId: Eq + Hash + Clone + Send + Sync + 'static,
+{
+    type Output = (HashSet<I::TxId>, I::IndexHandle);
+
+    fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
+        if facts.is_empty() {
+            return Default::default();
+        }
+        facts[0].clone()
+    }
+}
+

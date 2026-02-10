@@ -2,12 +2,14 @@ use std::sync::Arc;
 
 use bitcoin::Amount;
 
-use crate::ScriptPubkeyHash;
+use crate::{ScriptPubkeyHash, abstract_id::AbstractId};
 
 // Should be implemented by any type that is contained within a transaction.
 pub trait TxConstituent {
-    type Handle: AbstractTransaction;
-    fn containing_tx(&self) -> Self::Handle;
+    type Handle<'a>: AbstractTransaction + 'a
+    where
+        Self: 'a;
+    fn containing_tx(&self) -> Self::Handle<'_>;
 
     fn vout(&self) -> usize;
 }
@@ -17,7 +19,9 @@ pub trait OutputCount: AbstractTransaction {
 }
 
 pub trait EnumerateSpentTxOuts: AbstractTransaction {
-    fn spent_coins(&self) -> impl Iterator<Item = Self::TxOutId>;
+    fn spent_coins(
+        &self,
+    ) -> impl Iterator<Item = <<Self as AbstractTransaction>::Id as AbstractId>::TxOutId>;
 }
 
 // TODO: find a better name for this
@@ -27,7 +31,9 @@ pub trait EnumerateOutputValueInArbitraryOrder: AbstractTransaction {
 
 // Blanket implementation for Arc<dyn AbstractTransaction> to bridge with the heuristics
 impl<Atx: AbstractTransaction + ?Sized> EnumerateSpentTxOuts for Arc<Atx> {
-    fn spent_coins(&self) -> impl Iterator<Item = Self::TxOutId> {
+    fn spent_coins(
+        &self,
+    ) -> impl Iterator<Item = <<Self as AbstractTransaction>::Id as AbstractId>::TxOutId> {
         self.inputs().map(|input| input.prev_txout_id())
     }
 }
@@ -39,17 +45,15 @@ impl<Atx: AbstractTransaction + ?Sized> EnumerateOutputValueInArbitraryOrder for
 }
 
 impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Arc<T> {
-    type TxId = T::TxId;
-    type TxOutId = T::TxOutId;
-    type TxInId = T::TxInId;
-    fn id(&self) -> Self::TxId {
+    type Id = T::Id;
+    fn id(&self) -> <<Self as AbstractTransaction>::Id as AbstractId>::TxId {
         (**self).id()
     }
 
     fn inputs(
         &self,
     ) -> Box<
-        dyn Iterator<Item = Box<dyn AbstractTxIn<TxId = Self::TxId, TxOutId = Self::TxOutId>>> + '_,
+        dyn Iterator<Item = Box<dyn AbstractTxIn<Id = <Arc<T> as AbstractTransaction>::Id>>> + '_,
     > {
         (**self).inputs()
     }
@@ -81,14 +85,13 @@ impl<Atx: AbstractTransaction + ?Sized> OutputCount for Arc<Atx> {
 
 /// Trait for transaction inputs
 pub trait AbstractTxIn {
-    type TxId;
-    type TxOutId;
+    type Id: AbstractId;
     /// Returns the transaction ID of the previous output
-    fn prev_txid(&self) -> Self::TxId;
+    fn prev_txid(&self) -> <<Self as AbstractTxIn>::Id as AbstractId>::TxId;
     /// Returns the output index of the previous output
     fn prev_vout(&self) -> u32;
     /// Returns the previous output ID
-    fn prev_txout_id(&self) -> Self::TxOutId;
+    fn prev_txout_id(&self) -> <<Self as AbstractTxIn>::Id as AbstractId>::TxOutId;
 }
 
 /// Trait for transaction outputs
@@ -102,17 +105,11 @@ pub trait AbstractTxOut {
 
 /// Trait for transaction looking things. Generic over the ids as they can be either loose or dense.
 pub trait AbstractTransaction {
-    type TxId: Eq + std::hash::Hash + Copy;
-    type TxOutId: Eq + std::hash::Hash + Copy;
-    type TxInId;
+    type Id: AbstractId;
     /// Returns the transaction ID
-    fn id(&self) -> Self::TxId;
+    fn id(&self) -> <<Self as AbstractTransaction>::Id as AbstractId>::TxId;
     /// Returns an iterator over transaction inputs
-    fn inputs(
-        &self,
-    ) -> Box<
-        dyn Iterator<Item = Box<dyn AbstractTxIn<TxId = Self::TxId, TxOutId = Self::TxOutId>>> + '_,
-    >;
+    fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn<Id = Self::Id>>> + '_>;
     /// Returns an iterator over transaction outputs
     fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut>> + '_>;
     /// Returns the number of outputs

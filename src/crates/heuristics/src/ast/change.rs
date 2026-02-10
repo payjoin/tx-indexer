@@ -1,62 +1,87 @@
 use std::collections::HashMap;
 
-use pipeline::TxOutSet;
 use pipeline::engine::EvalContext;
 use pipeline::expr::Expr;
 use pipeline::node::{Node, NodeId};
-use pipeline::value::{Clustering, Mask, TxSet};
-use tx_indexer_primitives::abstract_id::{AbstractTxId, AbstractTxOutId};
-use tx_indexer_primitives::abstract_types::EnumerateSpentTxOuts;
+use pipeline::value::{Backend, Clustering, Index, Mask, TxOutSet, TxSet};
+use tx_indexer_primitives::abstract_types::TxConstituent;
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
-use tx_indexer_primitives::loose::{TxId, TxOutId};
+use tx_indexer_primitives::graph_index::{
+    IndexHandleFor, TxHandleLike, TxIdIndexOps, TxOutHandleLike, TxOutIdWithIndex, WithIndex,
+};
 
 use crate::change_identification::{
     NLockTimeChangeIdentification, NaiveChangeIdentificationHueristic, TxOutChangeAnnotation,
 };
 
-/// Node that identifies change outputs in transactions.
-///
-/// Uses a naive heuristic: the last output of a transaction is assumed to be change.
-pub struct ChangeIdentificationNode {
-    input: Expr<TxOutSet>,
-}
+/// Adapter so that we can pass `dyn TxOutHandleLike` to change detection (which expects TxConstituent).
+struct TxOutConstituentAdapter<'a, I: tx_indexer_primitives::abstract_id::AbstractId>(
+    &'a dyn TxOutHandleLike<I>,
+);
 
-impl ChangeIdentificationNode {
-    pub fn new(input: Expr<TxOutSet>) -> Self {
-        Self { input }
+impl<I: tx_indexer_primitives::abstract_id::AbstractId> TxConstituent
+    for TxOutConstituentAdapter<'_, I>
+{
+    type Handle<'a> = Box<dyn TxHandleLike<I> + 'a>;
+
+    fn containing_tx(&self) -> Self::Handle<'_> {
+        self.0.tx()
+    }
+
+    fn vout(&self) -> usize {
+        self.0.vout() as usize
     }
 }
 
-impl Node for ChangeIdentificationNode {
-    type OutputValue = Mask<AbstractTxOutId>;
+/// Node that identifies change outputs in transactions.
+pub struct ChangeIdentificationNode<I: Backend> {
+    input: Expr<TxOutSet<I::TxOutId>>,
+    index: Expr<Index<I>>,
+}
+
+impl<I: Backend> ChangeIdentificationNode<I>
+where
+    I::TxOutId: Eq + std::hash::Hash + Clone + Send + Sync + 'static,
+{
+    pub fn new(input: Expr<TxOutSet<I::TxOutId>>, index: Expr<Index<I>>) -> Self {
+        Self { input, index }
+    }
+}
+
+impl<I: Backend> Node for ChangeIdentificationNode<I>
+where
+    I::TxOutId: Eq + std::hash::Hash + Clone + Send + Sync + 'static + TxOutIdWithIndex<I>,
+{
+    type OutputValue = Mask<I::TxOutId>;
 
     fn dependencies(&self) -> Vec<NodeId> {
-        vec![self.input.id()]
+        vec![self.input.id(), self.index.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashMap<AbstractTxOutId, bool> {
-        // Use get_or_default since input might be part of a cycle
+    fn evaluate(&self, ctx: &EvalContext) -> HashMap<I::TxOutId, bool> {
         let txouts = ctx.get_or_default(&self.input);
-        let index = ctx.index();
+        let index_handle = ctx.get(&self.index);
 
-        let mut result = HashMap::new();
+        index_handle.with_graph(|graph| {
+            let mut result = HashMap::new();
 
-        for output_id in txouts.iter() {
-            /// TODO: this should not require loose
-            if let Some(concrete_id) = output_id.try_as_loose() {
-                let output = concrete_id.with(index);
-                let tx = output.tx();
-                let output_count = tx.output_count();
-                if output_count == 0 {
-                    continue;
-                }
+            for output_id in txouts.iter() {
+                output_id.with_index_apply(graph, |output| {
+                    let tx = output.tx();
+                    let output_count = tx.output_count();
+                    if output_count == 0 {
+                        return;
+                    }
 
-                let is_change = NaiveChangeIdentificationHueristic::is_change(output);
-                result.insert(*output_id, is_change == TxOutChangeAnnotation::Change);
+                    let adapter = TxOutConstituentAdapter(&output as &dyn TxOutHandleLike<I>);
+                    let is_change =
+                        NaiveChangeIdentificationHueristic::is_change(adapter) == TxOutChangeAnnotation::Change;
+                    result.insert(output_id.clone(), is_change);
+                });
             }
-        }
 
-        result
+            result
+        })
     }
 
     fn name(&self) -> &'static str {
@@ -68,67 +93,81 @@ impl Node for ChangeIdentificationNode {
 pub struct ChangeIdentification;
 
 impl ChangeIdentification {
-    /// Identify change outputs in the given transactions.
-    ///
-    /// Returns a mask over outputs where `true` indicates the output is likely change.
-    pub fn new(input: Expr<TxOutSet>) -> Expr<Mask<AbstractTxOutId>> {
+    pub fn new<I: Backend>(
+        input: Expr<TxOutSet<I::TxOutId>>,
+        index: Expr<Index<I>>,
+    ) -> Expr<Mask<I::TxOutId>>
+    where
+        I::TxOutId: Eq + std::hash::Hash + Clone + Send + Sync + 'static,
+    {
         let ctx = input.context().clone();
-        ctx.register(ChangeIdentificationNode::new(input))
+        ctx.register(ChangeIdentificationNode::new(input, index))
     }
 }
 
-/// Factory for creating a fingerprint-aware change identification expression.
-///
-/// Uses spending-tx fingerprints (e.g. n_locktime) to classify outputs as change or not:
-/// when both the containing tx and the spending tx share a fingerprint (e.g. n_locktime > 0),
-/// the output is classified as change.
+/// Fingerprint-aware change identification.
 pub struct FingerPrintChangeIdentification;
 
 impl FingerPrintChangeIdentification {
-    pub fn new(input: Expr<TxOutSet>) -> Expr<Mask<AbstractTxOutId>> {
+    pub fn new<I: Backend>(
+        input: Expr<TxOutSet<I::TxOutId>>,
+        index: Expr<Index<I>>,
+    ) -> Expr<Mask<I::TxOutId>>
+    where
+        I::TxOutId: Eq + std::hash::Hash + Clone + Send + Sync + 'static,
+    {
         let ctx = input.context().clone();
-        ctx.register(FingerPrintChangeIdentificationNode::new(input))
+        ctx.register(FingerPrintChangeIdentificationNode::new(input, index))
     }
 }
 
-pub struct FingerPrintChangeIdentificationNode {
-    input: Expr<TxOutSet>,
+pub struct FingerPrintChangeIdentificationNode<I: Backend> {
+    input: Expr<TxOutSet<I::TxOutId>>,
+    index: Expr<Index<I>>,
 }
 
-impl FingerPrintChangeIdentificationNode {
-    pub fn new(input: Expr<TxOutSet>) -> Self {
-        Self { input }
+impl<I: Backend> FingerPrintChangeIdentificationNode<I>
+where
+    I::TxOutId: Eq + std::hash::Hash + Clone + Send + Sync + 'static,
+{
+    pub fn new(input: Expr<TxOutSet<I::TxOutId>>, index: Expr<Index<I>>) -> Self {
+        Self { input, index }
     }
 }
 
-impl Node for FingerPrintChangeIdentificationNode {
-    type OutputValue = Mask<AbstractTxOutId>;
+impl<I: Backend> Node for FingerPrintChangeIdentificationNode<I>
+where
+    I::TxOutId: Eq + std::hash::Hash + Clone + Send + Sync + 'static + TxOutIdWithIndex<I>,
+{
+    type OutputValue = Mask<I::TxOutId>;
 
     fn dependencies(&self) -> Vec<NodeId> {
-        vec![self.input.id()]
+        vec![self.input.id(), self.index.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashMap<AbstractTxOutId, bool> {
-        // Use get_or_default since input might be part of a cycle
+    fn evaluate(&self, ctx: &EvalContext) -> HashMap<I::TxOutId, bool> {
         let txouts = ctx.get_or_default(&self.input);
-        let index = ctx.index();
+        let index_handle = ctx.get(&self.index);
 
-        let mut result = HashMap::new();
+        index_handle.with_graph(|graph| {
+            let mut result = HashMap::new();
 
-        for output_id in txouts.iter() {
-            // TODO: this should not require loose
-            if let Some(concrete_id) = output_id.try_as_loose() {
-                let output = concrete_id.with(index);
-                if let Some(spending_tx) = output.spent_by() {
-                    let spending_tx_handle = spending_tx.tx();
-                    let is_change =
-                        NLockTimeChangeIdentification::is_change(output, spending_tx_handle);
-                    result.insert(*output_id, is_change == TxOutChangeAnnotation::Change);
-                }
+            for output_id in txouts.iter() {
+                output_id.with_index_apply(graph, |output| {
+                    if let Some(spending_txin) = output.spent_by() {
+                        let spending_tx_handle = spending_txin.tx();
+                        let adapter = TxOutConstituentAdapter(&output as &dyn TxOutHandleLike<I>);
+                        let is_change = NLockTimeChangeIdentification::is_change(
+                            adapter,
+                            spending_tx_handle.as_ref(),
+                        ) == TxOutChangeAnnotation::Change;
+                        result.insert(output_id.clone(), is_change);
+                    }
+                });
             }
-        }
 
-        result
+            result
+        })
     }
 
     fn name(&self) -> &'static str {
@@ -137,46 +176,57 @@ impl Node for FingerPrintChangeIdentificationNode {
 }
 
 /// Node that checks if a transaction's inputs are all in the same cluster.
-///
-/// This is used to gate change clustering - we only cluster change with inputs
-/// if we're confident all inputs belong to the same entity.
-pub struct IsUnilateralNode {
-    txs: Expr<TxSet>,
-    clustering: Expr<Clustering>,
+pub struct IsUnilateralNode<I: Backend> {
+    txs: Expr<TxSet<I::TxId>>,
+    clustering: Expr<Clustering<I::TxOutId>>,
+    index: Expr<Index<I>>,
 }
 
-impl IsUnilateralNode {
-    pub fn new(txs: Expr<TxSet>, clustering: Expr<Clustering>) -> Self {
-        Self { txs, clustering }
+impl<I: Backend> IsUnilateralNode<I>
+where
+    I::TxId: Eq + std::hash::Hash + Clone + Send + Sync + 'static,
+    I::TxOutId: Eq + std::hash::Hash + Copy + Send + Sync + 'static,
+{
+    pub fn new(
+        txs: Expr<TxSet<I::TxId>>,
+        clustering: Expr<Clustering<I::TxOutId>>,
+        index: Expr<Index<I>>,
+    ) -> Self {
+        Self {
+            txs,
+            clustering,
+            index,
+        }
     }
 }
 
-impl Node for IsUnilateralNode {
-    type OutputValue = Mask<AbstractTxId>;
+impl<I: Backend> Node for IsUnilateralNode<I>
+where
+    I::TxId: Eq + std::hash::Hash + Clone + Send + Sync + 'static + WithIndex<I>,
+    I::TxOutId: Eq + std::hash::Hash + Copy + Send + Sync + 'static,
+{
+    type OutputValue = Mask<I::TxId>;
 
     fn dependencies(&self) -> Vec<NodeId> {
-        vec![self.txs.id(), self.clustering.id()]
+        vec![self.txs.id(), self.clustering.id(), self.index.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashMap<AbstractTxId, bool> {
-        // Use get_or_default for both; txs or clustering may not be ready yet in cyclic pipelines
+    fn evaluate(&self, ctx: &EvalContext) -> HashMap<I::TxId, bool> {
         let tx_ids = ctx.get_or_default(&self.txs);
         let clustering = ctx.get_or_default(&self.clustering);
-        let index = ctx.index();
+        let index_handle = ctx.get(&self.index);
 
-        let mut result = HashMap::new();
+        index_handle.with_graph(|graph| {
+            let mut result = HashMap::new();
 
-        for tx_id in &tx_ids {
-            // TODO: this should not require loose
-            if let Some(concrete_id) = tx_id.try_as_loose() {
-                let tx = concrete_id.with(index);
-                let inputs: Vec<AbstractTxOutId> =
-                    tx.spent_coins().map(AbstractTxOutId::from).collect();
+            for tx_id in &tx_ids {
+                let tx = tx_id.with_index(graph);
+                let inputs: Vec<I::TxOutId> = tx.spent_coins().collect();
 
                 let is_unilateral = if inputs.is_empty() {
-                    false // Coinbase - no inputs to cluster
+                    false
                 } else if inputs.len() == 1 {
-                    true // Single input is trivially unilateral
+                    true
                 } else {
                     let first_root = clustering.find(inputs[0]);
                     inputs
@@ -184,11 +234,11 @@ impl Node for IsUnilateralNode {
                         .all(|input| clustering.find(*input) == first_root)
                 };
 
-                result.insert(*tx_id, is_unilateral);
+                result.insert(tx_id.clone(), is_unilateral);
             }
-        }
 
-        result
+            result
+        })
     }
 
     fn name(&self) -> &'static str {
@@ -200,70 +250,83 @@ impl Node for IsUnilateralNode {
 pub struct IsUnilateral;
 
 impl IsUnilateral {
-    /// Check if transactions have all inputs in the same cluster.
-    ///
-    /// Takes a set of transactions and a clustering, returns a mask where `true`
-    /// indicates all inputs of that transaction are in the same cluster.
-    pub fn with_clustering(
-        txs: Expr<TxSet>,
-        clustering: Expr<Clustering>,
-    ) -> Expr<Mask<AbstractTxId>> {
+    pub fn with_clustering<I: Backend>(
+        txs: Expr<TxSet<I::TxId>>,
+        clustering: Expr<Clustering<I::TxOutId>>,
+        index: Expr<Index<I>>,
+    ) -> Expr<Mask<I::TxId>>
+    where
+        I::TxId: Eq + std::hash::Hash + Clone + Send + Sync + 'static,
+        I::TxOutId: Eq + std::hash::Hash + Copy + Send + Sync + 'static,
+    {
         let ctx = txs.context().clone();
-        ctx.register(IsUnilateralNode::new(txs, clustering))
+        ctx.register(IsUnilateralNode::new(txs, clustering, index))
     }
 }
 
 /// Node that clusters change outputs with their transaction's inputs.
-///
-/// For each transaction, if inputs are unilateral (all in same cluster) and has change outputs,
-/// cluster the change outputs with the inputs.
-pub struct ChangeClusteringNode {
-    txs: Expr<TxSet>,
-    change_mask: Expr<Mask<AbstractTxOutId>>,
+pub struct ChangeClusteringNode<I: Backend> {
+    txs: Expr<TxSet<I::TxId>>,
+    change_mask: Expr<Mask<I::TxOutId>>,
+    index: Expr<Index<I>>,
 }
 
-impl ChangeClusteringNode {
-    pub fn new(txs: Expr<TxSet>, change_mask: Expr<Mask<AbstractTxOutId>>) -> Self {
-        Self { txs, change_mask }
+impl<I: Backend> ChangeClusteringNode<I>
+where
+    I::TxId: Eq + std::hash::Hash + Clone + Send + Sync + 'static + TxIdIndexOps<I>,
+    I::TxOutId: Eq + std::hash::Hash + Copy + Send + Sync + 'static,
+{
+    pub fn new(
+        txs: Expr<TxSet<I::TxId>>,
+        change_mask: Expr<Mask<I::TxOutId>>,
+        index: Expr<Index<I>>,
+    ) -> Self {
+        Self {
+            txs,
+            change_mask,
+            index,
+        }
     }
 }
 
-impl Node for ChangeClusteringNode {
-    type OutputValue = Clustering;
+impl<I: Backend> Node for ChangeClusteringNode<I>
+where
+    I::TxId: Eq + std::hash::Hash + Clone + Send + Sync + 'static + TxIdIndexOps<I> + WithIndex<I>,
+    I::TxOutId: Eq + std::hash::Hash + Copy + Send + Sync + 'static,
+{
+    type OutputValue = Clustering<I::TxOutId>;
 
     fn dependencies(&self) -> Vec<NodeId> {
-        vec![self.txs.id(), self.change_mask.id()]
+        vec![self.txs.id(), self.change_mask.id(), self.index.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<AbstractTxOutId> {
-        // Use get_or_default since txs and change_mask might be part of a cycle
+    fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<I::TxOutId> {
         let tx_ids = ctx.get_or_default(&self.txs);
         let change_mask = ctx.get_or_default(&self.change_mask);
-        let index = ctx.index();
+        let index_handle = ctx.get(&self.index);
 
-        let clustering = SparseDisjointSet::new();
+        index_handle.with_graph(|graph| {
+            let mut clustering = SparseDisjointSet::new();
 
-        for tx_id in &tx_ids {
-            if let Some(concrete_tx_id) = tx_id.try_as_loose() {
-                let tx = concrete_tx_id.with(index);
-                let first_input: Option<AbstractTxOutId> =
-                    tx.spent_coins().next().map(AbstractTxOutId::from);
+            for tx_id in &tx_ids {
+                let tx = tx_id.with_index(graph);
+                let first_input: Option<I::TxOutId> = tx.spent_coins().next();
 
                 let Some(root_input) = first_input else {
-                    continue; // Coinbase
+                    continue;
                 };
 
                 let output_count = tx.output_count();
                 for vout in 0..output_count {
-                    let txout_id = AbstractTxOutId::from(TxOutId::new(concrete_tx_id, vout as u32));
+                    let txout_id = tx_id.clone().txout_id(vout as u32);
                     if change_mask.get(&txout_id).copied().unwrap_or(false) {
                         clustering.union(txout_id, root_input);
                     }
                 }
             }
-        }
 
-        clustering
+            clustering
+        })
     }
 
     fn name(&self) -> &'static str {
@@ -275,12 +338,16 @@ impl Node for ChangeClusteringNode {
 pub struct ChangeClustering;
 
 impl ChangeClustering {
-    /// Cluster change outputs with their transaction's inputs.
-    ///
-    /// Takes a set of transactions and a mask identifying change outputs.
-    /// Returns a clustering where change outputs are in the same cluster as inputs.
-    pub fn new(txs: Expr<TxSet>, change_mask: Expr<Mask<AbstractTxOutId>>) -> Expr<Clustering> {
+    pub fn new<I: Backend>(
+        txs: Expr<TxSet<I::TxId>>,
+        change_mask: Expr<Mask<I::TxOutId>>,
+        index: Expr<Index<I>>,
+    ) -> Expr<Clustering<I::TxOutId>>
+    where
+        I::TxId: Eq + std::hash::Hash + Clone + Send + Sync + 'static + TxIdIndexOps<I>,
+        I::TxOutId: Eq + std::hash::Hash + Copy + Send + Sync + 'static,
+    {
         let ctx = txs.context().clone();
-        ctx.register(ChangeClusteringNode::new(txs, change_mask))
+        ctx.register(ChangeClusteringNode::new(txs, change_mask, index))
     }
 }

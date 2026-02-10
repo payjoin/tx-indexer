@@ -17,7 +17,7 @@
 //! let non_coinjoin = all_txs.filter_with_mask(is_coinjoin_mask.negate());
 //!
 //! // Lazy evaluation - nothing runs until eval() is called
-//! let mut engine = Engine::new(&ctx, index);
+//! let mut engine = Engine::new(ctx.clone());
 //! engine.run_to_fixpoint();
 //! ```
 
@@ -37,4 +37,7 @@ pub use expr::Expr;
 pub use node::{AnyNode, Node, NodeId};
 pub use placeholder::Placeholder;
 pub use storage::NodeStorage;
-pub use value::{Clustering, ExprValue, Mask, TxOutSet, TxSet};
+pub use value::{
+    AllTxsOutput, Backend, Clustering, ExprValue, Index, LooseIndex, LooseIndexHandle, Mask,
+    TxOutSet, TxSet,
+};

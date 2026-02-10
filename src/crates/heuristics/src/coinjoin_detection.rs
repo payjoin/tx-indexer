@@ -1,6 +1,18 @@
 use std::collections::HashMap;
 
+use bitcoin::Amount;
 use tx_indexer_primitives::abstract_types::EnumerateOutputValueInArbitraryOrder;
+
+/// Object-safe trait for iterating output values (used by coinjoin detection with dyn handles).
+pub trait OutputValuesBoxed {
+    fn output_values(&self) -> Box<dyn Iterator<Item = Amount> + '_>;
+}
+
+impl<T: EnumerateOutputValueInArbitraryOrder> OutputValuesBoxed for T {
+    fn output_values(&self) -> Box<dyn Iterator<Item = Amount> + '_> {
+        Box::new(EnumerateOutputValueInArbitraryOrder::output_values(self))
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 // TODO: use this instead of bool
@@ -14,7 +26,7 @@ pub enum TxCoinjoinAnnotation {
 pub struct NaiveCoinjoinDetection;
 
 impl NaiveCoinjoinDetection {
-    pub fn is_coinjoin(tx: &impl EnumerateOutputValueInArbitraryOrder) -> bool {
+    pub fn is_coinjoin(tx: &impl OutputValuesBoxed) -> bool {
         // If there are >= 3 outputs of the same value, tag as coinjoin.
         // TODO: impl actual detection
         let mut counts = HashMap::new();

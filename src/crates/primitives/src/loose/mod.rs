@@ -1,7 +1,9 @@
 pub mod handle;
 pub mod storage;
 
-use crate::loose::handle::{LooseIndexedGraph, TxHandle, TxInHandle, TxOutHandle};
+use crate::abstract_id::LooseIds;
+use crate::graph_index::{IndexedGraph, TxIdIndexOps, TxOutIdWithIndex, WithIndex};
+use crate::loose::handle::{TxHandle, TxInHandle, TxOutHandle};
 
 // Type defintions for loose txs and their ids
 
@@ -26,7 +28,7 @@ impl TxOutId {
         self.vout
     }
 
-    pub fn with<'a>(self, index: &'a LooseIndexedGraph) -> TxOutHandle<'a> {
+    pub fn with<'a>(self, index: &'a (dyn IndexedGraph<LooseIds> + 'a)) -> TxOutHandle<'a> {
         TxOutHandle::new(self, index)
     }
 }
@@ -51,7 +53,7 @@ impl TxInId {
         self.vin
     }
 
-    pub fn with<'a>(self, index: &'a LooseIndexedGraph) -> TxInHandle<'a> {
+    pub fn with<'a>(self, index: &'a (dyn IndexedGraph<LooseIds> + 'a)) -> TxInHandle<'a> {
         TxInHandle::new(self, index)
     }
 }
@@ -72,7 +74,29 @@ impl TxId {
         TxInId::new(self, vin)
     }
 
-    pub fn with<'a>(self, index: &'a LooseIndexedGraph) -> TxHandle<'a> {
+    pub fn with<'a>(self, index: &'a (dyn IndexedGraph<LooseIds> + 'a)) -> TxHandle<'a> {
         TxHandle::new(self, index)
+    }
+}
+
+impl WithIndex<LooseIds> for TxId {
+    type Handle<'a> = TxHandle<'a>;
+
+    fn with_index<'a>(&self, index: &'a (dyn IndexedGraph<LooseIds> + 'a)) -> TxHandle<'a> {
+        TxHandle::new(*self, index)
+    }
+}
+
+impl TxIdIndexOps<LooseIds> for TxId {
+    fn txout_id(self, vout: u32) -> <LooseIds as crate::abstract_id::AbstractId>::TxOutId {
+        TxOutId::new(self, vout)
+    }
+}
+
+impl TxOutIdWithIndex<LooseIds> for TxOutId {
+    type Handle<'a> = TxOutHandle<'a>;
+
+    fn with_index<'a>(&self, index: &'a (dyn IndexedGraph<LooseIds> + 'a)) -> TxOutHandle<'a> {
+        TxOutHandle::new(*self, index)
     }
 }

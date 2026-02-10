@@ -7,10 +7,11 @@
 //! - Fixpoint iteration for recursive/cyclic definitions
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
+use tx_indexer_primitives::abstract_id::LooseIds;
 use tx_indexer_primitives::abstract_types::AbstractTransaction;
-use tx_indexer_primitives::loose::{TxId, TxInId, TxOutId, storage::InMemoryIndex};
+use tx_indexer_primitives::loose::{TxId, TxInId, TxOutId};
 
 use crate::context::PipelineContext;
 use crate::expr::Expr;
@@ -19,26 +20,20 @@ use crate::storage::{BaseFacts, NodeStorage};
 use crate::value::ExprValue;
 
 /// Concrete transaction type for the loose (InMemoryIndex) backend.
-/// Used for base facts and index operations; pipeline value types use abstract IDs.
+/// Used for base facts; the source node creates the index and passes it as a dependency.
 pub type LooseTx =
-    dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId> + Send + Sync;
+    dyn AbstractTransaction<Id = LooseIds> + Send + Sync;
 
 pub struct SourceNodeEvalContext<'a> {
     pub(crate) base_facts: &'a mut BaseFacts<LooseTx>,
-    pub(crate) index: &'a Arc<RwLock<InMemoryIndex>>,
     #[allow(unused)]
     pub(crate) node_id: NodeId,
 }
 
 impl<'a> SourceNodeEvalContext<'a> {
-    pub fn new(
-        base_facts: &'a mut BaseFacts<LooseTx>,
-        index: &'a Arc<RwLock<InMemoryIndex>>,
-        node_id: NodeId,
-    ) -> Self {
+    pub fn new(base_facts: &'a mut BaseFacts<LooseTx>, node_id: NodeId) -> Self {
         Self {
             base_facts,
-            index,
             node_id,
         }
     }
@@ -46,35 +41,24 @@ impl<'a> SourceNodeEvalContext<'a> {
     pub fn take_base_facts(&mut self) -> Option<Vec<Arc<LooseTx>>> {
         self.base_facts.take_base_facts()
     }
-
-    /// Run a closure with exclusive access to the index (e.g. for `add_tx`).
-    /// Use this instead of holding a mutable reference so the lock is released when done.
-    pub fn with_index_mut<R, F>(&self, f: F) -> R
-    where
-        F: FnOnce(&mut InMemoryIndex) -> R,
-    {
-        f(&mut self.index.write().expect("lock poisoned"))
-    }
 }
 
 /// Context passed to nodes during evaluation.
 ///
-/// Provides access to:
-/// - Results of dependency nodes
-/// - The underlying transaction index
+/// Provides access to results of dependency nodes. Nodes that need the
+/// transaction index take it as an expression dependency (e.g. from the
+/// source node's output) and use `get(&index_expr)`.
 pub struct EvalContext<'a> {
     pub(crate) storage: &'a NodeStorage,
-    index: &'a InMemoryIndex,
     /// Node id of the node being evaluated.
     pub(crate) node_id: NodeId,
 }
 
 impl<'a> EvalContext<'a> {
     /// Create a new evaluation context.
-    pub fn new(storage: &'a NodeStorage, index: &'a InMemoryIndex, node_id: NodeId) -> Self {
+    pub fn new(storage: &'a NodeStorage, node_id: NodeId) -> Self {
         Self {
             storage,
-            index,
             node_id,
         }
     }
@@ -97,10 +81,6 @@ impl<'a> EvalContext<'a> {
             })
     }
 
-    pub fn index(&self) -> &InMemoryIndex {
-        self.index
-    }
-
     /// Get a dependency result or a default value if not yet evaluated.
     /// This is useful for nodes that may be part of a cycle.
     pub fn get_or_default<T: ExprValue>(&self, expr: &Expr<T>) -> T::Output
@@ -121,7 +101,6 @@ impl<'a> EvalContext<'a> {
 /// through fixpoint iteration.
 pub struct Engine {
     ctx: Arc<PipelineContext>,
-    index: Arc<RwLock<InMemoryIndex>>,
     storage: NodeStorage,
     base_facts: BaseFacts<LooseTx>,
     /// Track which iteration each node was last evaluated in (for cycle detection).
@@ -132,12 +111,11 @@ pub struct Engine {
 impl Engine {
     /// Create a new engine.
     ///
-    /// The index is wrapped in `RwLock` so source nodes can mutate it (e.g. `add_tx`)
-    /// while other nodes read it. Use `Arc::new(RwLock::new(index))` at call sites.
-    pub fn new(ctx: Arc<PipelineContext>, index: Arc<RwLock<InMemoryIndex>>) -> Self {
+    /// The source node creates the index and stores it as part of its output;
+    /// nodes that need the index take it as a dependency.
+    pub fn new(ctx: Arc<PipelineContext>) -> Self {
         Self {
             ctx,
-            index,
             storage: NodeStorage::new(),
             base_facts: BaseFacts::new(),
             eval_iteration: HashMap::new(),
@@ -181,12 +159,6 @@ impl Engine {
         &self.ctx
     }
 
-    /// Get the underlying index (read access). For write access in source nodes, use
-    /// the `SourceNodeEvalContext::with_index_mut` closure API.
-    pub fn index(&self) -> &Arc<RwLock<InMemoryIndex>> {
-        &self.index
-    }
-
     /// Run the pipeline to fixpoint for recursive/cyclic definitions.
     ///
     /// This implements semi-naive evaluation:
@@ -204,9 +176,21 @@ impl Engine {
         // Sort nodes topologically (best effort - cycles will be handled)
         let sorted_ids = self.topological_sort(&all_ids);
 
-        // TODO: get source node ids, and handle them separately before entering the fixpoint loop
         for &id in self.ctx.all_source_node_ids().iter() {
             self.evaluate_source_node(id);
+        }
+
+        // Evaluate nodes that depend only on source nodes so they are available before any dependent.
+        let source_ids: std::collections::HashSet<NodeId> =
+            self.ctx.all_source_node_ids().iter().copied().collect();
+        for &id in &sorted_ids {
+            if let Some(node) = self.ctx.get_node(id) {
+                let deps: std::collections::HashSet<NodeId> =
+                    node.dependencies().into_iter().collect();
+                if !deps.is_empty() && deps.is_subset(&source_ids) {
+                    let _ = self.evaluate_node_for_fixpoint(id, self.iteration);
+                }
+            }
         }
 
         // Fixpoint iteration
@@ -244,16 +228,19 @@ impl Engine {
             None => return, // TODO: panic? This points to a bug
         };
 
-        let mut eval_ctx = SourceNodeEvalContext::new(&mut self.base_facts, &self.index, id);
+        let mut eval_ctx = SourceNodeEvalContext::new(&mut self.base_facts, id);
         let result = node.evaluate_any(&mut eval_ctx);
         self.storage.append(id, result);
     }
 
     /// Topologically sort nodes (best effort with cycles).
+    /// When a cycle is detected, the cycle node is still pushed so it gets evaluated
+    /// (dependents will see default for that dependency until the next iteration).
     fn topological_sort(&self, nodes: &[NodeId]) -> Vec<NodeId> {
         let mut result = Vec::new();
         let mut visited = HashSet::new();
         let mut in_stack = HashSet::new();
+        let mut pushed = HashSet::new();
 
         fn visit(
             id: NodeId,
@@ -261,12 +248,16 @@ impl Engine {
             visited: &mut HashSet<NodeId>,
             in_stack: &mut HashSet<NodeId>,
             result: &mut Vec<NodeId>,
+            pushed: &mut HashSet<NodeId>,
         ) {
             if visited.contains(&id) {
                 return;
             }
             if in_stack.contains(&id) {
-                // Cycle detected - skip
+                // Cycle detected - push this node so it gets evaluated
+                if pushed.insert(id) {
+                    result.push(id);
+                }
                 return;
             }
 
@@ -274,17 +265,31 @@ impl Engine {
 
             if let Some(node) = ctx.get_node(id) {
                 for dep_id in node.dependencies() {
-                    visit(dep_id, ctx, visited, in_stack, result);
+                    visit(dep_id, ctx, visited, in_stack, result, pushed);
                 }
             }
 
             in_stack.remove(&id);
             visited.insert(id);
-            result.push(id);
+            if pushed.insert(id) {
+                result.push(id);
+            }
         }
 
-        for &id in nodes {
-            visit(id, &self.ctx, &mut visited, &mut in_stack, &mut result);
+        // Visit source-dependent nodes first so they appear early in the result and
+        // are evaluated before nodes that depend on them (e.g. index projection before IsUnilateral).
+        let source_ids: HashSet<NodeId> = self.ctx.all_source_node_ids().iter().copied().collect();
+        let (source_deps, rest): (Vec<NodeId>, Vec<NodeId>) = nodes
+            .iter()
+            .copied()
+            .partition(|&id| {
+                self.ctx.get_node(id).map_or(false, |node| {
+                    let deps: HashSet<NodeId> = node.dependencies().into_iter().collect();
+                    !deps.is_empty() && deps.is_subset(&source_ids)
+                })
+            });
+        for &id in source_deps.iter().chain(rest.iter()) {
+            visit(id, &self.ctx, &mut visited, &mut in_stack, &mut result, &mut pushed);
         }
 
         result
@@ -317,8 +322,7 @@ impl Engine {
             return false;
         }
 
-        let index_guard = self.index.read().expect("lock poisoned");
-        let eval_ctx = EvalContext::new(&self.storage, &*index_guard, id);
+        let eval_ctx = EvalContext::new(&self.storage, id);
         let previous = self.storage.get_last(id);
         let (result, changed) = node.evaluate_any(&eval_ctx, previous);
 

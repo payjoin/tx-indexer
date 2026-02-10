@@ -13,7 +13,10 @@ pub struct NaiveChangeIdentificationHueristic;
 
 impl NaiveChangeIdentificationHueristic {
     /// Check if a txout is change based on its containing transaction.
-    pub fn is_change(txout: impl TxConstituent<Handle: OutputCount>) -> TxOutChangeAnnotation {
+    pub fn is_change<T: TxConstituent>(txout: T) -> TxOutChangeAnnotation
+    where
+        for<'a> T::Handle<'a>: OutputCount,
+    {
         let tx = txout.containing_tx();
         if tx.output_count() > 0 && txout.vout() == tx.output_count() - 1 {
             TxOutChangeAnnotation::Change
@@ -26,10 +29,13 @@ impl NaiveChangeIdentificationHueristic {
 pub struct NLockTimeChangeIdentification;
 
 impl NLockTimeChangeIdentification {
-    pub fn is_change(
-        tx_out: impl TxConstituent<Handle: HasNLockTime>,
+    pub fn is_change<T: TxConstituent>(
+        tx_out: T,
         spending_tx: impl HasNLockTime,
-    ) -> TxOutChangeAnnotation {
+    ) -> TxOutChangeAnnotation
+    where
+        for<'a> T::Handle<'a>: HasNLockTime,
+    {
         let containing_tx_n_locktime = tx_out.containing_tx().n_locktime();
         let child_tx_n_locktime = spending_tx.n_locktime();
         if containing_tx_n_locktime == 0 && child_tx_n_locktime == 0 {
