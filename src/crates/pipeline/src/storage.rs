@@ -8,51 +8,21 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use tx_indexer_primitives::abstract_types::AbstractTransaction;
-use tx_indexer_primitives::loose::{TxId, TxInId, TxOutId};
-
 use crate::node::NodeId;
 use crate::value::ExprValue;
 
-pub struct BaseFacts {
-    facts: Option<
-        Vec<
-            Arc<
-                dyn AbstractTransaction<TxId = TxId, TxInId = TxInId, TxOutId = TxOutId>
-                    + Send
-                    + Sync,
-            >,
-        >,
-    >,
+pub struct BaseFacts<T: ?Sized> {
+    facts: Option<Vec<Arc<T>>>,
 }
 
-impl BaseFacts {
+impl<T: ?Sized> BaseFacts<T> {
     pub fn new() -> Self {
         Self { facts: None }
     }
-    pub fn set_base_facts(
-        &mut self,
-        facts: impl IntoIterator<
-            Item = Arc<
-                dyn AbstractTransaction<TxId = TxId, TxInId = TxInId, TxOutId = TxOutId>
-                    + Send
-                    + Sync,
-            >,
-        >,
-    ) {
+    pub fn set_base_facts(&mut self, facts: impl IntoIterator<Item = Arc<T>>) {
         self.facts = Some(facts.into_iter().collect());
     }
-    pub fn take_base_facts(
-        &mut self,
-    ) -> Option<
-        Vec<
-            Arc<
-                dyn AbstractTransaction<TxId = TxId, TxInId = TxInId, TxOutId = TxOutId>
-                    + Send
-                    + Sync,
-            >,
-        >,
-    > {
+    pub fn take_base_facts(&mut self) -> Option<Vec<Arc<T>>> {
         self.facts.take()
     }
 }

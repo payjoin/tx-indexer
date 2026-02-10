@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::hash::Hash;
 
-use tx_indexer_primitives::loose::{TxId, TxOutId};
+use tx_indexer_primitives::abstract_id::{AbstractTxId, AbstractTxOutId};
 
 use crate::engine::EvalContext;
 use crate::expr::Expr;
@@ -25,16 +25,14 @@ impl<T: ExprValue, K: Eq + Hash + Clone + Send + Sync + 'static> FilterWithMaskN
     }
 }
 
-// Implementation for filtering TxSet with a TxId mask
-impl Node for FilterWithMaskNode<TxSet, TxId> {
+impl Node for FilterWithMaskNode<TxSet, AbstractTxId> {
     type OutputValue = TxSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id(), self.mask.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<TxId> {
-        // Use get_or_default for both; input or mask may not be ready yet in cyclic pipelines
+    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AbstractTxId> {
         let input_set = ctx.get_or_default(&self.input);
         let mask = ctx.get_or_default(&self.mask);
 
@@ -50,16 +48,14 @@ impl Node for FilterWithMaskNode<TxSet, TxId> {
     }
 }
 
-// Implementation for filtering TxOutSet with a TxOutId mask
-impl Node for FilterWithMaskNode<TxOutSet, TxOutId> {
+impl Node for FilterWithMaskNode<TxOutSet, AbstractTxOutId> {
     type OutputValue = TxOutSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id(), self.mask.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<TxOutId> {
-        // Use get_or_default for both; input or mask may not be ready yet in cyclic pipelines
+    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AbstractTxOutId> {
         let input_set = ctx.get_or_default(&self.input);
         let mask = ctx.get_or_default(&self.mask);
 
@@ -80,7 +76,7 @@ impl Expr<TxSet> {
     /// Filter transactions using a boolean mask.
     ///
     /// Keeps transactions where the mask value is `true`.
-    pub fn filter_with_mask(&self, mask: Expr<Mask<TxId>>) -> Expr<TxSet> {
+    pub fn filter_with_mask(&self, mask: Expr<Mask<AbstractTxId>>) -> Expr<TxSet> {
         self.ctx
             .register(FilterWithMaskNode::new(self.clone(), mask))
     }
@@ -91,7 +87,7 @@ impl Expr<TxOutSet> {
     /// Filter transaction outputs using a boolean mask.
     ///
     /// Keeps outputs where the mask value is `true`.
-    pub fn filter_with_mask(&self, mask: Expr<Mask<TxOutId>>) -> Expr<TxOutSet> {
+    pub fn filter_with_mask(&self, mask: Expr<Mask<AbstractTxOutId>>) -> Expr<TxOutSet> {
         self.ctx
             .register(FilterWithMaskNode::new(self.clone(), mask))
     }
@@ -110,14 +106,14 @@ impl<T: ExprValue, K: Eq + Hash + Clone + Send + Sync + 'static> FilterExcludeNo
     }
 }
 
-impl Node for FilterExcludeNode<TxSet, TxId> {
+impl Node for FilterExcludeNode<TxSet, AbstractTxId> {
     type OutputValue = TxSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id(), self.mask.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<TxId> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AbstractTxId> {
         let input_set = ctx.get(&self.input);
         let mask = ctx.get(&self.mask);
 
@@ -132,14 +128,15 @@ impl Node for FilterExcludeNode<TxSet, TxId> {
         "FilterExclude<TxSet>"
     }
 }
-impl Node for FilterExcludeNode<TxOutSet, TxOutId> {
+
+impl Node for FilterExcludeNode<TxOutSet, AbstractTxOutId> {
     type OutputValue = TxOutSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id(), self.mask.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<TxOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AbstractTxOutId> {
         let input_set = ctx.get(&self.input);
         let mask = ctx.get(&self.mask);
 

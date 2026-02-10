@@ -2,10 +2,9 @@ use pipeline::engine::EvalContext;
 use pipeline::expr::Expr;
 use pipeline::node::{Node, NodeId};
 use pipeline::value::{Clustering, TxSet};
-use tx_indexer_primitives::disjoint_set::SparseDisjointSet;
-use tx_indexer_primitives::loose::TxOutId;
-
-use crate::common_input::MultiInputHeuristic as MIHImpl;
+use tx_indexer_primitives::abstract_id::AbstractTxOutId;
+use tx_indexer_primitives::abstract_types::EnumerateSpentTxOuts;
+use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
 
 /// Node that implements the Multi-Input Heuristic.
 ///
@@ -29,7 +28,7 @@ impl Node for MultiInputHeuristicNode {
         vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<TxOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<AbstractTxOutId> {
         // Use get_or_default since input may not be ready yet in cyclic pipelines
         let tx_ids = ctx.get_or_default(&self.input);
         let index = ctx.index();
@@ -37,9 +36,18 @@ impl Node for MultiInputHeuristicNode {
         let mut clustering = SparseDisjointSet::new();
 
         for tx_id in &tx_ids {
-            let tx = tx_id.with(index);
-            let tx_clustering = MIHImpl::merge_prevouts(&tx);
-            clustering = clustering.join(&tx_clustering);
+            if let Some(concrete_id) = tx_id.try_as_loose() {
+                let tx = concrete_id.with(index);
+                let coins: Vec<AbstractTxOutId> =
+                    tx.spent_coins().map(AbstractTxOutId::from).collect();
+                if coins.len() > 1 {
+                    let set = SparseDisjointSet::new();
+                    for i in 1..coins.len() {
+                        set.union(coins[0], coins[i]);
+                    }
+                    clustering = clustering.join(&set);
+                }
+            }
         }
 
         clustering

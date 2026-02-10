@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use tx_indexer_primitives::loose::TxId;
+use tx_indexer_primitives::abstract_id::AbstractTxId;
 
 use crate::context::PipelineContext;
 use crate::engine::SourceNodeEvalContext;
@@ -15,19 +15,19 @@ use crate::node::SourceNode;
 use crate::value::TxSet;
 
 /// Node that returns all known transaction IDs from the index.
-// TODO: this is mostly scaffolding for tests. In practice, we will likely have different types of sources.
+/// Produces abstract IDs; conversion to/from concrete IDs happens at the index boundary.
 pub struct AllTxsNode;
 
 impl SourceNode for AllTxsNode {
     type OutputValue = TxSet;
 
-    fn evaluate(&self, ctx: &mut SourceNodeEvalContext) -> HashSet<TxId> {
+    fn evaluate(&self, ctx: &mut SourceNodeEvalContext<'_>) -> HashSet<AbstractTxId> {
         let base_tx_facts = ctx.take_base_facts();
         if let Some(base_tx_facts) = base_tx_facts {
             let mut res = HashSet::new();
             ctx.with_index_mut(|index| {
                 for tx in base_tx_facts {
-                    res.insert(tx.id());
+                    res.insert(tx.id().into());
                     index.add_tx(tx);
                 }
             });
@@ -46,7 +46,7 @@ impl SourceNode for AllTxsNode {
 pub struct AllTxs;
 
 impl AllTxs {
-    /// Create a new expression that evaluates to all known transaction IDs.
+    /// Create a new expression that evaluates to all known transaction IDs (as abstract IDs).
     pub fn new(ctx: &Arc<PipelineContext>) -> Expr<TxSet> {
         ctx.register_source(AllTxsNode)
     }

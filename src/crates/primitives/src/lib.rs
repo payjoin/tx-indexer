@@ -1,4 +1,5 @@
 pub mod abstract_fingerprints;
+pub mod abstract_id;
 pub mod abstract_types;
 pub mod dense;
 pub mod disjoint_set;
@@ -19,7 +20,7 @@ pub mod test_utils {
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
             EnumerateSpentTxOuts, OutputCount, TxConstituent,
         },
-        loose::{self, TxId, TxInId, TxOutId},
+        loose::{TxId, TxInId, TxOutId},
     };
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]

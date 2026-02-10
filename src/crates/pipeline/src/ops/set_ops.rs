@@ -6,8 +6,9 @@
 
 use std::collections::HashSet;
 
+use tx_indexer_primitives::abstract_id::{AbstractTxId, AbstractTxOutId};
 use tx_indexer_primitives::disjoint_set::SparseDisjointSet;
-use tx_indexer_primitives::loose::{TxId, TxOutId};
+use tx_indexer_primitives::loose::TxOutId;
 
 use crate::engine::EvalContext;
 use crate::expr::Expr;
@@ -32,16 +33,22 @@ impl Node for OutputsNode {
         vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<TxOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AbstractTxOutId> {
         let tx_ids = ctx.get(&self.input);
         let index = ctx.index();
 
         let mut outputs = HashSet::new();
-        for &tx_id in tx_ids {
-            if let Some(tx) = index.txs.get(&tx_id) {
-                let output_count = tx.output_len();
-                for vout in 0..output_count {
-                    outputs.insert(TxOutId::new(tx_id, vout as u32));
+        for id in tx_ids {
+            // TODO: this should not require loose
+            if let Some(concrete_tx_id) = id.try_as_loose() {
+                if let Some(tx) = index.txs.get(&concrete_tx_id) {
+                    let output_count = tx.output_len();
+                    for vout in 0..output_count {
+                        outputs.insert(AbstractTxOutId::from(TxOutId::new(
+                            concrete_tx_id,
+                            vout as u32,
+                        )));
+                    }
                 }
             }
         }
@@ -71,7 +78,7 @@ impl Node for TxsNode {
         vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<TxId> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AbstractTxId> {
         let outputs = ctx.get(&self.input);
         outputs.iter().map(|out| out.txid()).collect()
     }
@@ -104,7 +111,7 @@ impl Node for JoinClusteringNode {
         vec![self.left.id(), self.right.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<TxOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<AbstractTxOutId> {
         // Use get_or_default since either side might be part of a cycle
         let left = ctx.get_or_default(&self.left);
         let right = ctx.get_or_default(&self.right);

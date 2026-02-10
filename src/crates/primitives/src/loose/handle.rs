@@ -11,6 +11,7 @@ use crate::{
 
 use bitcoin::Amount;
 pub type LooseIndexedGraph = dyn IndexedGraph<TxId, TxInId, TxOutId>;
+
 pub struct TxHandle<'a> {
     id: TxId,
     index: &'a LooseIndexedGraph,
@@ -84,6 +85,7 @@ impl AbstractTransaction for TxHandle<'_> {
             .index
             .tx(&self.id)
             .expect("Tx should always exist if we have a handle");
+        // TODO: is this not a infinite loop?
         let input_boxes: Vec<Box<dyn AbstractTxIn<TxId = Self::TxId, TxOutId = Self::TxOutId>>> =
             tx.inputs().collect();
         Box::new(input_boxes.into_iter())
@@ -95,6 +97,7 @@ impl AbstractTransaction for TxHandle<'_> {
             .index
             .tx(&self.id.into())
             .expect("Tx should always exist if we have a handle");
+        // TODO: is this not a infinite loop?
         let output_boxes: Vec<Box<dyn AbstractTxOut>> = tx.outputs().collect();
         Box::new(output_boxes.into_iter())
     }

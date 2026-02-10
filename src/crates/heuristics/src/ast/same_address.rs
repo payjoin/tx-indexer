@@ -2,9 +2,9 @@ use pipeline::Clustering;
 use pipeline::expr::Expr;
 use pipeline::node::Node;
 use pipeline::value::TxSet;
+use tx_indexer_primitives::abstract_id::AbstractTxOutId;
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
 use tx_indexer_primitives::graph_index::ScriptPubkeyIndex;
-use tx_indexer_primitives::loose::TxOutId;
 
 pub struct SameAddressClusteringNode {
     txs: Expr<TxSet>,
@@ -23,18 +23,20 @@ impl Node for SameAddressClusteringNode {
         vec![self.txs.id()]
     }
 
-    fn evaluate(&self, ctx: &pipeline::EvalContext) -> SparseDisjointSet<TxOutId> {
+    fn evaluate(&self, ctx: &pipeline::EvalContext) -> SparseDisjointSet<AbstractTxOutId> {
         let txs = ctx.get(&self.txs);
         let index = ctx.index();
         let clustering = SparseDisjointSet::new();
 
-        for &tx_id in txs.iter() {
-            for output in tx_id.with(index).outputs() {
-                let txout_id = output.id();
-                if let Some(first_txout) =
-                    index.script_pubkey_to_txout_id(&output.script_pubkey_hash())
-                {
-                    clustering.union(txout_id, first_txout);
+        for tx_id in txs.iter() {
+            if let Some(concrete_id) = tx_id.try_as_loose() {
+                for output in concrete_id.with(index).outputs() {
+                    let txout_id = AbstractTxOutId::from(output.id());
+                    if let Some(first_txout) =
+                        index.script_pubkey_to_txout_id(&output.script_pubkey_hash())
+                    {
+                        clustering.union(txout_id, first_txout.into());
+                    }
                 }
             }
         }
@@ -62,7 +64,7 @@ mod tests {
     use pipeline::{Engine, PipelineContext};
     use tx_indexer_primitives::abstract_types::AbstractTransaction;
     use tx_indexer_primitives::loose::storage::InMemoryIndex;
-    use tx_indexer_primitives::loose::{TxId, TxInId};
+    use tx_indexer_primitives::loose::{TxId, TxInId, TxOutId};
     use tx_indexer_primitives::test_utils::{DummyTxData, DummyTxOutData};
 
     use super::*;
@@ -135,14 +137,14 @@ mod tests {
 
         // Same spk should be clustered together
         assert_eq!(
-            result.find(TxOutId::new(TxId(2), 1)),
-            result.find(TxOutId::new(TxId(3), 1))
+            result.find(AbstractTxOutId::from(TxOutId::new(TxId(2), 1))),
+            result.find(AbstractTxOutId::from(TxOutId::new(TxId(3), 1)))
         );
 
         // Other outputs should not be clustered together
         assert_ne!(
-            result.find(TxOutId::new(TxId(2), 0)),
-            result.find(TxOutId::new(TxId(3), 0))
+            result.find(AbstractTxOutId::from(TxOutId::new(TxId(2), 0))),
+            result.find(AbstractTxOutId::from(TxOutId::new(TxId(3), 0)))
         );
     }
 }

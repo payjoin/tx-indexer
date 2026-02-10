@@ -4,7 +4,7 @@ use pipeline::engine::EvalContext;
 use pipeline::expr::Expr;
 use pipeline::node::{Node, NodeId};
 use pipeline::value::{Mask, TxSet};
-use tx_indexer_primitives::loose::TxId;
+use tx_indexer_primitives::abstract_id::AbstractTxId;
 
 use crate::coinjoin_detection::NaiveCoinjoinDetection;
 
@@ -23,20 +23,25 @@ impl IsCoinJoinNode {
 }
 
 impl Node for IsCoinJoinNode {
-    type OutputValue = Mask<TxId>;
+    type OutputValue = Mask<AbstractTxId>;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashMap<TxId, bool> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashMap<AbstractTxId, bool> {
         let tx_ids = ctx.get(&self.input);
         let index = ctx.index();
         tx_ids
             .iter()
-            .map(|tx_id| {
-                let tx = tx_id.with(index);
-                (tx.id(), NaiveCoinjoinDetection::is_coinjoin(&tx))
+            .filter_map(|tx_id| {
+                tx_id.try_as_loose().map(|concrete_id| {
+                    let tx = concrete_id.with(index);
+                    (
+                        AbstractTxId::from(tx.id()),
+                        NaiveCoinjoinDetection::is_coinjoin(&tx),
+                    )
+                })
             })
             .collect()
     }
@@ -49,7 +54,7 @@ impl Node for IsCoinJoinNode {
 pub struct IsCoinJoin;
 
 impl IsCoinJoin {
-    pub fn new(input: Expr<TxSet>) -> Expr<Mask<TxId>> {
+    pub fn new(input: Expr<TxSet>) -> Expr<Mask<AbstractTxId>> {
         let ctx = input.context().clone();
         ctx.register(IsCoinJoinNode::new(input))
     }

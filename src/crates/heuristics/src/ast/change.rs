@@ -5,6 +5,7 @@ use pipeline::engine::EvalContext;
 use pipeline::expr::Expr;
 use pipeline::node::{Node, NodeId};
 use pipeline::value::{Clustering, Mask, TxSet};
+use tx_indexer_primitives::abstract_id::{AbstractTxId, AbstractTxOutId};
 use tx_indexer_primitives::abstract_types::EnumerateSpentTxOuts;
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
 use tx_indexer_primitives::loose::{TxId, TxOutId};
@@ -27,30 +28,32 @@ impl ChangeIdentificationNode {
 }
 
 impl Node for ChangeIdentificationNode {
-    type OutputValue = Mask<TxOutId>;
+    type OutputValue = Mask<AbstractTxOutId>;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashMap<TxOutId, bool> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashMap<AbstractTxOutId, bool> {
         // Use get_or_default since input might be part of a cycle
         let txouts = ctx.get_or_default(&self.input);
         let index = ctx.index();
 
         let mut result = HashMap::new();
 
-        for output in txouts.iter().map(|output| output.with(index)) {
-            let tx = output.tx();
-            let output_count = tx.output_count();
-            if output_count == 0 {
-                continue;
-            }
+        for output_id in txouts.iter() {
+            /// TODO: this should not require loose
+            if let Some(concrete_id) = output_id.try_as_loose() {
+                let output = concrete_id.with(index);
+                let tx = output.tx();
+                let output_count = tx.output_count();
+                if output_count == 0 {
+                    continue;
+                }
 
-            // Mark each output using the naive change identification heuristic
-            let output_id = output.id();
-            let is_change = NaiveChangeIdentificationHueristic::is_change(output);
-            result.insert(output_id, is_change == TxOutChangeAnnotation::Change);
+                let is_change = NaiveChangeIdentificationHueristic::is_change(output);
+                result.insert(*output_id, is_change == TxOutChangeAnnotation::Change);
+            }
         }
 
         result
@@ -68,7 +71,7 @@ impl ChangeIdentification {
     /// Identify change outputs in the given transactions.
     ///
     /// Returns a mask over outputs where `true` indicates the output is likely change.
-    pub fn new(input: Expr<TxOutSet>) -> Expr<Mask<TxOutId>> {
+    pub fn new(input: Expr<TxOutSet>) -> Expr<Mask<AbstractTxOutId>> {
         let ctx = input.context().clone();
         ctx.register(ChangeIdentificationNode::new(input))
     }
@@ -82,7 +85,7 @@ impl ChangeIdentification {
 pub struct FingerPrintChangeIdentification;
 
 impl FingerPrintChangeIdentification {
-    pub fn new(input: Expr<TxOutSet>) -> Expr<Mask<TxOutId>> {
+    pub fn new(input: Expr<TxOutSet>) -> Expr<Mask<AbstractTxOutId>> {
         let ctx = input.context().clone();
         ctx.register(FingerPrintChangeIdentificationNode::new(input))
     }
@@ -99,26 +102,29 @@ impl FingerPrintChangeIdentificationNode {
 }
 
 impl Node for FingerPrintChangeIdentificationNode {
-    type OutputValue = Mask<TxOutId>;
+    type OutputValue = Mask<AbstractTxOutId>;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashMap<TxOutId, bool> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashMap<AbstractTxOutId, bool> {
         // Use get_or_default since input might be part of a cycle
         let txouts = ctx.get_or_default(&self.input);
         let index = ctx.index();
 
         let mut result = HashMap::new();
 
-        for output in txouts.iter().map(|output| output.with(index)) {
-            if let Some(spending_tx) = output.spent_by() {
-                let spending_tx_handle = spending_tx.tx();
-                let output_id = output.id();
-                let is_change =
-                    NLockTimeChangeIdentification::is_change(output, spending_tx_handle);
-                result.insert(output_id, is_change == TxOutChangeAnnotation::Change);
+        for output_id in txouts.iter() {
+            // TODO: this should not require loose
+            if let Some(concrete_id) = output_id.try_as_loose() {
+                let output = concrete_id.with(index);
+                if let Some(spending_tx) = output.spent_by() {
+                    let spending_tx_handle = spending_tx.tx();
+                    let is_change =
+                        NLockTimeChangeIdentification::is_change(output, spending_tx_handle);
+                    result.insert(*output_id, is_change == TxOutChangeAnnotation::Change);
+                }
             }
         }
 
@@ -146,13 +152,13 @@ impl IsUnilateralNode {
 }
 
 impl Node for IsUnilateralNode {
-    type OutputValue = Mask<TxId>;
+    type OutputValue = Mask<AbstractTxId>;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.txs.id(), self.clustering.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashMap<TxId, bool> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashMap<AbstractTxId, bool> {
         // Use get_or_default for both; txs or clustering may not be ready yet in cyclic pipelines
         let tx_ids = ctx.get_or_default(&self.txs);
         let clustering = ctx.get_or_default(&self.clustering);
@@ -161,23 +167,25 @@ impl Node for IsUnilateralNode {
         let mut result = HashMap::new();
 
         for tx_id in &tx_ids {
-            let tx = tx_id.with(index);
-            let inputs: Vec<_> = tx.spent_coins().collect();
+            // TODO: this should not require loose
+            if let Some(concrete_id) = tx_id.try_as_loose() {
+                let tx = concrete_id.with(index);
+                let inputs: Vec<AbstractTxOutId> =
+                    tx.spent_coins().map(AbstractTxOutId::from).collect();
 
-            let is_unilateral = if inputs.is_empty() {
-                false // Coinbase - no inputs to cluster
-            } else if inputs.len() == 1 {
-                true // Single input is trivially unilateral
-            } else {
-                // TODO: update to use the util on tx handle
-                // Check if all inputs are in the same cluster
-                let first_root = clustering.find(inputs[0]);
-                inputs
-                    .iter()
-                    .all(|&input| clustering.find(input) == first_root)
-            };
+                let is_unilateral = if inputs.is_empty() {
+                    false // Coinbase - no inputs to cluster
+                } else if inputs.len() == 1 {
+                    true // Single input is trivially unilateral
+                } else {
+                    let first_root = clustering.find(inputs[0]);
+                    inputs
+                        .iter()
+                        .all(|input| clustering.find(*input) == first_root)
+                };
 
-            result.insert(*tx_id, is_unilateral);
+                result.insert(*tx_id, is_unilateral);
+            }
         }
 
         result
@@ -196,7 +204,10 @@ impl IsUnilateral {
     ///
     /// Takes a set of transactions and a clustering, returns a mask where `true`
     /// indicates all inputs of that transaction are in the same cluster.
-    pub fn with_clustering(txs: Expr<TxSet>, clustering: Expr<Clustering>) -> Expr<Mask<TxId>> {
+    pub fn with_clustering(
+        txs: Expr<TxSet>,
+        clustering: Expr<Clustering>,
+    ) -> Expr<Mask<AbstractTxId>> {
         let ctx = txs.context().clone();
         ctx.register(IsUnilateralNode::new(txs, clustering))
     }
@@ -208,11 +219,11 @@ impl IsUnilateral {
 /// cluster the change outputs with the inputs.
 pub struct ChangeClusteringNode {
     txs: Expr<TxSet>,
-    change_mask: Expr<Mask<TxOutId>>,
+    change_mask: Expr<Mask<AbstractTxOutId>>,
 }
 
 impl ChangeClusteringNode {
-    pub fn new(txs: Expr<TxSet>, change_mask: Expr<Mask<TxOutId>>) -> Self {
+    pub fn new(txs: Expr<TxSet>, change_mask: Expr<Mask<AbstractTxOutId>>) -> Self {
         Self { txs, change_mask }
     }
 }
@@ -224,7 +235,7 @@ impl Node for ChangeClusteringNode {
         vec![self.txs.id(), self.change_mask.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<TxOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<AbstractTxOutId> {
         // Use get_or_default since txs and change_mask might be part of a cycle
         let tx_ids = ctx.get_or_default(&self.txs);
         let change_mask = ctx.get_or_default(&self.change_mask);
@@ -232,22 +243,22 @@ impl Node for ChangeClusteringNode {
 
         let clustering = SparseDisjointSet::new();
 
-        for &tx_id in &tx_ids {
-            let tx = tx_id.with(index);
-            // Get first input (if any)
-            let first_input: Option<TxOutId> = tx.spent_coins().next();
+        for tx_id in &tx_ids {
+            if let Some(concrete_tx_id) = tx_id.try_as_loose() {
+                let tx = concrete_tx_id.with(index);
+                let first_input: Option<AbstractTxOutId> =
+                    tx.spent_coins().next().map(AbstractTxOutId::from);
 
-            let Some(root_input) = first_input else {
-                continue; // Coinbase
-            };
+                let Some(root_input) = first_input else {
+                    continue; // Coinbase
+                };
 
-            // Find change outputs for this transaction
-            let output_count = tx.output_count();
-            for vout in 0..output_count {
-                let txout_id = TxOutId::new(tx_id, vout as u32);
-                if change_mask.get(&txout_id).copied().unwrap_or(false) {
-                    // This is a change output - cluster it with inputs
-                    clustering.union(txout_id, root_input);
+                let output_count = tx.output_count();
+                for vout in 0..output_count {
+                    let txout_id = AbstractTxOutId::from(TxOutId::new(concrete_tx_id, vout as u32));
+                    if change_mask.get(&txout_id).copied().unwrap_or(false) {
+                        clustering.union(txout_id, root_input);
+                    }
                 }
             }
         }
@@ -268,7 +279,7 @@ impl ChangeClustering {
     ///
     /// Takes a set of transactions and a mask identifying change outputs.
     /// Returns a clustering where change outputs are in the same cluster as inputs.
-    pub fn new(txs: Expr<TxSet>, change_mask: Expr<Mask<TxOutId>>) -> Expr<Clustering> {
+    pub fn new(txs: Expr<TxSet>, change_mask: Expr<Mask<AbstractTxOutId>>) -> Expr<Clustering> {
         let ctx = txs.context().clone();
         ctx.register(ChangeClusteringNode::new(txs, change_mask))
     }

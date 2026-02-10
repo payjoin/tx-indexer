@@ -8,6 +8,7 @@ mod tests {
     use pipeline::engine::Engine;
     use pipeline::ops::source::AllTxs;
     use pipeline::value::Clustering;
+    use tx_indexer_primitives::abstract_id::{AbstractTxId, AbstractTxOutId};
     use tx_indexer_primitives::abstract_types::AbstractTransaction;
     use tx_indexer_primitives::disjoint_set::DisJointSet;
     use tx_indexer_primitives::loose::storage::InMemoryIndex;
@@ -120,8 +121,8 @@ mod tests {
 
         let result = engine.eval(&coinjoin_mask);
 
-        assert_eq!(result.get(&TxId(0)), Some(&false)); // Not a coinjoin
-        assert_eq!(result.get(&TxId(1)), Some(&true)); // Is a coinjoin
+        assert_eq!(result.get(&AbstractTxId::from(TxId(0))), Some(&false)); // Not a coinjoin
+        assert_eq!(result.get(&AbstractTxId::from(TxId(1))), Some(&true)); // Is a coinjoin
     }
 
     #[test]
@@ -140,8 +141,8 @@ mod tests {
         let result = engine.eval(&mih_clustering);
 
         // The two inputs of spending_tx should be in the same cluster
-        let input1 = TestFixture::spending_tx().spent_coins[0];
-        let input2 = TestFixture::spending_tx().spent_coins[1];
+        let input1 = AbstractTxOutId::from(TestFixture::spending_tx().spent_coins[0]);
+        let input2 = AbstractTxOutId::from(TestFixture::spending_tx().spent_coins[1]);
         assert_eq!(result.find(input1), result.find(input2));
     }
 
@@ -165,8 +166,8 @@ mod tests {
 
         // Same assertion as test_multi_input_heuristic: the two inputs of spending_tx
         // should be in the same cluster regardless of insertion order
-        let input1 = TestFixture::spending_tx().spent_coins[0];
-        let input2 = TestFixture::spending_tx().spent_coins[1];
+        let input1 = AbstractTxOutId::from(TestFixture::spending_tx().spent_coins[0]);
+        let input2 = AbstractTxOutId::from(TestFixture::spending_tx().spent_coins[1]);
         assert_eq!(result.find(input1), result.find(input2));
     }
 
@@ -184,9 +185,15 @@ mod tests {
         let result = engine.eval(&change_mask);
 
         // Payment output (vout=0) should not be change
-        assert_eq!(result.get(&TestFixture::payment_output()), Some(&false));
+        assert_eq!(
+            result.get(&AbstractTxOutId::from(TestFixture::payment_output())),
+            Some(&false)
+        );
         // Change output (vout=1, last output) should be change
-        assert_eq!(result.get(&TestFixture::change_output()), Some(&true));
+        assert_eq!(
+            result.get(&AbstractTxOutId::from(TestFixture::change_output())),
+            Some(&true)
+        );
     }
 
     #[test]
@@ -205,10 +212,10 @@ mod tests {
         let result = engine.eval(&is_unilateral_mask);
 
         // First two coinbases are not unilateral
-        assert_eq!(result.get(&TxId(0)), Some(&false));
-        assert_eq!(result.get(&TxId(1)), Some(&false));
+        assert_eq!(result.get(&AbstractTxId::from(TxId(0))), Some(&false));
+        assert_eq!(result.get(&AbstractTxId::from(TxId(1))), Some(&false));
         // The spending tx is unilateral
-        assert_eq!(result.get(&TxId(2)), Some(&true));
+        assert_eq!(result.get(&AbstractTxId::from(TxId(2))), Some(&true));
     }
 
     #[test]
@@ -231,7 +238,10 @@ mod tests {
         let result = engine.eval(&is_unilateral_mask);
 
         // The spending tx should be unilateral
-        assert_eq!(result.get(&TestFixture::spending_tx().id), Some(&true));
+        assert_eq!(
+            result.get(&AbstractTxId::from(TestFixture::spending_tx().id)),
+            Some(&true)
+        );
     }
 
     #[test]
@@ -239,8 +249,8 @@ mod tests {
         let all_txs = setup_test_fixture();
 
         // Pre-cluster the inputs so IsUnilateral passes
-        let input1 = TestFixture::spending_tx().spent_coins[0];
-        let input2 = TestFixture::spending_tx().spent_coins[1];
+        let input1 = AbstractTxOutId::from(TestFixture::spending_tx().spent_coins[0]);
+        let input2 = AbstractTxOutId::from(TestFixture::spending_tx().spent_coins[1]);
 
         let ctx = Arc::new(PipelineContext::new());
         let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
@@ -278,13 +288,13 @@ mod tests {
 
         // Change output should be clustered with inputs (change clustering)
         assert_eq!(
-            result.find(TestFixture::change_output()),
+            result.find(AbstractTxOutId::from(TestFixture::change_output())),
             result.find(input1)
         );
 
         // Payment output should NOT be in the same cluster
         assert_ne!(
-            result.find(TestFixture::payment_output()),
+            result.find(AbstractTxOutId::from(TestFixture::payment_output())),
             result.find(input1)
         );
     }
@@ -315,8 +325,8 @@ mod tests {
         let result = engine.eval(&global_clustering.as_expr());
 
         // The two inputs should be clustered
-        let input1 = TestFixture::spending_tx().spent_coins[0];
-        let input2 = TestFixture::spending_tx().spent_coins[1];
+        let input1 = AbstractTxOutId::from(TestFixture::spending_tx().spent_coins[0]);
+        let input2 = AbstractTxOutId::from(TestFixture::spending_tx().spent_coins[1]);
         assert_eq!(result.find(input1), result.find(input2));
     }
 
@@ -447,8 +457,8 @@ mod tests {
         // tx1 has single input, so MIH doesn't cluster anything for it
         // But tx1's change (vout=1) should be clustered with coinbase (vout=0)
         // because tx1 is unilateral (single input = trivially unilateral)
-        let coinbase_out = TxOutId::new(TxId(0), 0);
-        let tx1_change = TxOutId::new(TxId(1), 1);
+        let coinbase_out = AbstractTxOutId::from(TxOutId::new(TxId(0), 0));
+        let tx1_change = AbstractTxOutId::from(TxOutId::new(TxId(1), 1));
 
         // tx1 is unilateral, so change clustering applies
         assert_eq!(
@@ -459,8 +469,8 @@ mod tests {
 
         // tx2 has two inputs: tx1's change and coinbase2
         // MIH should cluster these together
-        let tx1_change_as_input = TxOutId::new(TxId(1), 1);
-        let coinbase2_out = TxOutId::new(TxId(2), 0);
+        let tx1_change_as_input = AbstractTxOutId::from(TxOutId::new(TxId(1), 1));
+        let coinbase2_out = AbstractTxOutId::from(TxOutId::new(TxId(2), 0));
 
         assert_eq!(
             result.find(tx1_change_as_input),
@@ -476,7 +486,7 @@ mod tests {
         );
 
         // tx2's change should also be clustered (if tx2 is unilateral)
-        let tx2_change = TxOutId::new(TxId(3), 1);
+        let tx2_change = AbstractTxOutId::from(TxOutId::new(TxId(3), 1));
         // After MIH runs, tx2's inputs are clustered, so it becomes unilateral
         // Then change clustering should cluster tx2's change with its inputs
         assert_eq!(
@@ -553,13 +563,13 @@ mod tests {
 
         // Change output (vout 1, spent by tx2 with matching n_locktime) is change
         assert_eq!(
-            result.get(&change_output),
+            result.get(&AbstractTxOutId::from(change_output)),
             Some(&true),
             "change output should be identified as change by fingerprint heuristic"
         );
 
         assert_eq!(
-            result.get(&payment_output),
+            result.get(&AbstractTxOutId::from(payment_output)),
             Some(&false),
             "payment output should not be identified as change by fingerprint heuristic"
         );
@@ -579,16 +589,16 @@ mod tests {
 
         let spending_tx_fixture = TestFixture::spending_tx();
         assert_ne!(
-            result.find(spending_tx_fixture.spent_coins[0]),
-            result.find(spending_tx_fixture.spent_coins[1])
+            result.find(AbstractTxOutId::from(spending_tx_fixture.spent_coins[0])),
+            result.find(AbstractTxOutId::from(spending_tx_fixture.spent_coins[1]))
         );
 
         engine.add_base_facts(spending_tx);
 
         let result = engine.eval(&mih_clustering);
         assert_eq!(
-            result.find(spending_tx_fixture.spent_coins[0]),
-            result.find(spending_tx_fixture.spent_coins[1])
+            result.find(AbstractTxOutId::from(spending_tx_fixture.spent_coins[0])),
+            result.find(AbstractTxOutId::from(spending_tx_fixture.spent_coins[1]))
         );
     }
 }

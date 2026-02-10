@@ -133,8 +133,10 @@ pub trait SourceNode: Send + Sync + 'static {
     /// The value type this node produces when evaluated.
     type OutputValue: ExprValue;
 
-    fn evaluate(&self, ctx: &mut SourceNodeEvalContext)
-    -> <Self::OutputValue as ExprValue>::Output;
+    fn evaluate(
+        &self,
+        ctx: &mut SourceNodeEvalContext<'_>,
+    ) -> <Self::OutputValue as ExprValue>::Output;
 
     /// Optional: provide a human-readable name for debugging.
     fn name(&self) -> &'static str {
@@ -143,9 +145,8 @@ pub trait SourceNode: Send + Sync + 'static {
 }
 
 pub trait AnySourceNode: Send + Sync + 'static {
-    /// Evaluate this node and return the result plus whether it changed from `previous`.
-    /// The node does a single typed downcast of `previous` to compare
-    fn evaluate_any(&self, ctx: &mut SourceNodeEvalContext) -> Box<dyn Any + Send + Sync>;
+    /// Evaluate this node and return the result (type-erased).
+    fn evaluate_any(&self, ctx: &mut SourceNodeEvalContext<'_>) -> Box<dyn Any + Send + Sync>;
 
     /// Get the name of this node for debugging.
     fn name(&self) -> &'static str;
@@ -155,7 +156,7 @@ impl<N: SourceNode> AnySourceNode for N
 where
     <N::OutputValue as ExprValue>::Output: Send + Sync,
 {
-    fn evaluate_any(&self, ctx: &mut SourceNodeEvalContext) -> Box<dyn Any + Send + Sync> {
+    fn evaluate_any(&self, ctx: &mut SourceNodeEvalContext<'_>) -> Box<dyn Any + Send + Sync> {
         Box::new(self.evaluate(ctx))
     }
 

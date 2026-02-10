@@ -18,9 +18,13 @@ use crate::node::NodeId;
 use crate::storage::{BaseFacts, NodeStorage};
 use crate::value::ExprValue;
 
-// TODO: make the base fact generic
+/// Concrete transaction type for the loose (InMemoryIndex) backend.
+/// Used for base facts and index operations; pipeline value types use abstract IDs.
+pub type LooseTx =
+    dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId> + Send + Sync;
+
 pub struct SourceNodeEvalContext<'a> {
-    pub(crate) base_facts: &'a mut BaseFacts,
+    pub(crate) base_facts: &'a mut BaseFacts<LooseTx>,
     pub(crate) index: &'a Arc<RwLock<InMemoryIndex>>,
     #[allow(unused)]
     pub(crate) node_id: NodeId,
@@ -28,7 +32,7 @@ pub struct SourceNodeEvalContext<'a> {
 
 impl<'a> SourceNodeEvalContext<'a> {
     pub fn new(
-        base_facts: &'a mut BaseFacts,
+        base_facts: &'a mut BaseFacts<LooseTx>,
         index: &'a Arc<RwLock<InMemoryIndex>>,
         node_id: NodeId,
     ) -> Self {
@@ -39,17 +43,7 @@ impl<'a> SourceNodeEvalContext<'a> {
         }
     }
 
-    pub fn take_base_facts(
-        &mut self,
-    ) -> Option<
-        Vec<
-            Arc<
-                dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId>
-                    + Send
-                    + Sync,
-            >,
-        >,
-    > {
+    pub fn take_base_facts(&mut self) -> Option<Vec<Arc<LooseTx>>> {
         self.base_facts.take_base_facts()
     }
 
@@ -125,12 +119,11 @@ impl<'a> EvalContext<'a> {
 /// The engine evaluates expressions on demand, caching results and
 /// respecting dependencies between nodes. It supports cyclic dependencies
 /// through fixpoint iteration.
-// TODO: this is hardcoded for loose txs. We need to make it generic.
 pub struct Engine {
     ctx: Arc<PipelineContext>,
     index: Arc<RwLock<InMemoryIndex>>,
     storage: NodeStorage,
-    base_facts: BaseFacts,
+    base_facts: BaseFacts<LooseTx>,
     /// Track which iteration each node was last evaluated in (for cycle detection).
     eval_iteration: HashMap<NodeId, usize>,
     iteration: usize,
@@ -159,16 +152,7 @@ impl Engine {
             .unwrap_or_default()
     }
 
-    pub fn add_base_facts(
-        &mut self,
-        facts: impl IntoIterator<
-            Item = Arc<
-                dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId>
-                    + Send
-                    + Sync,
-            >,
-        >,
-    ) {
+    pub fn add_base_facts(&mut self, facts: impl IntoIterator<Item = Arc<LooseTx>>) {
         self.base_facts.set_base_facts(facts);
     }
 

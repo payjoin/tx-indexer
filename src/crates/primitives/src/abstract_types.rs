@@ -102,7 +102,7 @@ pub trait AbstractTxOut {
 
 /// Trait for transaction looking things. Generic over the ids as they can be either loose or dense.
 pub trait AbstractTransaction {
-    type TxId;
+    type TxId: Eq + std::hash::Hash + Copy;
     type TxOutId: Eq + std::hash::Hash + Copy;
     type TxInId;
     /// Returns the transaction ID
