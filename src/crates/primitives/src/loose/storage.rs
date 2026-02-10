@@ -1,6 +1,6 @@
 use crate::{
     ScriptPubkeyHash,
-    abstract_types::{AbstractTransaction, LooseIds},
+    abstract_types::{AbstractTransaction, IdFamily, LooseIds},
     disjoint_set::{DisJointSet, SparseDisjointSet},
     graph_index::{
         GlobalClusteringIndex, IndexedGraph, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex,
@@ -105,7 +105,7 @@ impl InMemoryIndex {
 
 impl PrevOutIndex for InMemoryIndex {
     type I = LooseIds;
-    fn prev_txout(&self, id: &Self::I::TxInId) -> Self::I::TxOutId {
+    fn prev_txout(&self, id: &<Self::I as IdFamily>::TxInId) -> <Self::I as IdFamily>::TxOutId {
         *self
             .prev_txouts
             .get(id)
@@ -114,7 +114,7 @@ impl PrevOutIndex for InMemoryIndex {
 }
 impl TxInIndex for InMemoryIndex {
     type I = LooseIds;
-    fn spending_txin(&self, tx_out: &Self::I::TxOutId) -> Option<Self::I::TxInId> {
+    fn spending_txin(&self, tx_out: &<Self::I as IdFamily>::TxOutId) -> Option<<Self::I as IdFamily>::TxInId> {
         self.spending_txins.get(tx_out).cloned()
     }
 }
@@ -130,7 +130,7 @@ impl TxIndex for InMemoryIndex {
     type I = LooseIds;
     fn tx(
         &self,
-        txid: &Self::I::TxId,
+        txid: &<Self::I as IdFamily>::TxId,
     ) -> Option<Arc<dyn AbstractTransaction<I = Self::I> + Send + Sync>> {
         self.txs.get(txid).cloned()
     }

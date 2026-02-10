@@ -2,8 +2,7 @@ use crate::{
     ScriptPubkeyHash,
     abstract_fingerprints::HasNLockTime,
     abstract_types::{
-        AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
-        EnumerateSpentTxOuts, LooseIds, OutputCount, TxConstituent,
+        AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts, IdFamily, LooseIds, OutputCount, TxConstituent
     },
     graph_index::IndexedGraph,
     loose::{TxId, TxInId, TxOutId, storage::InMemoryIndex},
@@ -68,8 +67,8 @@ impl<'a> TxHandle<'a> {
 
 impl AbstractTransaction for TxHandle<'_> {
     type I = LooseIds;
-    fn id(&self) -> Self::I::TxId {
-        self.id.into()
+    fn id(&self) -> <Self::I as IdFamily>::TxId {
+        self.id
     }
 
     // TODO: are these expects correct when in a pruned node

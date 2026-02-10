@@ -16,8 +16,7 @@ pub mod test_utils {
         ScriptPubkeyHash,
         abstract_fingerprints::HasNLockTime,
         abstract_types::{
-            AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
-            EnumerateSpentTxOuts, LooseIds, OutputCount, TxConstituent,
+            AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts, IdFamily, LooseIds, OutputCount, TxConstituent
         },
         loose::{TxId, TxInId, TxOutId},
     };
@@ -61,7 +60,7 @@ pub mod test_utils {
 
     impl AbstractTxIn for DummyTxInWrapper {
         type I = LooseIds;
-        fn prev_txid(&self) -> Self::I::TxId {
+        fn prev_txid(&self) -> <Self::I as IdFamily>::TxId {
             self.prev_txid
         }
 
@@ -106,7 +105,7 @@ pub mod test_utils {
 
     impl AbstractTransaction for DummyTxData {
         type I = LooseIds;
-        fn id(&self) -> Self::I::TxId {
+        fn id(&self) -> <Self::I as IdFamily>::TxId {
             self.id
         }
 
@@ -170,7 +169,7 @@ pub mod test_utils {
 
     impl From<DummyTxData>
         for Box<
-            dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId> + Send + Sync,
+            dyn AbstractTransaction<I = LooseIds> + Send + Sync,
         >
     {
         fn from(val: DummyTxData) -> Self {

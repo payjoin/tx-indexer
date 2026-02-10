@@ -18,7 +18,7 @@ pub trait OutputCount: AbstractTransaction {
 }
 
 pub trait EnumerateSpentTxOuts: AbstractTransaction {
-    fn spent_coins(&self) -> impl Iterator<Item = Self::TxOutId>;
+    fn spent_coins(&self) -> impl Iterator<Item = <Self::I as IdFamily>::TxOutId>;
 }
 
 // TODO: find a better name for this
@@ -28,7 +28,7 @@ pub trait EnumerateOutputValueInArbitraryOrder: AbstractTransaction {
 
 // Blanket implementation for Arc<dyn AbstractTransaction> to bridge with the heuristics
 impl<Atx: AbstractTransaction + ?Sized> EnumerateSpentTxOuts for Arc<Atx> {
-    fn spent_coins(&self) -> impl Iterator<Item = Self::TxOutId> {
+    fn spent_coins(&self) -> impl Iterator<Item = <Self::I as IdFamily>::TxOutId> {
         self.inputs().map(|input| input.prev_txout_id())
     }
 }
@@ -41,7 +41,7 @@ impl<Atx: AbstractTransaction + ?Sized> EnumerateOutputValueInArbitraryOrder for
 
 impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Arc<T> {
     type I = T::I;
-    fn id(&self) -> Self::I::TxId {
+    fn id(&self) -> <Self::I as IdFamily>::TxId {
         (**self).id()
     }
 
@@ -78,11 +78,11 @@ impl<Atx: AbstractTransaction + ?Sized> OutputCount for Arc<Atx> {
 pub trait AbstractTxIn {
     type I: IdFamily;
     /// Returns the transaction ID of the previous output
-    fn prev_txid(&self) -> Self::I::TxId;
+    fn prev_txid(&self) -> <Self::I as IdFamily>::TxId;
     /// Returns the output index of the previous output
     fn prev_vout(&self) -> u32;
     /// Returns the previous output ID
-    fn prev_txout_id(&self) -> Self::I::TxOutId;
+    fn prev_txout_id(&self) -> <Self::I as IdFamily>::TxOutId;
 }
 
 /// Trait for transaction outputs
@@ -98,7 +98,7 @@ pub trait AbstractTxOut {
 pub trait AbstractTransaction {
     type I: IdFamily;
     /// Returns the transaction ID
-    fn id(&self) -> Self::I::TxId;
+    fn id(&self) -> <Self::I as IdFamily>::TxId;
     /// Returns an iterator over transaction inputs
     fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn<I = Self::I>>> + '_>;
     /// Returns an iterator over transaction outputs
@@ -117,12 +117,27 @@ pub trait IdFamily {
     type TxOutId: Eq + std::hash::Hash + Copy;
 }
 
+pub trait TxIdOps<I: IdFamily>: Copy {
+    fn txout_id(self, vout: u32) -> I::TxOutId;
+    fn txin_id(self, vin: u32) -> I::TxInId;
+}
+
 pub struct LooseIds;
 
 impl IdFamily for LooseIds {
     type TxId = loose::TxId;
     type TxInId = loose::TxInId;
     type TxOutId = loose::TxOutId;
+}
+
+impl TxIdOps<LooseIds> for loose::TxId {
+    fn txout_id(self, vout: u32) -> loose::TxOutId {
+        loose::TxOutId::new(self, vout)
+    }
+
+    fn txin_id(self, vin: u32) -> loose::TxInId {
+        loose::TxInId::new(self, vin)
+    }
 }
 
 pub trait IntoTxHandle<I: IdFamily> {

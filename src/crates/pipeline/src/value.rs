@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::marker::PhantomData;
 
+use tx_indexer_primitives::abstract_types::IdFamily;
 use tx_indexer_primitives::disjoint_set::SparseDisjointSet;
 
 /// Trait for types that can be the value of an expression.
@@ -25,7 +26,7 @@ pub trait ExprValue: 'static {
 
 // Built-in Value Types
 
-/// Marker type for a set of transaction IDs.
+/// Marker type for a set of IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Set<T>(PhantomData<T>);
 
@@ -101,10 +102,8 @@ where
 }
 
 // Value Type Aliases for convenience
-// TODO: these dont seem needed
-
-/// A mask over transaction IDs.
-pub type TxMask<T> = Mask<T>;
-
-/// A mask over transaction output IDs.
-pub type TxOutMask<T> = Mask<T>;
+pub type TxSet<I> = Set<<I as IdFamily>::TxId>;
+pub type TxOutSet<I> = Set<<I as IdFamily>::TxOutId>;
+pub type TxMask<I> = Mask<<I as IdFamily>::TxId>;
+pub type TxOutMask<I> = Mask<<I as IdFamily>::TxOutId>;
+pub type TxOutClustering<I> = Clustering<<I as IdFamily>::TxOutId>;

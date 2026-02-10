@@ -9,8 +9,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
-use tx_indexer_primitives::abstract_types::AbstractTransaction;
-use tx_indexer_primitives::loose::{TxId, TxInId, TxOutId, storage::InMemoryIndex};
+use tx_indexer_primitives::abstract_types::{AbstractTransaction, LooseIds};
+use tx_indexer_primitives::loose::storage::InMemoryIndex;
 
 use crate::context::PipelineContext;
 use crate::expr::Expr;
@@ -20,8 +20,7 @@ use crate::value::ExprValue;
 
 /// Concrete transaction type for the loose (InMemoryIndex) backend.
 /// Used for base facts and index operations; pipeline value types use abstract IDs.
-pub type LooseTx =
-    dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId> + Send + Sync;
+pub type LooseTx = dyn AbstractTransaction<I = LooseIds> + Send + Sync;
 
 pub struct SourceNodeEvalContext<'a> {
     pub(crate) base_facts: &'a mut BaseFacts<LooseTx>,

@@ -7,12 +7,15 @@ pub trait PrevOutIndex {
     type I: IdFamily;
     // TODO: consider handle wrappers converting ids to the actual types.
     // justification: the heuristics may not care about the content of the data. Only access that thru the handler.
-    fn prev_txout(&self, ot: &Self::TxInId) -> Self::TxOutId;
+    fn prev_txout(&self, ot: &<Self::I as IdFamily>::TxInId) -> <Self::I as IdFamily>::TxOutId;
 }
 
 pub trait TxInIndex {
     type I: IdFamily;
-    fn spending_txin(&self, tx: &Self::I::TxOutId) -> Option<Self::I::TxInId>;
+    fn spending_txin(
+        &self,
+        tx: &<Self::I as IdFamily>::TxOutId,
+    ) -> Option<<Self::I as IdFamily>::TxInId>;
 }
 
 pub trait ScriptPubkeyIndex {
@@ -21,21 +24,25 @@ pub trait ScriptPubkeyIndex {
     fn script_pubkey_to_txout_id(
         &self,
         script_pubkey: &ScriptPubkeyHash,
-    ) -> Option<Self::I::TxOutId>;
+    ) -> Option<<Self::I as IdFamily>::TxOutId>;
 }
 
 pub trait TxIndex {
     type I: IdFamily;
     fn tx(
         &self,
-        txid: &Self::I::TxId,
+        txid: &<Self::I as IdFamily>::TxId,
     ) -> Option<Arc<dyn AbstractTransaction<I = Self::I> + Send + Sync>>;
 }
 
 pub trait GlobalClusteringIndex {
     type I: IdFamily;
-    fn find(&self, txout_id: Self::I::TxOutId) -> Self::TxOutId;
-    fn union(&self, txout_id1: Self::TxOutId, txout_id2: Self::TxOutId);
+    fn find(&self, txout_id: <Self::I as IdFamily>::TxOutId) -> <Self::I as IdFamily>::TxOutId;
+    fn union(
+        &self,
+        txout_id1: <Self::I as IdFamily>::TxOutId,
+        txout_id2: <Self::I as IdFamily>::TxOutId,
+    );
 }
 
 // TODO: seprate out into rw and ro traits
