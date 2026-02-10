@@ -16,4 +16,4 @@ pub mod source;
 pub use filter::FilterWithMaskNode;
 pub use negate::NegateMaskNode;
 pub use set_ops::{JoinClusteringNode, OutputsNode, TxsNode};
-pub use source::{AllTxs, AllTxsNode};
+pub use source::{AllLooseTxs, AllLooseTxsNode};

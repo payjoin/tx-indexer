@@ -1,6 +1,6 @@
 use crate::{
     ScriptPubkeyHash,
-    abstract_types::AbstractTransaction,
+    abstract_types::{AbstractTransaction, LooseIds},
     disjoint_set::{DisJointSet, SparseDisjointSet},
     graph_index::{
         GlobalClusteringIndex, IndexedGraph, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex,
@@ -16,16 +16,13 @@ use std::{
     sync::Arc,
 };
 
-impl IndexedGraph<TxId, TxInId, TxOutId> for InMemoryIndex {}
+impl IndexedGraph<LooseIds> for InMemoryIndex {}
 
 pub struct InMemoryIndex {
     pub prev_txouts: HashMap<TxInId, TxOutId>,
     pub spending_txins: HashMap<TxOutId, TxInId>,
     // TODO: test that insertion order does not make a difference
-    pub txs: HashMap<
-        TxId,
-        Arc<dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId> + Send + Sync>,
-    >,
+    pub txs: HashMap<TxId, Arc<dyn AbstractTransaction<I = LooseIds> + Send + Sync>>,
     pub global_clustering: SparseDisjointSet<TxOutId>,
     /// Index mapping script pubkey hash (20 bytes) and the first transaction output ID that uses it
     pub spk_to_txout_ids: HashMap<ScriptPubkeyHash, TxOutId>,
@@ -61,9 +58,7 @@ impl InMemoryIndex {
     // FIXME: check all the keys before inserting. Lets not modify anything before checking for all dup checks
     pub fn add_tx<'a>(
         &'a mut self,
-        tx: Arc<
-            dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId> + Send + Sync,
-        >,
+        tx: Arc<dyn AbstractTransaction<I = LooseIds> + Send + Sync>,
     ) -> TxHandle<'a> {
         let tx_id = tx.id();
         // TODO: only loose txids for now
@@ -109,46 +104,40 @@ impl InMemoryIndex {
 }
 
 impl PrevOutIndex for InMemoryIndex {
-    type TxInId = TxInId;
-    type TxOutId = TxOutId;
-    fn prev_txout(&self, id: &TxInId) -> TxOutId {
+    type I = LooseIds;
+    fn prev_txout(&self, id: &Self::I::TxInId) -> Self::I::TxOutId {
         *self
             .prev_txouts
             .get(id)
-            .expect("Previous output should always be present if index is build correctly")
+            .expect("Previous output should always be present if index is built correctly")
     }
 }
 impl TxInIndex for InMemoryIndex {
-    type TxOutId = TxOutId;
-    type TxInId = TxInId;
-    fn spending_txin(&self, tx_out: &TxOutId) -> Option<TxInId> {
+    type I = LooseIds;
+    fn spending_txin(&self, tx_out: &Self::I::TxOutId) -> Option<Self::I::TxInId> {
         self.spending_txins.get(tx_out).cloned()
     }
 }
 
 impl ScriptPubkeyIndex for InMemoryIndex {
-    type TxOutId = TxOutId;
+    type I = LooseIds;
     fn script_pubkey_to_txout_id(&self, script_pubkey: &ScriptPubkeyHash) -> Option<TxOutId> {
         self.spk_to_txout_ids.get(script_pubkey).cloned()
     }
 }
 
 impl TxIndex for InMemoryIndex {
-    type TxId = TxId;
-    type TxOutId = TxOutId;
-    type TxInId = TxInId;
+    type I = LooseIds;
     fn tx(
         &self,
-        txid: &TxId,
-    ) -> Option<
-        Arc<dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId> + Send + Sync>,
-    > {
+        txid: &Self::I::TxId,
+    ) -> Option<Arc<dyn AbstractTransaction<I = Self::I> + Send + Sync>> {
         self.txs.get(txid).cloned()
     }
 }
 
 impl GlobalClusteringIndex for InMemoryIndex {
-    type TxOutId = TxOutId;
+    type I = LooseIds;
     fn find(&self, txout_id: TxOutId) -> TxOutId {
         self.global_clustering.find(txout_id)
     }

@@ -3,14 +3,14 @@ use crate::{
     abstract_fingerprints::HasNLockTime,
     abstract_types::{
         AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
-        EnumerateSpentTxOuts, OutputCount, TxConstituent,
+        EnumerateSpentTxOuts, LooseIds, OutputCount, TxConstituent,
     },
     graph_index::IndexedGraph,
     loose::{TxId, TxInId, TxOutId, storage::InMemoryIndex},
 };
 
 use bitcoin::Amount;
-pub type LooseIndexedGraph = dyn IndexedGraph<TxId, TxInId, TxOutId>;
+pub type LooseIndexedGraph = dyn IndexedGraph<LooseIds>;
 
 pub struct TxHandle<'a> {
     id: TxId,
@@ -67,27 +67,20 @@ impl<'a> TxHandle<'a> {
 }
 
 impl AbstractTransaction for TxHandle<'_> {
-    type TxId = TxId;
-    type TxOutId = TxOutId;
-    type TxInId = TxInId;
-    fn id(&self) -> TxId {
+    type I = LooseIds;
+    fn id(&self) -> Self::I::TxId {
         self.id.into()
     }
 
     // TODO: are these expects correct when in a pruned node
     // TODO: this hsould be returning an Arc pointer not allocated box
-    fn inputs(
-        &self,
-    ) -> Box<
-        dyn Iterator<Item = Box<dyn AbstractTxIn<TxId = Self::TxId, TxOutId = Self::TxOutId>>> + '_,
-    > {
+    fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn<I = Self::I>>> + '_> {
         let tx = self
             .index
             .tx(&self.id)
             .expect("Tx should always exist if we have a handle");
         // TODO: is this not a infinite loop?
-        let input_boxes: Vec<Box<dyn AbstractTxIn<TxId = Self::TxId, TxOutId = Self::TxOutId>>> =
-            tx.inputs().collect();
+        let input_boxes: Vec<Box<dyn AbstractTxIn<I = Self::I>>> = tx.inputs().collect();
         Box::new(input_boxes.into_iter())
     }
 

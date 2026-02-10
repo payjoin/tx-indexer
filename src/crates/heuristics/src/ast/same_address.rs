@@ -1,17 +1,17 @@
 use pipeline::Clustering;
 use pipeline::expr::Expr;
 use pipeline::node::Node;
-use pipeline::value::TxSet;
+use pipeline::value::Set;
 use tx_indexer_primitives::abstract_id::AbstractTxOutId;
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
 use tx_indexer_primitives::graph_index::ScriptPubkeyIndex;
 
 pub struct SameAddressClusteringNode {
-    txs: Expr<TxSet>,
+    txs: Expr<Set>,
 }
 
 impl SameAddressClusteringNode {
-    pub fn new(txs: Expr<TxSet>) -> Self {
+    pub fn new(txs: Expr<Set>) -> Self {
         Self { txs }
     }
 }
@@ -50,7 +50,7 @@ pub struct SameAddressClustering;
 
 impl SameAddressClustering {
     #[allow(dead_code)]
-    pub fn new(txs: Expr<TxSet>) -> Expr<Clustering> {
+    pub fn new(txs: Expr<Set>) -> Expr<Clustering> {
         let ctx = txs.context().clone();
         ctx.register(SameAddressClusteringNode::new(txs))
     }
@@ -60,7 +60,7 @@ impl SameAddressClustering {
 mod tests {
     use std::sync::{Arc, RwLock};
 
-    use pipeline::ops::AllTxs;
+    use pipeline::ops::AllLooseTxs;
     use pipeline::{Engine, PipelineContext};
     use tx_indexer_primitives::abstract_types::AbstractTransaction;
     use tx_indexer_primitives::loose::storage::InMemoryIndex;
@@ -130,7 +130,7 @@ mod tests {
         let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
         engine.add_base_facts(all_txs);
 
-        let all_txs = AllTxs::new(&ctx);
+        let all_txs = AllLooseTxs::new(&ctx);
         let clustering = SameAddressClustering::new(all_txs);
         engine.run_to_fixpoint();
         let result = engine.eval(&clustering);

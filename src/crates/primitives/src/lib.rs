@@ -1,5 +1,4 @@
 pub mod abstract_fingerprints;
-pub mod abstract_id;
 pub mod abstract_types;
 pub mod dense;
 pub mod disjoint_set;
@@ -18,7 +17,7 @@ pub mod test_utils {
         abstract_fingerprints::HasNLockTime,
         abstract_types::{
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
-            EnumerateSpentTxOuts, OutputCount, TxConstituent,
+            EnumerateSpentTxOuts, LooseIds, OutputCount, TxConstituent,
         },
         loose::{TxId, TxInId, TxOutId},
     };
@@ -61,9 +60,8 @@ pub mod test_utils {
     }
 
     impl AbstractTxIn for DummyTxInWrapper {
-        type TxId = TxId;
-        type TxOutId = TxOutId;
-        fn prev_txid(&self) -> TxId {
+        type I = LooseIds;
+        fn prev_txid(&self) -> Self::I::TxId {
             self.prev_txid
         }
 
@@ -107,31 +105,23 @@ pub mod test_utils {
     }
 
     impl AbstractTransaction for DummyTxData {
-        type TxId = TxId;
-        type TxOutId = TxOutId;
-        type TxInId = TxInId;
-        fn id(&self) -> TxId {
+        type I = LooseIds;
+        fn id(&self) -> Self::I::TxId {
             self.id
         }
 
-        fn inputs(
-            &self,
-        ) -> Box<
-            dyn Iterator<Item = Box<dyn AbstractTxIn<TxId = Self::TxId, TxOutId = Self::TxOutId>>>
-                + '_,
-        > {
+        fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn<I = Self::I>>> + '_> {
             // Collect into a vector to avoid lifetime issues
-            let inputs: Vec<Box<dyn AbstractTxIn<TxId = Self::TxId, TxOutId = Self::TxOutId>>> =
-                self.spent_coins
-                    .iter()
-                    .map(|spent| {
-                        Box::new(DummyTxInWrapper {
-                            prev_txid: spent.txid(),
-                            prev_vout: spent.vout(),
-                        })
-                            as Box<dyn AbstractTxIn<TxId = Self::TxId, TxOutId = Self::TxOutId>>
-                    })
-                    .collect();
+            let inputs: Vec<Box<dyn AbstractTxIn<I = Self::I>>> = self
+                .spent_coins
+                .iter()
+                .map(|spent| {
+                    Box::new(DummyTxInWrapper {
+                        prev_txid: spent.txid(),
+                        prev_vout: spent.vout(),
+                    }) as Box<dyn AbstractTxIn<I = Self::I>>
+                })
+                .collect();
             Box::new(inputs.into_iter())
         }
 

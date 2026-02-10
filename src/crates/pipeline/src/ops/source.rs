@@ -6,22 +6,22 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use tx_indexer_primitives::abstract_id::AbstractTxId;
+use tx_indexer_primitives::loose;
 
 use crate::context::PipelineContext;
 use crate::engine::SourceNodeEvalContext;
 use crate::expr::Expr;
 use crate::node::SourceNode;
-use crate::value::TxSet;
+use crate::value::Set;
 
 /// Node that returns all known transaction IDs from the index.
 /// Produces abstract IDs; conversion to/from concrete IDs happens at the index boundary.
-pub struct AllTxsNode;
+pub struct AllLooseTxsNode;
 
-impl SourceNode for AllTxsNode {
-    type OutputValue = TxSet;
+impl SourceNode for AllLooseTxsNode {
+    type OutputValue = Set<loose::TxId>;
 
-    fn evaluate(&self, ctx: &mut SourceNodeEvalContext<'_>) -> HashSet<AbstractTxId> {
+    fn evaluate(&self, ctx: &mut SourceNodeEvalContext<'_>) -> HashSet<loose::TxId> {
         let base_tx_facts = ctx.take_base_facts();
         if let Some(base_tx_facts) = base_tx_facts {
             let mut res = HashSet::new();
@@ -43,11 +43,11 @@ impl SourceNode for AllTxsNode {
 }
 
 /// Factory for creating an AllTxs expression.
-pub struct AllTxs;
+pub struct AllLooseTxs;
 
-impl AllTxs {
+impl AllLooseTxs {
     /// Create a new expression that evaluates to all known transaction IDs (as abstract IDs).
-    pub fn new(ctx: &Arc<PipelineContext>) -> Expr<TxSet> {
-        ctx.register_source(AllTxsNode)
+    pub fn new(ctx: &Arc<PipelineContext>) -> Expr<Set<loose::TxId>> {
+        ctx.register_source(AllLooseTxsNode)
     }
 }

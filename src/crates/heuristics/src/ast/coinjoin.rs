@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use pipeline::engine::EvalContext;
 use pipeline::expr::Expr;
 use pipeline::node::{Node, NodeId};
-use pipeline::value::{Mask, TxSet};
+use pipeline::value::{Mask, Set};
 use tx_indexer_primitives::abstract_id::AbstractTxId;
 
 use crate::coinjoin_detection::NaiveCoinjoinDetection;
@@ -13,11 +13,11 @@ use crate::coinjoin_detection::NaiveCoinjoinDetection;
 /// Uses a naive heuristic: if there are >= 3 outputs of the same value,
 /// the transaction is classified as a CoinJoin.
 pub struct IsCoinJoinNode {
-    input: Expr<TxSet>,
+    input: Expr<Set>,
 }
 
 impl IsCoinJoinNode {
-    pub fn new(input: Expr<TxSet>) -> Self {
+    pub fn new(input: Expr<Set>) -> Self {
         Self { input }
     }
 }
@@ -54,7 +54,7 @@ impl Node for IsCoinJoinNode {
 pub struct IsCoinJoin;
 
 impl IsCoinJoin {
-    pub fn new(input: Expr<TxSet>) -> Expr<Mask<AbstractTxId>> {
+    pub fn new(input: Expr<Set>) -> Expr<Mask<AbstractTxId>> {
         let ctx = input.context().clone();
         ctx.register(IsCoinJoinNode::new(input))
     }

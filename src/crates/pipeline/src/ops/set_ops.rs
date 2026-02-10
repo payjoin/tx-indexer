@@ -6,22 +6,21 @@
 
 use std::collections::HashSet;
 
-use tx_indexer_primitives::abstract_id::{AbstractTxId, AbstractTxOutId};
 use tx_indexer_primitives::disjoint_set::SparseDisjointSet;
 use tx_indexer_primitives::loose::TxOutId;
 
 use crate::engine::EvalContext;
 use crate::expr::Expr;
 use crate::node::{Node, NodeId};
-use crate::value::{Clustering, TxOutSet, TxSet};
+use crate::value::{Clustering, Set};
 
 /// Node that extracts all outputs from a set of transactions.
 pub struct OutputsNode {
-    input: Expr<TxSet>,
+    input: Expr<Set>,
 }
 
 impl OutputsNode {
-    pub fn new(input: Expr<TxSet>) -> Self {
+    pub fn new(input: Expr<Set>) -> Self {
         Self { input }
     }
 }
@@ -72,7 +71,7 @@ impl TxsNode {
 }
 
 impl Node for TxsNode {
-    type OutputValue = TxSet;
+    type OutputValue = Set;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id()]
@@ -124,7 +123,7 @@ impl Node for JoinClusteringNode {
 }
 
 // Extension methods on Expr<TxSet>
-impl Expr<TxSet> {
+impl Expr<Set> {
     /// Get all outputs of the transactions in this set.
     pub fn outputs(&self) -> Expr<TxOutSet> {
         self.ctx.register(OutputsNode::new(self.clone()))
@@ -134,7 +133,7 @@ impl Expr<TxSet> {
 // Extension methods on Expr<TxOutSet>
 impl Expr<TxOutSet> {
     /// Get the transactions containing these outputs.
-    pub fn txs(&self) -> Expr<TxSet> {
+    pub fn txs(&self) -> Expr<Set> {
         self.ctx.register(TxsNode::new(self.clone()))
     }
 }

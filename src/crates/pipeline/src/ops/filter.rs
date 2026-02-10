@@ -8,7 +8,7 @@ use tx_indexer_primitives::abstract_id::{AbstractTxId, AbstractTxOutId};
 use crate::engine::EvalContext;
 use crate::expr::Expr;
 use crate::node::{Node, NodeId};
-use crate::value::{ExprValue, Mask, TxOutSet, TxSet};
+use crate::value::{ExprValue, Mask, Set, TxOutSet};
 
 /// Node that filters a set using a boolean mask.
 ///
@@ -25,8 +25,8 @@ impl<T: ExprValue, K: Eq + Hash + Clone + Send + Sync + 'static> FilterWithMaskN
     }
 }
 
-impl Node for FilterWithMaskNode<TxSet, AbstractTxId> {
-    type OutputValue = TxSet;
+impl Node for FilterWithMaskNode<Set, AbstractTxId> {
+    type OutputValue = Set;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id(), self.mask.id()]
@@ -72,11 +72,11 @@ impl Node for FilterWithMaskNode<TxOutSet, AbstractTxOutId> {
 }
 
 // Extension methods on Expr<TxSet>
-impl Expr<TxSet> {
+impl Expr<Set> {
     /// Filter transactions using a boolean mask.
     ///
     /// Keeps transactions where the mask value is `true`.
-    pub fn filter_with_mask(&self, mask: Expr<Mask<AbstractTxId>>) -> Expr<TxSet> {
+    pub fn filter_with_mask(&self, mask: Expr<Mask<AbstractTxId>>) -> Expr<Set> {
         self.ctx
             .register(FilterWithMaskNode::new(self.clone(), mask))
     }
@@ -106,8 +106,8 @@ impl<T: ExprValue, K: Eq + Hash + Clone + Send + Sync + 'static> FilterExcludeNo
     }
 }
 
-impl Node for FilterExcludeNode<TxSet, AbstractTxId> {
-    type OutputValue = TxSet;
+impl Node for FilterExcludeNode<Set, AbstractTxId> {
+    type OutputValue = Set;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id(), self.mask.id()]

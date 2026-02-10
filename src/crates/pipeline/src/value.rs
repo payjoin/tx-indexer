@@ -7,7 +7,6 @@ use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::marker::PhantomData;
 
-use tx_indexer_primitives::abstract_id::{AbstractTxId, AbstractTxOutId};
 use tx_indexer_primitives::disjoint_set::SparseDisjointSet;
 
 /// Trait for types that can be the value of an expression.
@@ -28,29 +27,13 @@ pub trait ExprValue: 'static {
 
 /// Marker type for a set of transaction IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TxSet;
+pub struct Set<T>(PhantomData<T>);
 
-impl ExprValue for TxSet {
-    type Output = HashSet<AbstractTxId>;
-
-    fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
-        if facts.is_empty() {
-            return Default::default();
-        }
-        let mut acc = facts[0].clone();
-        for rest in &facts[1..] {
-            acc.extend(rest.iter().copied());
-        }
-        acc
-    }
-}
-
-/// Marker type for a set of transaction output IDs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TxOutSet;
-
-impl ExprValue for TxOutSet {
-    type Output = HashSet<AbstractTxOutId>;
+impl<T> ExprValue for Set<T>
+where
+    T: Eq + Hash + Clone + Send + Sync + 'static,
+{
+    type Output = HashSet<T>;
 
     fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
         if facts.is_empty() {
@@ -58,7 +41,7 @@ impl ExprValue for TxOutSet {
         }
         let mut acc = facts[0].clone();
         for rest in &facts[1..] {
-            acc.extend(rest.iter().copied());
+            acc.extend(rest.iter().cloned());
         }
         acc
     }
@@ -94,10 +77,13 @@ impl<K: Eq + Hash + Clone + Send + Sync + 'static> ExprValue for Mask<K> {
 
 /// Marker type for clustering (disjoint set union of transaction outputs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Clustering;
+pub struct Clustering<T>(PhantomData<T>);
 
-impl ExprValue for Clustering {
-    type Output = SparseDisjointSet<AbstractTxOutId>;
+impl<T> ExprValue for Clustering<T>
+where
+    T: Eq + Hash + Copy + Clone + Send + Sync + 'static,
+{
+    type Output = SparseDisjointSet<T>;
 
     fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
         if facts.is_empty() {
@@ -115,11 +101,10 @@ impl ExprValue for Clustering {
 }
 
 // Value Type Aliases for convenience
+// TODO: these dont seem needed
 
 /// A mask over transaction IDs.
-pub type TxMask = Mask<AbstractTxId>;
+pub type TxMask<T> = Mask<T>;
 
 /// A mask over transaction output IDs.
-pub type TxOutMask = Mask<AbstractTxOutId>;
-
-pub type TxOutCluster = SparseDisjointSet<AbstractTxOutId>;
+pub type TxOutMask<T> = Mask<T>;

@@ -4,7 +4,7 @@ use pipeline::TxOutSet;
 use pipeline::engine::EvalContext;
 use pipeline::expr::Expr;
 use pipeline::node::{Node, NodeId};
-use pipeline::value::{Clustering, Mask, TxSet};
+use pipeline::value::{Clustering, Mask, Set};
 use tx_indexer_primitives::abstract_id::{AbstractTxId, AbstractTxOutId};
 use tx_indexer_primitives::abstract_types::EnumerateSpentTxOuts;
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
@@ -141,12 +141,12 @@ impl Node for FingerPrintChangeIdentificationNode {
 /// This is used to gate change clustering - we only cluster change with inputs
 /// if we're confident all inputs belong to the same entity.
 pub struct IsUnilateralNode {
-    txs: Expr<TxSet>,
+    txs: Expr<Set>,
     clustering: Expr<Clustering>,
 }
 
 impl IsUnilateralNode {
-    pub fn new(txs: Expr<TxSet>, clustering: Expr<Clustering>) -> Self {
+    pub fn new(txs: Expr<Set>, clustering: Expr<Clustering>) -> Self {
         Self { txs, clustering }
     }
 }
@@ -205,7 +205,7 @@ impl IsUnilateral {
     /// Takes a set of transactions and a clustering, returns a mask where `true`
     /// indicates all inputs of that transaction are in the same cluster.
     pub fn with_clustering(
-        txs: Expr<TxSet>,
+        txs: Expr<Set>,
         clustering: Expr<Clustering>,
     ) -> Expr<Mask<AbstractTxId>> {
         let ctx = txs.context().clone();
@@ -218,12 +218,12 @@ impl IsUnilateral {
 /// For each transaction, if inputs are unilateral (all in same cluster) and has change outputs,
 /// cluster the change outputs with the inputs.
 pub struct ChangeClusteringNode {
-    txs: Expr<TxSet>,
+    txs: Expr<Set>,
     change_mask: Expr<Mask<AbstractTxOutId>>,
 }
 
 impl ChangeClusteringNode {
-    pub fn new(txs: Expr<TxSet>, change_mask: Expr<Mask<AbstractTxOutId>>) -> Self {
+    pub fn new(txs: Expr<Set>, change_mask: Expr<Mask<AbstractTxOutId>>) -> Self {
         Self { txs, change_mask }
     }
 }
@@ -279,7 +279,7 @@ impl ChangeClustering {
     ///
     /// Takes a set of transactions and a mask identifying change outputs.
     /// Returns a clustering where change outputs are in the same cluster as inputs.
-    pub fn new(txs: Expr<TxSet>, change_mask: Expr<Mask<AbstractTxOutId>>) -> Expr<Clustering> {
+    pub fn new(txs: Expr<Set>, change_mask: Expr<Mask<AbstractTxOutId>>) -> Expr<Clustering> {
         let ctx = txs.context().clone();
         ctx.register(ChangeClusteringNode::new(txs, change_mask))
     }

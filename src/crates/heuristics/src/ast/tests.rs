@@ -6,7 +6,7 @@ mod tests {
     use pipeline::Placeholder;
     use pipeline::context::PipelineContext;
     use pipeline::engine::Engine;
-    use pipeline::ops::source::AllTxs;
+    use pipeline::ops::source::AllLooseTxs;
     use pipeline::value::Clustering;
     use tx_indexer_primitives::abstract_id::{AbstractTxId, AbstractTxOutId};
     use tx_indexer_primitives::abstract_types::AbstractTransaction;
@@ -116,7 +116,7 @@ mod tests {
         let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
         engine.add_base_facts(all_txs);
 
-        let all_txs = AllTxs::new(&ctx);
+        let all_txs = AllLooseTxs::new(&ctx);
         let coinjoin_mask = IsCoinJoin::new(all_txs);
 
         let result = engine.eval(&coinjoin_mask);
@@ -133,7 +133,7 @@ mod tests {
         let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
         engine.add_base_facts(all_txs);
 
-        let all_txs = AllTxs::new(&ctx);
+        let all_txs = AllLooseTxs::new(&ctx);
         let coinjoin_mask = IsCoinJoin::new(all_txs.clone());
         let non_coinjoin = all_txs.filter_with_mask(coinjoin_mask.negate());
         let mih_clustering = MultiInputHeuristic::new(non_coinjoin);
@@ -157,7 +157,7 @@ mod tests {
         let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
         engine.add_base_facts(all_txs);
 
-        let all_txs = AllTxs::new(&ctx);
+        let all_txs = AllLooseTxs::new(&ctx);
         let coinjoin_mask = IsCoinJoin::new(all_txs.clone());
         let non_coinjoin = all_txs.filter_with_mask(coinjoin_mask.negate());
         let mih_clustering = MultiInputHeuristic::new(non_coinjoin);
@@ -179,7 +179,7 @@ mod tests {
         let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
         engine.add_base_facts(all_txs);
 
-        let all_txouts = AllTxs::new(&ctx).outputs();
+        let all_txouts = AllLooseTxs::new(&ctx).outputs();
         let change_mask = ChangeIdentification::new(all_txouts);
 
         let result = engine.eval(&change_mask);
@@ -204,7 +204,7 @@ mod tests {
         let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
         engine.add_base_facts(all_txs);
 
-        let all_txs = AllTxs::new(&ctx);
+        let all_txs = AllLooseTxs::new(&ctx);
 
         let mih_clustering = MultiInputHeuristic::new(all_txs.clone());
         let is_unilateral_mask = IsUnilateral::with_clustering(all_txs, mih_clustering);
@@ -227,7 +227,7 @@ mod tests {
         let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
         engine.add_base_facts(all_txs);
 
-        let all_txs = AllTxs::new(&ctx);
+        let all_txs = AllLooseTxs::new(&ctx);
         let placeholder = Placeholder::<Clustering>::new(&ctx);
         let mih_clustering = MultiInputHeuristic::new(all_txs.clone());
         let is_unilateral_mask = IsUnilateral::with_clustering(all_txs, placeholder.as_expr());
@@ -257,7 +257,7 @@ mod tests {
         engine.add_base_facts(all_txs);
 
         // Build the pipeline (similar to the user's example)
-        let all_txs = AllTxs::new(&ctx);
+        let all_txs = AllLooseTxs::new(&ctx);
 
         let coinjoin_mask = IsCoinJoin::new(all_txs.clone());
         let non_coinjoin = all_txs.filter_with_mask(coinjoin_mask.negate());
@@ -307,7 +307,7 @@ mod tests {
         let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
         engine.add_base_facts(all_txs);
 
-        let all_txs = AllTxs::new(&ctx);
+        let all_txs = AllLooseTxs::new(&ctx);
 
         // Create a placeholder for global clustering
         let global_clustering = Placeholder::<Clustering>::new(&ctx);
@@ -421,7 +421,7 @@ mod tests {
 
         // === Build the cyclic pipeline ===
 
-        let all_txs = AllTxs::new(&ctx);
+        let all_txs = AllLooseTxs::new(&ctx);
 
         // Filter out coinjoins (none in this test, but for correctness)
         let coinjoin_mask = IsCoinJoin::new(all_txs.clone());
@@ -556,7 +556,7 @@ mod tests {
         let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
         engine.add_base_facts(all_txs);
 
-        let all_txouts = AllTxs::new(&ctx).outputs();
+        let all_txouts = AllLooseTxs::new(&ctx).outputs();
         let change_mask = FingerPrintChangeIdentification::new(all_txouts);
 
         let result = engine.eval(&change_mask);
@@ -583,7 +583,7 @@ mod tests {
         let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
         engine.add_base_facts(all_txs);
 
-        let all_txs = AllTxs::new(&ctx);
+        let all_txs = AllLooseTxs::new(&ctx);
         let mih_clustering = MultiInputHeuristic::new(all_txs);
         let result = engine.eval(&mih_clustering);
 

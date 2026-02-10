@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use bitcoin::Amount;
 
-use crate::ScriptPubkeyHash;
+use crate::loose;
+use crate::{ScriptPubkeyHash, graph_index::IndexedGraph};
 
 // Should be implemented by any type that is contained within a transaction.
 pub trait TxConstituent {
@@ -39,18 +40,12 @@ impl<Atx: AbstractTransaction + ?Sized> EnumerateOutputValueInArbitraryOrder for
 }
 
 impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Arc<T> {
-    type TxId = T::TxId;
-    type TxOutId = T::TxOutId;
-    type TxInId = T::TxInId;
-    fn id(&self) -> Self::TxId {
+    type I = T::I;
+    fn id(&self) -> Self::I::TxId {
         (**self).id()
     }
 
-    fn inputs(
-        &self,
-    ) -> Box<
-        dyn Iterator<Item = Box<dyn AbstractTxIn<TxId = Self::TxId, TxOutId = Self::TxOutId>>> + '_,
-    > {
+    fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn<I = Self::I>>> + '_> {
         (**self).inputs()
     }
 
@@ -81,14 +76,13 @@ impl<Atx: AbstractTransaction + ?Sized> OutputCount for Arc<Atx> {
 
 /// Trait for transaction inputs
 pub trait AbstractTxIn {
-    type TxId;
-    type TxOutId;
+    type I: IdFamily;
     /// Returns the transaction ID of the previous output
-    fn prev_txid(&self) -> Self::TxId;
+    fn prev_txid(&self) -> Self::I::TxId;
     /// Returns the output index of the previous output
     fn prev_vout(&self) -> u32;
     /// Returns the previous output ID
-    fn prev_txout_id(&self) -> Self::TxOutId;
+    fn prev_txout_id(&self) -> Self::I::TxOutId;
 }
 
 /// Trait for transaction outputs
@@ -102,17 +96,11 @@ pub trait AbstractTxOut {
 
 /// Trait for transaction looking things. Generic over the ids as they can be either loose or dense.
 pub trait AbstractTransaction {
-    type TxId: Eq + std::hash::Hash + Copy;
-    type TxOutId: Eq + std::hash::Hash + Copy;
-    type TxInId;
+    type I: IdFamily;
     /// Returns the transaction ID
-    fn id(&self) -> Self::TxId;
+    fn id(&self) -> Self::I::TxId;
     /// Returns an iterator over transaction inputs
-    fn inputs(
-        &self,
-    ) -> Box<
-        dyn Iterator<Item = Box<dyn AbstractTxIn<TxId = Self::TxId, TxOutId = Self::TxOutId>>> + '_,
-    >;
+    fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn<I = Self::I>>> + '_>;
     /// Returns an iterator over transaction outputs
     fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut>> + '_>;
     /// Returns the number of outputs
@@ -121,4 +109,22 @@ pub trait AbstractTransaction {
     fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>>;
 
     fn locktime(&self) -> u32;
+}
+
+pub trait IdFamily {
+    type TxId: Eq + std::hash::Hash + Copy;
+    type TxInId: Eq + std::hash::Hash + Copy;
+    type TxOutId: Eq + std::hash::Hash + Copy;
+}
+
+pub struct LooseIds;
+
+impl IdFamily for LooseIds {
+    type TxId = loose::TxId;
+    type TxInId = loose::TxInId;
+    type TxOutId = loose::TxOutId;
+}
+
+pub trait IntoTxHandle<I: IdFamily> {
+    fn with_index<'a>(self, index: &'a dyn IndexedGraph<I>) -> Box<dyn AbstractTransaction<I = I>>;
 }

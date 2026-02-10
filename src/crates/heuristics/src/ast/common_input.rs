@@ -1,7 +1,7 @@
 use pipeline::engine::EvalContext;
 use pipeline::expr::Expr;
 use pipeline::node::{Node, NodeId};
-use pipeline::value::{Clustering, TxSet};
+use pipeline::value::{Clustering, Set};
 use tx_indexer_primitives::abstract_id::AbstractTxOutId;
 use tx_indexer_primitives::abstract_types::EnumerateSpentTxOuts;
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
@@ -12,11 +12,11 @@ use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
 /// This node creates a clustering where all spent outputs (inputs) of each transaction
 /// are in the same cluster.
 pub struct MultiInputHeuristicNode {
-    input: Expr<TxSet>,
+    input: Expr<Set>,
 }
 
 impl MultiInputHeuristicNode {
-    pub fn new(input: Expr<TxSet>) -> Self {
+    pub fn new(input: Expr<Set>) -> Self {
         Self { input }
     }
 }
@@ -65,7 +65,7 @@ impl MultiInputHeuristic {
     /// Apply the Multi-Input Heuristic to the given transactions.
     ///
     /// Returns a clustering where all inputs of each transaction are in the same cluster.
-    pub fn new(input: Expr<TxSet>) -> Expr<Clustering> {
+    pub fn new(input: Expr<Set>) -> Expr<Clustering> {
         let ctx = input.context().clone();
         ctx.register(MultiInputHeuristicNode::new(input))
     }
