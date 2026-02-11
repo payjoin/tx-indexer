@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use pipeline::engine::EvalContext;
 use pipeline::expr::Expr;
 use pipeline::node::{Node, NodeId};
-use pipeline::value::{Mask, Set};
-use tx_indexer_primitives::abstract_id::AbstractTxId;
+use pipeline::value::{Index, Mask, TxSet};
+use tx_indexer_primitives::abstract_types::{IdFamily, IntoTxHandle};
+use tx_indexer_primitives::graph_index::IndexedGraph;
 
 use crate::coinjoin_detection::NaiveCoinjoinDetection;
 
@@ -12,36 +13,35 @@ use crate::coinjoin_detection::NaiveCoinjoinDetection;
 ///
 /// Uses a naive heuristic: if there are >= 3 outputs of the same value,
 /// the transaction is classified as a CoinJoin.
-pub struct IsCoinJoinNode {
-    input: Expr<Set>,
+pub struct IsCoinJoinNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> {
+    input: Expr<TxSet<I>>,
+    index: Expr<Index<G>>,
 }
 
-impl IsCoinJoinNode {
-    pub fn new(input: Expr<Set>) -> Self {
-        Self { input }
+impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> IsCoinJoinNode<I, G> {
+    pub fn new(input: Expr<TxSet<I>>, index: Expr<Index<G>>) -> Self {
+        Self { input, index }
     }
 }
 
-impl Node for IsCoinJoinNode {
-    type OutputValue = Mask<AbstractTxId>;
+impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node
+    for IsCoinJoinNode<I, G>
+{
+    type OutputValue = Mask<I::TxId>;
 
     fn dependencies(&self) -> Vec<NodeId> {
-        vec![self.input.id()]
+        vec![self.input.id(), self.index.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashMap<AbstractTxId, bool> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashMap<I::TxId, bool> {
         let tx_ids = ctx.get(&self.input);
-        let index = ctx.index();
+        let index_handle = ctx.get(&self.index);
+        let index_guard = index_handle.as_arc().read().expect("lock poisoned");
         tx_ids
             .iter()
-            .filter_map(|tx_id| {
-                tx_id.try_as_loose().map(|concrete_id| {
-                    let tx = concrete_id.with(index);
-                    (
-                        AbstractTxId::from(tx.id()),
-                        NaiveCoinjoinDetection::is_coinjoin(&tx),
-                    )
-                })
+            .map(|tx_id| {
+                let tx = tx_id.with_index(&*index_guard);
+                (*tx_id, NaiveCoinjoinDetection::is_coinjoin(&tx))
             })
             .collect()
     }
@@ -54,8 +54,11 @@ impl Node for IsCoinJoinNode {
 pub struct IsCoinJoin;
 
 impl IsCoinJoin {
-    pub fn new(input: Expr<Set>) -> Expr<Mask<AbstractTxId>> {
+    pub fn new<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>(
+        input: Expr<TxSet<I>>,
+        index: Expr<Index<G>>,
+    ) -> Expr<Mask<I::TxId>> {
         let ctx = input.context().clone();
-        ctx.register(IsCoinJoinNode::new(input))
+        ctx.register(IsCoinJoinNode::new(input, index))
     }
 }

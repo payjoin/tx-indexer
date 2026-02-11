@@ -2,22 +2,24 @@ use crate::{
     ScriptPubkeyHash,
     abstract_fingerprints::HasNLockTime,
     abstract_types::{
-        AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts, IdFamily, LooseIds, OutputCount, TxConstituent
+        AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
+        EnumerateSpentTxOuts, IdFamily, OutputCount, TxConstituent,
     },
     graph_index::IndexedGraph,
-    loose::{TxId, TxInId, TxOutId, storage::InMemoryIndex},
+    loose::{LooseIds, TxId, TxInId, TxOutId, storage::InMemoryIndex},
 };
 
 use bitcoin::Amount;
-pub type LooseIndexedGraph = dyn IndexedGraph<LooseIds>;
+/// Type alias for the indexed graph; the lifetime ties the trait object to the reference.
+pub type LooseIndexedGraph<'a> = dyn IndexedGraph<LooseIds> + 'a;
 
 pub struct TxHandle<'a> {
     id: TxId,
-    index: &'a LooseIndexedGraph,
+    index: &'a LooseIndexedGraph<'a>,
 }
 
 impl<'a> TxHandle<'a> {
-    pub fn new(id: TxId, index: &'a LooseIndexedGraph) -> Self {
+    pub fn new(id: TxId, index: &'a LooseIndexedGraph<'a>) -> Self {
         Self { id, index }
     }
 
@@ -159,11 +161,11 @@ impl<'a> HasNLockTime for TxHandle<'a> {
 
 pub struct TxInHandle<'a> {
     id: TxInId,
-    index: &'a LooseIndexedGraph,
+    index: &'a LooseIndexedGraph<'a>,
 }
 
 impl<'a> TxInHandle<'a> {
-    pub fn new(id: TxInId, index: &'a LooseIndexedGraph) -> Self {
+    pub fn new(id: TxInId, index: &'a LooseIndexedGraph<'a>) -> Self {
         Self { id, index }
     }
 
@@ -173,6 +175,20 @@ impl<'a> TxInHandle<'a> {
 
     pub fn tx(&self) -> TxHandle<'a> {
         self.id.txid().with(self.index)
+    }
+}
+
+impl<'a> AbstractTxIn for TxInHandle<'a> {
+    type I = LooseIds;
+    fn prev_txid(&self) -> <Self::I as IdFamily>::TxId {
+        self.index.prev_txout(&self.id).txid()
+    }
+    fn prev_vout(&self) -> u32 {
+        self.index.prev_txout(&self.id).vout()
+    }
+
+    fn prev_txout_id(&self) -> <Self::I as IdFamily>::TxOutId {
+        self.index.prev_txout(&self.id)
     }
 }
 
@@ -198,12 +214,12 @@ impl<'a> ClusterHandle<'a> {
 
 pub struct TxOutHandle<'a> {
     id: TxOutId,
-    index: &'a LooseIndexedGraph,
+    index: &'a LooseIndexedGraph<'a>,
 }
 
 impl<'a> TxOutHandle<'a> {
     // TODO: this new should exist. You always get a handle from the id.
-    pub fn new(id: TxOutId, index: &'a LooseIndexedGraph) -> Self {
+    pub fn new(id: TxOutId, index: &'a LooseIndexedGraph<'a>) -> Self {
         Self { id, index }
     }
 
@@ -241,5 +257,15 @@ impl<'a> TxOutHandle<'a> {
             .output_at(self.id.vout() as usize)
             .expect("Output should always exist")
             .script_pubkey_hash()
+    }
+}
+
+impl<'a> AbstractTxOut for TxOutHandle<'a> {
+    fn value(&self) -> Amount {
+        self.amount()
+    }
+
+    fn script_pubkey_hash(&self) -> ScriptPubkeyHash {
+        self.script_pubkey_hash()
     }
 }

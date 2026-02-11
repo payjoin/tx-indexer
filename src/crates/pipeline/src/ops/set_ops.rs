@@ -5,50 +5,47 @@
 //! - `join`: Clustering x Clustering -> Clustering (merge clusterings)
 
 use std::collections::HashSet;
+use std::hash::Hash;
 
+use tx_indexer_primitives::abstract_types::{IdFamily, IntoTxHandle, TxIdOps, TxOutIdOps};
 use tx_indexer_primitives::disjoint_set::SparseDisjointSet;
-use tx_indexer_primitives::loose::TxOutId;
+use tx_indexer_primitives::graph_index::IndexedGraph;
 
 use crate::engine::EvalContext;
 use crate::expr::Expr;
 use crate::node::{Node, NodeId};
-use crate::value::{Clustering, Set};
+use crate::value::{Clustering, Index, TxOutSet, TxSet};
 
-/// Node that extracts all outputs from a set of transactions.
-pub struct OutputsNode {
-    input: Expr<Set>,
+/// Node that extracts all TxOut ids from a set of transactions.
+pub struct OutputsNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> {
+    input: Expr<TxSet<I>>,
+    index: Expr<Index<G>>,
 }
 
-impl OutputsNode {
-    pub fn new(input: Expr<Set>) -> Self {
-        Self { input }
+impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> OutputsNode<I, G> {
+    pub fn new(input: Expr<TxSet<I>>, index: Expr<Index<G>>) -> Self {
+        Self { input, index }
     }
 }
 
-impl Node for OutputsNode {
-    type OutputValue = TxOutSet;
+impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for OutputsNode<I, G> {
+    type OutputValue = TxOutSet<I>;
 
     fn dependencies(&self) -> Vec<NodeId> {
-        vec![self.input.id()]
+        vec![self.input.id(), self.index.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AbstractTxOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashSet<I::TxOutId> {
         let tx_ids = ctx.get(&self.input);
-        let index = ctx.index();
+        let index_handle = ctx.get(&self.index);
+        let index_guard = index_handle.as_arc().read().expect("lock poisoned");
 
         let mut outputs = HashSet::new();
         for id in tx_ids {
-            // TODO: this should not require loose
-            if let Some(concrete_tx_id) = id.try_as_loose() {
-                if let Some(tx) = index.txs.get(&concrete_tx_id) {
-                    let output_count = tx.output_len();
-                    for vout in 0..output_count {
-                        outputs.insert(AbstractTxOutId::from(TxOutId::new(
-                            concrete_tx_id,
-                            vout as u32,
-                        )));
-                    }
-                }
+            let tx = id.with_index(&*index_guard);
+            let output_count = tx.output_len();
+            for vout in 0..output_count {
+                outputs.insert(id.txout_id(vout as u32));
             }
         }
         outputs
@@ -60,26 +57,26 @@ impl Node for OutputsNode {
 }
 
 /// Node that extracts the containing transactions from a set of outputs.
-pub struct TxsNode {
-    input: Expr<TxOutSet>,
+pub struct TxsNode<I: IdFamily + 'static> {
+    input: Expr<TxOutSet<I>>,
 }
 
-impl TxsNode {
-    pub fn new(input: Expr<TxOutSet>) -> Self {
+impl<I: IdFamily + 'static> TxsNode<I> {
+    pub fn new(input: Expr<TxOutSet<I>>) -> Self {
         Self { input }
     }
 }
 
-impl Node for TxsNode {
-    type OutputValue = Set;
+impl<I: IdFamily + 'static> Node for TxsNode<I> {
+    type OutputValue = TxSet<I>;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AbstractTxId> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashSet<I::TxId> {
         let outputs = ctx.get(&self.input);
-        outputs.iter().map(|out| out.txid()).collect()
+        outputs.iter().map(|out| out.containing_txid()).collect()
     }
 
     fn name(&self) -> &'static str {
@@ -92,25 +89,25 @@ impl Node for TxsNode {
 /// The result is the coarsest partition that is a refinement of both input
 /// clusterings. In other words, if two items are in the same cluster in
 /// either input, they will be in the same cluster in the output.
-pub struct JoinClusteringNode {
-    left: Expr<Clustering>,
-    right: Expr<Clustering>,
+pub struct JoinClusteringNode<K: Eq + Hash + Copy + Clone + Send + Sync + 'static> {
+    left: Expr<Clustering<K>>,
+    right: Expr<Clustering<K>>,
 }
 
-impl JoinClusteringNode {
-    pub fn new(left: Expr<Clustering>, right: Expr<Clustering>) -> Self {
+impl<K: Eq + Hash + Copy + Clone + Send + Sync + 'static> JoinClusteringNode<K> {
+    pub fn new(left: Expr<Clustering<K>>, right: Expr<Clustering<K>>) -> Self {
         Self { left, right }
     }
 }
 
-impl Node for JoinClusteringNode {
-    type OutputValue = Clustering;
+impl<K: Eq + Hash + Copy + Clone + Send + Sync + 'static> Node for JoinClusteringNode<K> {
+    type OutputValue = Clustering<K>;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.left.id(), self.right.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<AbstractTxOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<K> {
         // Use get_or_default since either side might be part of a cycle
         let left = ctx.get_or_default(&self.left);
         let right = ctx.get_or_default(&self.right);
@@ -122,28 +119,32 @@ impl Node for JoinClusteringNode {
     }
 }
 
-// Extension methods on Expr<TxSet>
-impl Expr<Set> {
+// Extension methods on Expr<TxSet> (IdFamily-parameterized so I is constrained)
+impl<I: IdFamily + 'static> Expr<TxSet<I>> {
     /// Get all outputs of the transactions in this set.
-    pub fn outputs(&self) -> Expr<TxOutSet> {
-        self.ctx.register(OutputsNode::new(self.clone()))
+    pub fn outputs<G: IndexedGraph<I> + 'static>(
+        &self,
+        index: Expr<Index<G>>,
+    ) -> Expr<TxOutSet<I>> {
+        self.ctx
+            .register(OutputsNode::<I, G>::new(self.clone(), index))
     }
 }
 
 // Extension methods on Expr<TxOutSet>
-impl Expr<TxOutSet> {
+impl<I: IdFamily + 'static> Expr<TxOutSet<I>> {
     /// Get the transactions containing these outputs.
-    pub fn txs(&self) -> Expr<Set> {
+    pub fn txs(&self) -> Expr<TxSet<I>> {
         self.ctx.register(TxsNode::new(self.clone()))
     }
 }
 
 // Extension methods on Expr<Clustering>
-impl Expr<Clustering> {
+impl<K: Eq + Hash + Copy + Clone + Send + Sync + 'static> Expr<Clustering<K>> {
     /// Join (merge) this clustering with another.
     ///
     /// The result contains all equivalences from both clusterings.
-    pub fn join(&self, other: Expr<Clustering>) -> Expr<Clustering> {
+    pub fn join(&self, other: Expr<Clustering<K>>) -> Expr<Clustering<K>> {
         self.ctx
             .register(JoinClusteringNode::new(self.clone(), other))
     }

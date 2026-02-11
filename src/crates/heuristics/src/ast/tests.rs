@@ -1,18 +1,17 @@
 //! Integration tests for the AST-based pipeline DSL.
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     use pipeline::Placeholder;
     use pipeline::context::PipelineContext;
     use pipeline::engine::Engine;
     use pipeline::ops::source::AllLooseTxs;
-    use pipeline::value::Clustering;
-    use tx_indexer_primitives::abstract_id::{AbstractTxId, AbstractTxOutId};
+    use pipeline::value::TxOutClustering;
     use tx_indexer_primitives::abstract_types::AbstractTransaction;
+    use tx_indexer_primitives::loose::LooseIds;
     use tx_indexer_primitives::disjoint_set::DisJointSet;
-    use tx_indexer_primitives::loose::storage::InMemoryIndex;
-    use tx_indexer_primitives::loose::{TxId, TxInId, TxOutId};
+    use tx_indexer_primitives::loose::{TxId, TxOutId};
     use tx_indexer_primitives::test_utils::{DummyTxData, DummyTxOutData};
 
     use crate::ast::{
@@ -68,7 +67,7 @@ mod tests {
     }
 
     fn setup_test_fixture() -> Vec<
-        Arc<dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId> + Send + Sync>,
+        Arc<dyn AbstractTransaction<I = LooseIds> + Send + Sync>,
     > {
         vec![
             Arc::new(TestFixture::coinbase1()),
@@ -106,23 +105,25 @@ mod tests {
 
         let all_txs: Vec<
             Arc<
-                dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId>
+                dyn AbstractTransaction<I = LooseIds>
                     + Send
                     + Sync,
             >,
         > = vec![Arc::new(normal_tx), Arc::new(coinjoin_tx)];
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        let mut engine = Engine::new(ctx.clone());
         engine.add_base_facts(all_txs);
 
-        let all_txs = AllLooseTxs::new(&ctx);
-        let coinjoin_mask = IsCoinJoin::new(all_txs);
+        let source = AllLooseTxs::new(&ctx);
+        let all_txs = source.txs();
+        let index = source.index();
+        let coinjoin_mask = IsCoinJoin::new(all_txs, index);
 
         let result = engine.eval(&coinjoin_mask);
 
-        assert_eq!(result.get(&AbstractTxId::from(TxId(0))), Some(&false)); // Not a coinjoin
-        assert_eq!(result.get(&AbstractTxId::from(TxId(1))), Some(&true)); // Is a coinjoin
+        assert_eq!(result.get(&TxId(0)), Some(&false)); // Not a coinjoin
+        assert_eq!(result.get(&TxId(1)), Some(&true)); // Is a coinjoin
     }
 
     #[test]
@@ -130,19 +131,21 @@ mod tests {
         let all_txs = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        let mut engine = Engine::new(ctx.clone());
         engine.add_base_facts(all_txs);
 
-        let all_txs = AllLooseTxs::new(&ctx);
-        let coinjoin_mask = IsCoinJoin::new(all_txs.clone());
+        let source = AllLooseTxs::new(&ctx);
+        let all_txs = source.txs();
+        let index = source.index();
+        let coinjoin_mask = IsCoinJoin::new(all_txs.clone(), index.clone());
         let non_coinjoin = all_txs.filter_with_mask(coinjoin_mask.negate());
-        let mih_clustering = MultiInputHeuristic::new(non_coinjoin);
+        let mih_clustering = MultiInputHeuristic::new(non_coinjoin, index);
 
         let result = engine.eval(&mih_clustering);
 
         // The two inputs of spending_tx should be in the same cluster
-        let input1 = AbstractTxOutId::from(TestFixture::spending_tx().spent_coins[0]);
-        let input2 = AbstractTxOutId::from(TestFixture::spending_tx().spent_coins[1]);
+        let input1 = TestFixture::spending_tx().spent_coins[0];
+        let input2 = TestFixture::spending_tx().spent_coins[1];
         assert_eq!(result.find(input1), result.find(input2));
     }
 
@@ -154,20 +157,22 @@ mod tests {
         let all_txs = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        let mut engine = Engine::new(ctx.clone());
         engine.add_base_facts(all_txs);
 
-        let all_txs = AllLooseTxs::new(&ctx);
-        let coinjoin_mask = IsCoinJoin::new(all_txs.clone());
+        let source = AllLooseTxs::new(&ctx);
+        let all_txs = source.txs();
+        let index = source.index();
+        let coinjoin_mask = IsCoinJoin::new(all_txs.clone(), index.clone());
         let non_coinjoin = all_txs.filter_with_mask(coinjoin_mask.negate());
-        let mih_clustering = MultiInputHeuristic::new(non_coinjoin);
+        let mih_clustering = MultiInputHeuristic::new(non_coinjoin, index.clone());
 
         let result = engine.eval(&mih_clustering);
 
         // Same assertion as test_multi_input_heuristic: the two inputs of spending_tx
         // should be in the same cluster regardless of insertion order
-        let input1 = AbstractTxOutId::from(TestFixture::spending_tx().spent_coins[0]);
-        let input2 = AbstractTxOutId::from(TestFixture::spending_tx().spent_coins[1]);
+        let input1 = TestFixture::spending_tx().spent_coins[0];
+        let input2 = TestFixture::spending_tx().spent_coins[1];
         assert_eq!(result.find(input1), result.find(input2));
     }
 
@@ -176,22 +181,23 @@ mod tests {
         let all_txs = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        let mut engine = Engine::new(ctx.clone());
         engine.add_base_facts(all_txs);
 
-        let all_txouts = AllLooseTxs::new(&ctx).outputs();
-        let change_mask = ChangeIdentification::new(all_txouts);
+        let source = AllLooseTxs::new(&ctx);
+        let all_txouts = source.txs().outputs(source.index());
+        let change_mask = ChangeIdentification::new(all_txouts, source.index());
 
         let result = engine.eval(&change_mask);
 
         // Payment output (vout=0) should not be change
         assert_eq!(
-            result.get(&AbstractTxOutId::from(TestFixture::payment_output())),
+            result.get(&TestFixture::payment_output()),
             Some(&false)
         );
         // Change output (vout=1, last output) should be change
         assert_eq!(
-            result.get(&AbstractTxOutId::from(TestFixture::change_output())),
+            result.get(&TestFixture::change_output()),
             Some(&true)
         );
     }
@@ -201,21 +207,23 @@ mod tests {
         let all_txs = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        let mut engine = Engine::new(ctx.clone());
         engine.add_base_facts(all_txs);
 
-        let all_txs = AllLooseTxs::new(&ctx);
+        let source = AllLooseTxs::new(&ctx);
+        let all_txs = source.txs();
+        let index = source.index();
 
-        let mih_clustering = MultiInputHeuristic::new(all_txs.clone());
-        let is_unilateral_mask = IsUnilateral::with_clustering(all_txs, mih_clustering);
+        let mih_clustering = MultiInputHeuristic::new(all_txs.clone(), index.clone());
+        let is_unilateral_mask = IsUnilateral::with_clustering(all_txs, mih_clustering, index);
 
         let result = engine.eval(&is_unilateral_mask);
 
         // First two coinbases are not unilateral
-        assert_eq!(result.get(&AbstractTxId::from(TxId(0))), Some(&false));
-        assert_eq!(result.get(&AbstractTxId::from(TxId(1))), Some(&false));
+        assert_eq!(result.get(&TxId(0)), Some(&false));
+        assert_eq!(result.get(&TxId(1)), Some(&false));
         // The spending tx is unilateral
-        assert_eq!(result.get(&AbstractTxId::from(TxId(2))), Some(&true));
+        assert_eq!(result.get(&TxId(2)), Some(&true));
     }
 
     #[test]
@@ -224,13 +232,16 @@ mod tests {
         let all_txs = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        let mut engine = Engine::new(ctx.clone());
         engine.add_base_facts(all_txs);
 
-        let all_txs = AllLooseTxs::new(&ctx);
-        let placeholder = Placeholder::<Clustering>::new(&ctx);
-        let mih_clustering = MultiInputHeuristic::new(all_txs.clone());
-        let is_unilateral_mask = IsUnilateral::with_clustering(all_txs, placeholder.as_expr());
+        let source = AllLooseTxs::new(&ctx);
+        let all_txs = source.txs();
+        let index = source.index();
+        let placeholder = Placeholder::<TxOutClustering<LooseIds>>::new(&ctx);
+        let mih_clustering = MultiInputHeuristic::new(all_txs.clone(), index.clone());
+        let is_unilateral_mask =
+            IsUnilateral::with_clustering(all_txs, placeholder.as_expr(), index);
 
         // Unify the placeholder with the MIH clustering
         placeholder.unify(mih_clustering);
@@ -239,7 +250,7 @@ mod tests {
 
         // The spending tx should be unilateral
         assert_eq!(
-            result.get(&AbstractTxId::from(TestFixture::spending_tx().id)),
+            result.get(&TestFixture::spending_tx().id),
             Some(&true)
         );
     }
@@ -249,34 +260,37 @@ mod tests {
         let all_txs = setup_test_fixture();
 
         // Pre-cluster the inputs so IsUnilateral passes
-        let input1 = AbstractTxOutId::from(TestFixture::spending_tx().spent_coins[0]);
-        let input2 = AbstractTxOutId::from(TestFixture::spending_tx().spent_coins[1]);
+        let input1 = TestFixture::spending_tx().spent_coins[0];
+        let input2 = TestFixture::spending_tx().spent_coins[1];
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        let mut engine = Engine::new(ctx.clone());
         engine.add_base_facts(all_txs);
 
         // Build the pipeline (similar to the user's example)
-        let all_txs = AllLooseTxs::new(&ctx);
+        let source = AllLooseTxs::new(&ctx);
+        let all_txs = source.txs();
+        let index = source.index();
 
-        let coinjoin_mask = IsCoinJoin::new(all_txs.clone());
+        let coinjoin_mask = IsCoinJoin::new(all_txs.clone(), index.clone());
         let non_coinjoin = all_txs.filter_with_mask(coinjoin_mask.negate());
-        let mih_clustering = MultiInputHeuristic::new(non_coinjoin.clone());
+        let mih_clustering = MultiInputHeuristic::new(non_coinjoin.clone(), index.clone());
 
-        let change_mask = ChangeIdentification::new(all_txs.outputs());
+        let change_mask = ChangeIdentification::new(all_txs.outputs(index.clone()), index.clone());
 
         // For IsUnilateral, we use MIH clustering
         let unilateral_mask =
-            IsUnilateral::with_clustering(non_coinjoin.clone(), mih_clustering.clone());
+            IsUnilateral::with_clustering(non_coinjoin.clone(), mih_clustering.clone(), index.clone());
 
         // Get outputs that are marked as change
-        let change_outputs = non_coinjoin.outputs().filter_with_mask(change_mask.clone());
+        let change_outputs = non_coinjoin.outputs(index.clone()).filter_with_mask(change_mask.clone());
         let txs_with_change = change_outputs.txs();
 
         // Filter to unilateral txs with change
         let unilateral_with_change = txs_with_change.filter_with_mask(unilateral_mask);
 
-        let change_clustering = ChangeClustering::new(unilateral_with_change, change_mask);
+        let change_clustering =
+            ChangeClustering::new(unilateral_with_change, change_mask, index);
 
         let combined = change_clustering.join(mih_clustering);
 
@@ -288,13 +302,13 @@ mod tests {
 
         // Change output should be clustered with inputs (change clustering)
         assert_eq!(
-            result.find(AbstractTxOutId::from(TestFixture::change_output())),
+            result.find(TestFixture::change_output()),
             result.find(input1)
         );
 
         // Payment output should NOT be in the same cluster
         assert_ne!(
-            result.find(AbstractTxOutId::from(TestFixture::payment_output())),
+            result.find(TestFixture::payment_output()),
             result.find(input1)
         );
     }
@@ -304,16 +318,19 @@ mod tests {
         let all_txs = setup_test_fixture();
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        let mut engine = Engine::new(ctx.clone());
         engine.add_base_facts(all_txs);
 
-        let all_txs = AllLooseTxs::new(&ctx);
+        let source = AllLooseTxs::new(&ctx);
+        let all_txs = source.txs();
+        let index = source.index();
 
         // Create a placeholder for global clustering
-        let global_clustering = Placeholder::<Clustering>::new(&ctx);
+        let global_clustering =
+            Placeholder::<TxOutClustering<LooseIds>>::new(&ctx);
 
         // MIH clustering
-        let mih_clustering = MultiInputHeuristic::new(all_txs.clone());
+        let mih_clustering = MultiInputHeuristic::new(all_txs.clone(), index);
 
         // Unify the placeholder with MIH clustering
         global_clustering.unify(mih_clustering);
@@ -325,8 +342,8 @@ mod tests {
         let result = engine.eval(&global_clustering.as_expr());
 
         // The two inputs should be clustered
-        let input1 = AbstractTxOutId::from(TestFixture::spending_tx().spent_coins[0]);
-        let input2 = AbstractTxOutId::from(TestFixture::spending_tx().spent_coins[1]);
+        let input1 = TestFixture::spending_tx().spent_coins[0];
+        let input2 = TestFixture::spending_tx().spent_coins[1];
         assert_eq!(result.find(input1), result.find(input2));
     }
 
@@ -404,7 +421,7 @@ mod tests {
         };
         let all_txs: Vec<
             Arc<
-                dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId>
+                dyn AbstractTransaction<I = LooseIds>
                     + Send
                     + Sync,
             >,
@@ -416,35 +433,40 @@ mod tests {
         ];
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        let mut engine = Engine::new(ctx.clone());
         engine.add_base_facts(all_txs);
 
         // === Build the cyclic pipeline ===
 
-        let all_txs = AllLooseTxs::new(&ctx);
+        let source = AllLooseTxs::new(&ctx);
+        let all_txs = source.txs();
+        let index = source.index();
 
         // Filter out coinjoins (none in this test, but for correctness)
-        let coinjoin_mask = IsCoinJoin::new(all_txs.clone());
+        let coinjoin_mask = IsCoinJoin::new(all_txs.clone(), index.clone());
         let non_coinjoin = all_txs.filter_with_mask(coinjoin_mask.negate());
 
         // MIH clustering: all inputs of a tx are clustered
-        let mih_clustering = MultiInputHeuristic::new(non_coinjoin.clone());
+        let mih_clustering = MultiInputHeuristic::new(non_coinjoin.clone(), index.clone());
 
         // Create placeholder for global clustering -- the cyclic dependency
-        let global_clustering = Placeholder::<Clustering>::new(&ctx);
+        let global_clustering =
+            Placeholder::<TxOutClustering<LooseIds>>::new(&ctx);
 
         // IsUnilateral uses the placeholder (creates dependency on cycle)
         let unilateral_mask =
-            IsUnilateral::with_clustering(non_coinjoin.clone(), global_clustering.as_expr());
+            IsUnilateral::with_clustering(non_coinjoin.clone(), global_clustering.as_expr(), index.clone());
 
         // Filter to txs that are unilateral (all inputs clustered)
         let unilateral_txs = non_coinjoin.filter_with_mask(unilateral_mask);
 
         // Get change mask for unilateral txs
-        let unilateral_change_mask = ChangeIdentification::new(unilateral_txs.outputs());
+        let unilateral_change_mask =
+            ChangeIdentification::new(unilateral_txs.outputs(index.clone()), index.clone());
 
         // Change clustering: cluster change outputs with inputs
-        let change_clustering = ChangeClustering::new(unilateral_txs, unilateral_change_mask);
+        let change_clustering =
+            ChangeClustering::new(unilateral_txs, unilateral_change_mask, index.clone());
 
         // Combine MIH and change clustering
         let combined = mih_clustering.join(change_clustering);
@@ -457,8 +479,8 @@ mod tests {
         // tx1 has single input, so MIH doesn't cluster anything for it
         // But tx1's change (vout=1) should be clustered with coinbase (vout=0)
         // because tx1 is unilateral (single input = trivially unilateral)
-        let coinbase_out = AbstractTxOutId::from(TxOutId::new(TxId(0), 0));
-        let tx1_change = AbstractTxOutId::from(TxOutId::new(TxId(1), 1));
+        let coinbase_out = TxOutId::new(TxId(0), 0);
+        let tx1_change = TxOutId::new(TxId(1), 1);
 
         // tx1 is unilateral, so change clustering applies
         assert_eq!(
@@ -469,8 +491,8 @@ mod tests {
 
         // tx2 has two inputs: tx1's change and coinbase2
         // MIH should cluster these together
-        let tx1_change_as_input = AbstractTxOutId::from(TxOutId::new(TxId(1), 1));
-        let coinbase2_out = AbstractTxOutId::from(TxOutId::new(TxId(2), 0));
+        let tx1_change_as_input = TxOutId::new(TxId(1), 1);
+        let coinbase2_out = TxOutId::new(TxId(2), 0);
 
         assert_eq!(
             result.find(tx1_change_as_input),
@@ -486,7 +508,7 @@ mod tests {
         );
 
         // tx2's change should also be clustered (if tx2 is unilateral)
-        let tx2_change = AbstractTxOutId::from(TxOutId::new(TxId(3), 1));
+        let tx2_change = TxOutId::new(TxId(3), 1);
         // After MIH runs, tx2's inputs are clustered, so it becomes unilateral
         // Then change clustering should cluster tx2's change with its inputs
         assert_eq!(
@@ -541,7 +563,7 @@ mod tests {
 
         let all_txs: Vec<
             Arc<
-                dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId>
+                dyn AbstractTransaction<I = LooseIds>
                     + Send
                     + Sync,
             >,
@@ -553,23 +575,24 @@ mod tests {
         ];
 
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        let mut engine = Engine::new(ctx.clone());
         engine.add_base_facts(all_txs);
 
-        let all_txouts = AllLooseTxs::new(&ctx).outputs();
-        let change_mask = FingerPrintChangeIdentification::new(all_txouts);
+        let source = AllLooseTxs::new(&ctx);
+        let all_txouts = source.txs().outputs(source.index());
+        let change_mask = FingerPrintChangeIdentification::new(all_txouts, source.index());
 
         let result = engine.eval(&change_mask);
 
         // Change output (vout 1, spent by tx2 with matching n_locktime) is change
         assert_eq!(
-            result.get(&AbstractTxOutId::from(change_output)),
+            result.get(&change_output),
             Some(&true),
             "change output should be identified as change by fingerprint heuristic"
         );
 
         assert_eq!(
-            result.get(&AbstractTxOutId::from(payment_output)),
+            result.get(&payment_output),
             Some(&false),
             "payment output should not be identified as change by fingerprint heuristic"
         );
@@ -580,25 +603,27 @@ mod tests {
         let mut all_txs = setup_test_fixture();
         let spending_tx = all_txs.split_off(2);
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        let mut engine = Engine::new(ctx.clone());
         engine.add_base_facts(all_txs);
 
-        let all_txs = AllLooseTxs::new(&ctx);
-        let mih_clustering = MultiInputHeuristic::new(all_txs);
+        let source = AllLooseTxs::new(&ctx);
+        let all_txs = source.txs();
+        let index = source.index();
+        let mih_clustering = MultiInputHeuristic::new(all_txs, index);
         let result = engine.eval(&mih_clustering);
 
         let spending_tx_fixture = TestFixture::spending_tx();
         assert_ne!(
-            result.find(AbstractTxOutId::from(spending_tx_fixture.spent_coins[0])),
-            result.find(AbstractTxOutId::from(spending_tx_fixture.spent_coins[1]))
+            result.find(spending_tx_fixture.spent_coins[0]),
+            result.find(spending_tx_fixture.spent_coins[1])
         );
 
         engine.add_base_facts(spending_tx);
 
         let result = engine.eval(&mih_clustering);
         assert_eq!(
-            result.find(AbstractTxOutId::from(spending_tx_fixture.spent_coins[0])),
-            result.find(AbstractTxOutId::from(spending_tx_fixture.spent_coins[1]))
+            result.find(spending_tx_fixture.spent_coins[0]),
+            result.find(spending_tx_fixture.spent_coins[1])
         );
     }
 }

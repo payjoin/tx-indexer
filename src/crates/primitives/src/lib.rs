@@ -16,9 +16,10 @@ pub mod test_utils {
         ScriptPubkeyHash,
         abstract_fingerprints::HasNLockTime,
         abstract_types::{
-            AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts, IdFamily, LooseIds, OutputCount, TxConstituent
+            AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
+            EnumerateSpentTxOuts, IdFamily, OutputCount, TxConstituent,
         },
-        loose::{TxId, TxInId, TxOutId},
+        loose::{LooseIds, TxId, TxOutId},
     };
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -167,11 +168,7 @@ pub mod test_utils {
         }
     }
 
-    impl From<DummyTxData>
-        for Box<
-            dyn AbstractTransaction<I = LooseIds> + Send + Sync,
-        >
-    {
+    impl From<DummyTxData> for Box<dyn AbstractTransaction<I = LooseIds> + Send + Sync> {
         fn from(val: DummyTxData) -> Self {
             Box::new(val)
         }

@@ -72,7 +72,6 @@ pub trait Node: Send + Sync + 'static {
     ///
     /// The `EvalContext` provides access to:
     /// - Results of dependency nodes via `ctx.get(&expr)`
-    /// - The underlying index via `ctx.index()`
     fn evaluate(&self, ctx: &EvalContext) -> <Self::OutputValue as ExprValue>::Output;
 
     /// Optional: provide a human-readable name for debugging.

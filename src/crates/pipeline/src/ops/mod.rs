@@ -15,5 +15,5 @@ pub mod source;
 // Re-export commonly used items
 pub use filter::FilterWithMaskNode;
 pub use negate::NegateMaskNode;
-pub use set_ops::{JoinClusteringNode, OutputsNode, TxsNode};
+pub use set_ops::{JoinClusteringNode, TxsNode};
 pub use source::{AllLooseTxs, AllLooseTxsNode};

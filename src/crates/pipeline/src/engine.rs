@@ -7,10 +7,9 @@
 //! - Fixpoint iteration for recursive/cyclic definitions
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
-use tx_indexer_primitives::abstract_types::{AbstractTransaction, LooseIds};
-use tx_indexer_primitives::loose::storage::InMemoryIndex;
+use tx_indexer_primitives::loose::{LooseTx};
 
 use crate::context::PipelineContext;
 use crate::expr::Expr;
@@ -18,41 +17,19 @@ use crate::node::NodeId;
 use crate::storage::{BaseFacts, NodeStorage};
 use crate::value::ExprValue;
 
-/// Concrete transaction type for the loose (InMemoryIndex) backend.
-/// Used for base facts and index operations; pipeline value types use abstract IDs.
-pub type LooseTx = dyn AbstractTransaction<I = LooseIds> + Send + Sync;
-
 pub struct SourceNodeEvalContext<'a> {
     pub(crate) base_facts: &'a mut BaseFacts<LooseTx>,
-    pub(crate) index: &'a Arc<RwLock<InMemoryIndex>>,
     #[allow(unused)]
     pub(crate) node_id: NodeId,
 }
 
 impl<'a> SourceNodeEvalContext<'a> {
-    pub fn new(
-        base_facts: &'a mut BaseFacts<LooseTx>,
-        index: &'a Arc<RwLock<InMemoryIndex>>,
-        node_id: NodeId,
-    ) -> Self {
-        Self {
-            base_facts,
-            index,
-            node_id,
-        }
+    pub fn new(base_facts: &'a mut BaseFacts<LooseTx>, node_id: NodeId) -> Self {
+        Self { base_facts, node_id }
     }
 
     pub fn take_base_facts(&mut self) -> Option<Vec<Arc<LooseTx>>> {
         self.base_facts.take_base_facts()
-    }
-
-    /// Run a closure with exclusive access to the index (e.g. for `add_tx`).
-    /// Use this instead of holding a mutable reference so the lock is released when done.
-    pub fn with_index_mut<R, F>(&self, f: F) -> R
-    where
-        F: FnOnce(&mut InMemoryIndex) -> R,
-    {
-        f(&mut self.index.write().expect("lock poisoned"))
     }
 }
 
@@ -63,19 +40,14 @@ impl<'a> SourceNodeEvalContext<'a> {
 /// - The underlying transaction index
 pub struct EvalContext<'a> {
     pub(crate) storage: &'a NodeStorage,
-    index: &'a InMemoryIndex,
     /// Node id of the node being evaluated.
     pub(crate) node_id: NodeId,
 }
 
 impl<'a> EvalContext<'a> {
     /// Create a new evaluation context.
-    pub fn new(storage: &'a NodeStorage, index: &'a InMemoryIndex, node_id: NodeId) -> Self {
-        Self {
-            storage,
-            index,
-            node_id,
-        }
+    pub fn new(storage: &'a NodeStorage, node_id: NodeId) -> Self {
+        Self { storage, node_id }
     }
 
     /// Get the result of a dependency expression.
@@ -94,10 +66,6 @@ impl<'a> EvalContext<'a> {
                     expr.id()
                 )
             })
-    }
-
-    pub fn index(&self) -> &InMemoryIndex {
-        self.index
     }
 
     /// Get a dependency result or a default value if not yet evaluated.
@@ -120,7 +88,6 @@ impl<'a> EvalContext<'a> {
 /// through fixpoint iteration.
 pub struct Engine {
     ctx: Arc<PipelineContext>,
-    index: Arc<RwLock<InMemoryIndex>>,
     storage: NodeStorage,
     base_facts: BaseFacts<LooseTx>,
     /// Track which iteration each node was last evaluated in (for cycle detection).
@@ -131,12 +98,9 @@ pub struct Engine {
 impl Engine {
     /// Create a new engine.
     ///
-    /// The index is wrapped in `RwLock` so source nodes can mutate it (e.g. `add_tx`)
-    /// while other nodes read it. Use `Arc::new(RwLock::new(index))` at call sites.
-    pub fn new(ctx: Arc<PipelineContext>, index: Arc<RwLock<InMemoryIndex>>) -> Self {
+    pub fn new(ctx: Arc<PipelineContext>) -> Self {
         Self {
             ctx,
-            index,
             storage: NodeStorage::new(),
             base_facts: BaseFacts::new(),
             eval_iteration: HashMap::new(),
@@ -178,12 +142,6 @@ impl Engine {
     /// Get the pipeline context.
     pub fn context(&self) -> &Arc<PipelineContext> {
         &self.ctx
-    }
-
-    /// Get the underlying index (read access). For write access in source nodes, use
-    /// the `SourceNodeEvalContext::with_index_mut` closure API.
-    pub fn index(&self) -> &Arc<RwLock<InMemoryIndex>> {
-        &self.index
     }
 
     /// Run the pipeline to fixpoint for recursive/cyclic definitions.
@@ -243,7 +201,7 @@ impl Engine {
             None => return, // TODO: panic? This points to a bug
         };
 
-        let mut eval_ctx = SourceNodeEvalContext::new(&mut self.base_facts, &self.index, id);
+        let mut eval_ctx = SourceNodeEvalContext::new(&mut self.base_facts, id);
         let result = node.evaluate_any(&mut eval_ctx);
         self.storage.append(id, result);
     }
@@ -316,8 +274,7 @@ impl Engine {
             return false;
         }
 
-        let index_guard = self.index.read().expect("lock poisoned");
-        let eval_ctx = EvalContext::new(&self.storage, &*index_guard, id);
+        let eval_ctx = EvalContext::new(&self.storage, id);
         let previous = self.storage.get_last(id);
         let (result, changed) = node.evaluate_any(&eval_ctx, previous);
 

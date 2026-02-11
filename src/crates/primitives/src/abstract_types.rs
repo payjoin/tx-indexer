@@ -1,8 +1,7 @@
-use std::sync::Arc;
+use std::{hash::Hash, sync::Arc};
 
 use bitcoin::Amount;
 
-use crate::loose;
 use crate::{ScriptPubkeyHash, graph_index::IndexedGraph};
 
 // Should be implemented by any type that is contained within a transaction.
@@ -26,14 +25,14 @@ pub trait EnumerateOutputValueInArbitraryOrder: AbstractTransaction {
     fn output_values(&self) -> impl Iterator<Item = Amount>;
 }
 
-// Blanket implementation for Arc<dyn AbstractTransaction> to bridge with the heuristics
-impl<Atx: AbstractTransaction + ?Sized> EnumerateSpentTxOuts for Arc<Atx> {
+// Blanket implementation for Arc<dyn AbstractTransaction>
+impl<T: AbstractTransaction + ?Sized> EnumerateSpentTxOuts for Arc<T> {
     fn spent_coins(&self) -> impl Iterator<Item = <Self::I as IdFamily>::TxOutId> {
         self.inputs().map(|input| input.prev_txout_id())
     }
 }
 
-impl<Atx: AbstractTransaction + ?Sized> EnumerateOutputValueInArbitraryOrder for Arc<Atx> {
+impl<T: AbstractTransaction + ?Sized> EnumerateOutputValueInArbitraryOrder for Arc<T> {
     fn output_values(&self) -> impl Iterator<Item = Amount> {
         self.outputs().map(|output| output.value())
     }
@@ -66,13 +65,58 @@ impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Arc<T> {
     }
 }
 
-impl<Atx: AbstractTransaction + ?Sized> OutputCount for Arc<Atx> {
+impl<T: AbstractTransaction + ?Sized> OutputCount for Arc<T> {
     fn output_count(&self) -> usize {
         self.output_len()
     }
 }
 
-// Abstract transaction types for type erasure
+// --- Implementations for Box<dyn AbstractTransaction> ---
+
+impl<T: AbstractTransaction + ?Sized> EnumerateSpentTxOuts for Box<T> {
+    fn spent_coins(&self) -> impl Iterator<Item = <Self::I as IdFamily>::TxOutId> {
+        self.inputs().map(|input| input.prev_txout_id())
+    }
+}
+
+impl<T: AbstractTransaction + ?Sized> EnumerateOutputValueInArbitraryOrder for Box<T> {
+    fn output_values(&self) -> impl Iterator<Item = Amount> {
+        self.outputs().map(|output| output.value())
+    }
+}
+
+impl<T: AbstractTransaction + ?Sized> OutputCount for Box<T> {
+    fn output_count(&self) -> usize {
+        self.output_len()
+    }
+}
+
+impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Box<T> {
+    type I = T::I;
+    fn id(&self) -> <Self::I as IdFamily>::TxId {
+        (**self).id()
+    }
+
+    fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn<I = Self::I>>> + '_> {
+        (**self).inputs()
+    }
+
+    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut>> + '_> {
+        (**self).outputs()
+    }
+
+    fn output_len(&self) -> usize {
+        (**self).output_len()
+    }
+
+    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>> {
+        (**self).output_at(index)
+    }
+
+    fn locktime(&self) -> u32 {
+        (**self).locktime()
+    }
+}
 
 /// Trait for transaction inputs
 pub trait AbstractTxIn {
@@ -111,10 +155,10 @@ pub trait AbstractTransaction {
     fn locktime(&self) -> u32;
 }
 
-pub trait IdFamily {
-    type TxId: Eq + std::hash::Hash + Copy;
-    type TxInId: Eq + std::hash::Hash + Copy;
-    type TxOutId: Eq + std::hash::Hash + Copy;
+pub trait IdFamily: Sized + Send + Sync + 'static {
+    type TxId: Eq + Hash + Copy + Send + Sync + IntoTxHandle<Self> + TxIdOps<Self>;
+    type TxInId: Eq + Hash + Copy + Send + Sync + TxInIdOps<Self>;
+    type TxOutId: Eq + Hash + Copy + Send + Sync + IntoTxOutHandle<Self> + TxOutIdOps<Self>;
 }
 
 pub trait TxIdOps<I: IdFamily>: Copy {
@@ -122,24 +166,25 @@ pub trait TxIdOps<I: IdFamily>: Copy {
     fn txin_id(self, vin: u32) -> I::TxInId;
 }
 
-pub struct LooseIds;
-
-impl IdFamily for LooseIds {
-    type TxId = loose::TxId;
-    type TxInId = loose::TxInId;
-    type TxOutId = loose::TxOutId;
+pub trait TxOutIdOps<I: IdFamily>: Copy {
+    fn containing_txid(self) -> I::TxId;
 }
 
-impl TxIdOps<LooseIds> for loose::TxId {
-    fn txout_id(self, vout: u32) -> loose::TxOutId {
-        loose::TxOutId::new(self, vout)
-    }
-
-    fn txin_id(self, vin: u32) -> loose::TxInId {
-        loose::TxInId::new(self, vin)
-    }
+pub trait TxInIdOps<I: IdFamily>: Copy {
+    fn containing_txid(self) -> I::TxId;
 }
 
 pub trait IntoTxHandle<I: IdFamily> {
-    fn with_index<'a>(self, index: &'a dyn IndexedGraph<I>) -> Box<dyn AbstractTransaction<I = I>>;
+    fn with_index<'a>(
+        self,
+        index: &'a dyn IndexedGraph<I>,
+    ) -> Box<dyn AbstractTransaction<I = I> + 'a>;
+}
+
+pub trait IntoTxOutHandle<I: IdFamily> {
+    fn with_index<'a>(self, index: &'a dyn IndexedGraph<I>) -> Box<dyn AbstractTxOut + 'a>;
+}
+
+pub trait IntoTxInHandle<I: IdFamily> {
+    fn with_index<'a>(self, index: &'a dyn IndexedGraph<I>) -> Box<dyn AbstractTxIn<I = I> + 'a>;
 }

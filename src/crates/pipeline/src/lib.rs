@@ -37,4 +37,4 @@ pub use expr::Expr;
 pub use node::{AnyNode, Node, NodeId};
 pub use placeholder::Placeholder;
 pub use storage::NodeStorage;
-pub use value::{Clustering, ExprValue, Mask, Set};
+pub use value::{Clustering, ExprValue, Mask, TxSet};

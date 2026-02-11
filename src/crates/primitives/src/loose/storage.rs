@@ -1,11 +1,11 @@
 use crate::{
     ScriptPubkeyHash,
-    abstract_types::{AbstractTransaction, IdFamily, LooseIds},
+    abstract_types::{AbstractTransaction, IdFamily},
     disjoint_set::{DisJointSet, SparseDisjointSet},
     graph_index::{
         GlobalClusteringIndex, IndexedGraph, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex,
     },
-    loose::{TxId, TxInId, TxOutId, handle::TxHandle},
+    loose::{LooseIds, TxId, TxInId, TxOutId, handle::TxHandle},
 };
 
 use bitcoin::consensus::Encodable;
@@ -114,7 +114,10 @@ impl PrevOutIndex for InMemoryIndex {
 }
 impl TxInIndex for InMemoryIndex {
     type I = LooseIds;
-    fn spending_txin(&self, tx_out: &<Self::I as IdFamily>::TxOutId) -> Option<<Self::I as IdFamily>::TxInId> {
+    fn spending_txin(
+        &self,
+        tx_out: &<Self::I as IdFamily>::TxOutId,
+    ) -> Option<<Self::I as IdFamily>::TxInId> {
         self.spending_txins.get(tx_out).cloned()
     }
 }

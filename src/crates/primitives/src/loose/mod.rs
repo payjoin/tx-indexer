@@ -1,7 +1,12 @@
 pub mod handle;
 pub mod storage;
 
-use crate::loose::handle::{LooseIndexedGraph, TxHandle, TxInHandle, TxOutHandle};
+use crate::{
+    abstract_types::{
+        AbstractTransaction, AbstractTxIn, AbstractTxOut, IdFamily, IntoTxHandle, IntoTxInHandle, IntoTxOutHandle, TxIdOps, TxInIdOps, TxOutIdOps
+    },
+    loose::handle::{LooseIndexedGraph, TxHandle, TxInHandle, TxOutHandle},
+};
 
 // Type defintions for loose txs and their ids
 
@@ -26,7 +31,7 @@ impl TxOutId {
         self.vout
     }
 
-    pub fn with<'a>(self, index: &'a LooseIndexedGraph) -> TxOutHandle<'a> {
+    pub fn with<'a>(self, index: &'a LooseIndexedGraph<'a>) -> TxOutHandle<'a> {
         TxOutHandle::new(self, index)
     }
 }
@@ -34,7 +39,9 @@ impl TxOutId {
 /// Sum of the short id of the txid and vin
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Ord, PartialOrd)]
 pub struct TxInId {
-    pub(crate) txid: TxId,
+    /// The transaction ID of the transaction spending this input
+    txid: TxId,
+    /// The input index of the transaction spending this input
     vin: u32,
 }
 
@@ -51,7 +58,7 @@ impl TxInId {
         self.vin
     }
 
-    pub fn with<'a>(self, index: &'a LooseIndexedGraph) -> TxInHandle<'a> {
+    pub fn with<'a>(self, index: &'a LooseIndexedGraph<'a>) -> TxInHandle<'a> {
         TxInHandle::new(self, index)
     }
 }
@@ -72,7 +79,69 @@ impl TxId {
         TxInId::new(self, vin)
     }
 
-    pub fn with<'a>(self, index: &'a LooseIndexedGraph) -> TxHandle<'a> {
+    pub fn with<'a>(self, index: &'a LooseIndexedGraph<'a>) -> TxHandle<'a> {
         TxHandle::new(self, index)
     }
 }
+
+impl IntoTxHandle<LooseIds> for TxId {
+    fn with_index<'a>(
+        self,
+        index: &'a dyn crate::graph_index::IndexedGraph<LooseIds>,
+    ) -> Box<dyn AbstractTransaction<I = LooseIds> + 'a> {
+        Box::new(TxHandle::new(self, index))
+    }
+}
+
+impl IntoTxOutHandle<LooseIds> for TxOutId {
+    fn with_index<'a>(
+        self,
+        index: &'a dyn crate::graph_index::IndexedGraph<LooseIds>,
+    ) -> Box<dyn AbstractTxOut + 'a> {
+        Box::new(TxOutHandle::new(self, index))
+    }
+}
+
+impl IntoTxInHandle<LooseIds> for TxInId {
+    fn with_index<'a>(
+        self,
+        index: &'a dyn crate::graph_index::IndexedGraph<LooseIds>,
+    ) -> Box<dyn AbstractTxIn<I = LooseIds> + 'a> {
+        Box::new(TxInHandle::new(self, index))
+    }
+}
+
+#[derive(Clone, PartialEq)]
+pub struct LooseIds;
+
+impl IdFamily for LooseIds {
+    type TxId = TxId;
+    type TxInId = TxInId;
+    type TxOutId = TxOutId;
+}
+
+impl TxIdOps<LooseIds> for TxId {
+    fn txout_id(self, vout: u32) -> TxOutId {
+        TxOutId::new(self, vout)
+    }
+
+    fn txin_id(self, vin: u32) -> TxInId {
+        TxInId::new(self, vin)
+    }
+}
+
+impl TxOutIdOps<LooseIds> for TxOutId {
+    fn containing_txid(self) -> TxId {
+        self.txid()
+    }
+}
+
+impl TxInIdOps<LooseIds> for TxInId {
+    fn containing_txid(self) -> TxId {
+        self.txid()
+    }
+}
+
+/// Concrete transaction type for the loose Transactions
+pub type LooseTx = dyn AbstractTransaction<I = LooseIds> + Send + Sync;
+

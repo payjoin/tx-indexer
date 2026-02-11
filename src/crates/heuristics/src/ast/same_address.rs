@@ -1,42 +1,51 @@
-use pipeline::Clustering;
 use pipeline::expr::Expr;
 use pipeline::node::Node;
-use pipeline::value::Set;
-use tx_indexer_primitives::abstract_id::AbstractTxOutId;
+use pipeline::value::{Index, TxOutClustering, TxSet};
+use tx_indexer_primitives::abstract_types::{IdFamily, IntoTxHandle, TxIdOps};
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
-use tx_indexer_primitives::graph_index::ScriptPubkeyIndex;
+use tx_indexer_primitives::graph_index::{IndexedGraph};
 
-pub struct SameAddressClusteringNode {
-    txs: Expr<Set>,
+pub struct SameAddressClusteringNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>
+{
+    txs: Expr<TxSet<I>>,
+    index: Expr<Index<G>>,
 }
 
-impl SameAddressClusteringNode {
-    pub fn new(txs: Expr<Set>) -> Self {
-        Self { txs }
+impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>
+    SameAddressClusteringNode<I, G>
+{
+    pub fn new(txs: Expr<TxSet<I>>, index: Expr<Index<G>>) -> Self {
+        Self { txs, index }
     }
 }
 
-impl Node for SameAddressClusteringNode {
-    type OutputValue = Clustering;
+impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node
+    for SameAddressClusteringNode<I, G>
+{
+    type OutputValue = TxOutClustering<I>;
 
     fn dependencies(&self) -> Vec<pipeline::NodeId> {
-        vec![self.txs.id()]
+        vec![self.txs.id(), self.index.id()]
     }
 
-    fn evaluate(&self, ctx: &pipeline::EvalContext) -> SparseDisjointSet<AbstractTxOutId> {
+    fn evaluate(&self, ctx: &pipeline::EvalContext) -> SparseDisjointSet<I::TxOutId> {
         let txs = ctx.get(&self.txs);
-        let index = ctx.index();
+        let index_handle = ctx.get(&self.index);
+        let index_guard = index_handle.as_arc().read().expect("lock poisoned");
         let clustering = SparseDisjointSet::new();
 
         for tx_id in txs.iter() {
-            if let Some(concrete_id) = tx_id.try_as_loose() {
-                for output in concrete_id.with(index).outputs() {
-                    let txout_id = AbstractTxOutId::from(output.id());
-                    if let Some(first_txout) =
-                        index.script_pubkey_to_txout_id(&output.script_pubkey_hash())
-                    {
-                        clustering.union(txout_id, first_txout.into());
-                    }
+            let tx = tx_id.with_index(&*index_guard);
+            let output_count = tx.output_len();
+            for vout in 0..output_count {
+                let txout_id = tx_id.txout_id(vout as u32);
+                let output = tx
+                    .output_at(vout)
+                    .expect("output should exist");
+                if let Some(first_txout) =
+                    index_guard.script_pubkey_to_txout_id(&output.script_pubkey_hash())
+                {
+                    clustering.union(txout_id, first_txout);
                 }
             }
         }
@@ -50,27 +59,30 @@ pub struct SameAddressClustering;
 
 impl SameAddressClustering {
     #[allow(dead_code)]
-    pub fn new(txs: Expr<Set>) -> Expr<Clustering> {
+    pub fn new<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>(
+        txs: Expr<TxSet<I>>,
+        index: Expr<Index<G>>,
+    ) -> Expr<TxOutClustering<I>> {
         let ctx = txs.context().clone();
-        ctx.register(SameAddressClusteringNode::new(txs))
+        ctx.register(SameAddressClusteringNode::new(txs, index))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     use pipeline::ops::AllLooseTxs;
     use pipeline::{Engine, PipelineContext};
     use tx_indexer_primitives::abstract_types::AbstractTransaction;
-    use tx_indexer_primitives::loose::storage::InMemoryIndex;
-    use tx_indexer_primitives::loose::{TxId, TxInId, TxOutId};
+    use tx_indexer_primitives::loose::LooseIds;
+    use tx_indexer_primitives::loose::{TxId, TxOutId};
     use tx_indexer_primitives::test_utils::{DummyTxData, DummyTxOutData};
 
     use super::*;
 
     fn setup_test_fixture() -> Vec<
-        Arc<dyn AbstractTransaction<TxId = TxId, TxOutId = TxOutId, TxInId = TxInId> + Send + Sync>,
+        Arc<dyn AbstractTransaction<I = LooseIds> + Send + Sync>,
     > {
         // Fixture: two coinbase txs, spent by two txs; two outputs each, both change outputs share same spk
         let shared_spk = [42u8; 20];
@@ -127,24 +139,26 @@ mod tests {
     fn test_same_address_clustering() {
         let all_txs = setup_test_fixture();
         let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone(), Arc::new(RwLock::new(InMemoryIndex::new())));
+        let mut engine = Engine::new(ctx.clone());
         engine.add_base_facts(all_txs);
 
-        let all_txs = AllLooseTxs::new(&ctx);
-        let clustering = SameAddressClustering::new(all_txs);
+        let source = AllLooseTxs::new(&ctx);
+        let all_txs = source.txs();
+        let index = source.index();
+        let clustering = SameAddressClustering::new(all_txs, index);
         engine.run_to_fixpoint();
         let result = engine.eval(&clustering);
 
         // Same spk should be clustered together
         assert_eq!(
-            result.find(AbstractTxOutId::from(TxOutId::new(TxId(2), 1))),
-            result.find(AbstractTxOutId::from(TxOutId::new(TxId(3), 1)))
+            result.find(TxOutId::new(TxId(2), 1)),
+            result.find(TxOutId::new(TxId(3), 1))
         );
 
         // Other outputs should not be clustered together
         assert_ne!(
-            result.find(AbstractTxOutId::from(TxOutId::new(TxId(2), 0))),
-            result.find(AbstractTxOutId::from(TxOutId::new(TxId(3), 0)))
+            result.find(TxOutId::new(TxId(2), 0)),
+            result.find(TxOutId::new(TxId(3), 0))
         );
     }
 }
