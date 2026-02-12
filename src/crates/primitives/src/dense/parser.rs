@@ -17,6 +17,8 @@ use super::{BlockFileId, TxId, TxInId, TxOutId};
 /// Block 0 starts at offset 8.
 const BLOCK_START_LEN: usize = 8;
 
+// TODO: provide option to memory map the block files
+
 /// Storage for dense IDs backed by Bitcoin Core block files.
 ///
 /// Parses blocks via bitcoin_slices (Visitor pattern), maintains an in-memory

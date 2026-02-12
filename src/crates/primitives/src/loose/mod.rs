@@ -3,7 +3,8 @@ pub mod storage;
 
 use crate::{
     abstract_types::{
-        AbstractTransaction, AbstractTxIn, AbstractTxOut, IdFamily, IntoTxHandle, IntoTxInHandle, IntoTxOutHandle, TxIdOps, TxInIdOps, TxOutIdOps
+        AbstractTransaction, AbstractTxIn, AbstractTxOut, IdFamily, IntoTxHandle, IntoTxInHandle,
+        IntoTxOutHandle, TxInIdOps, TxOutIdOps,
     },
     loose::handle::{LooseIndexedGraph, TxHandle, TxInHandle, TxOutHandle},
 };
@@ -97,7 +98,7 @@ impl IntoTxOutHandle<LooseIds> for TxOutId {
     fn with_index<'a>(
         self,
         index: &'a dyn crate::graph_index::IndexedGraph<LooseIds>,
-    ) -> Box<dyn AbstractTxOut + 'a> {
+    ) -> Box<dyn AbstractTxOut<I = LooseIds> + 'a> {
         Box::new(TxOutHandle::new(self, index))
     }
 }
@@ -120,16 +121,6 @@ impl IdFamily for LooseIds {
     type TxOutId = TxOutId;
 }
 
-impl TxIdOps<LooseIds> for TxId {
-    fn txout_id(self, vout: u32) -> TxOutId {
-        TxOutId::new(self, vout)
-    }
-
-    fn txin_id(self, vin: u32) -> TxInId {
-        TxInId::new(self, vin)
-    }
-}
-
 impl TxOutIdOps<LooseIds> for TxOutId {
     fn containing_txid(self) -> TxId {
         self.txid()
@@ -144,4 +135,3 @@ impl TxInIdOps<LooseIds> for TxInId {
 
 /// Concrete transaction type for the loose Transactions
 pub type LooseTx = dyn AbstractTransaction<I = LooseIds> + Send + Sync;
-

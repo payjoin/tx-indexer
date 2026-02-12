@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::ScriptPubkeyHash;
 use crate::abstract_types::{AbstractTransaction, IdFamily};
 
@@ -32,7 +30,7 @@ pub trait TxIndex {
     fn tx(
         &self,
         txid: &<Self::I as IdFamily>::TxId,
-    ) -> Option<Arc<dyn AbstractTransaction<I = Self::I> + Send + Sync>>;
+    ) -> Option<std::sync::Arc<dyn AbstractTransaction<I = Self::I> + Send + Sync>>;
 }
 
 pub trait GlobalClusteringIndex {
