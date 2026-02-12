@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tx_indexer_primitives::loose::{LooseTx};
+use tx_indexer_primitives::loose::LooseTx;
 
 use crate::context::PipelineContext;
 use crate::expr::Expr;
@@ -25,7 +25,10 @@ pub struct SourceNodeEvalContext<'a> {
 
 impl<'a> SourceNodeEvalContext<'a> {
     pub fn new(base_facts: &'a mut BaseFacts<LooseTx>, node_id: NodeId) -> Self {
-        Self { base_facts, node_id }
+        Self {
+            base_facts,
+            node_id,
+        }
     }
 
     pub fn take_base_facts(&mut self) -> Option<Vec<Arc<LooseTx>>> {

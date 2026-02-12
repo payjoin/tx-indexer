@@ -60,7 +60,7 @@ mod tests {
             vout: 0,
             containing_tx: DummyTxData {
                 id: TxId(1),
-                outputs: vec![DummyTxOutData::new_with_amount(100)],
+                outputs: vec![DummyTxOutData::new_with_amount(100, 0, TxId(1))],
                 spent_coins: vec![],
                 n_locktime: 0,
             },
@@ -77,14 +77,14 @@ mod tests {
             vout: 0,
             containing_tx: DummyTxData {
                 id: TxId(1),
-                outputs: vec![DummyTxOutData::new_with_amount(100)],
+                outputs: vec![DummyTxOutData::new_with_amount(100, 0, TxId(1))],
                 spent_coins: vec![],
                 n_locktime: 0,
             },
         };
         let spending_tx = DummyTxData {
             id: TxId(2),
-            outputs: vec![DummyTxOutData::new_with_amount(100)],
+            outputs: vec![DummyTxOutData::new_with_amount(100, 0, TxId(2))],
             spent_coins: vec![],
             n_locktime: 0,
         };
@@ -98,14 +98,14 @@ mod tests {
             vout: 0,
             containing_tx: DummyTxData {
                 id: TxId(1),
-                outputs: vec![DummyTxOutData::new_with_amount(100)],
+                outputs: vec![DummyTxOutData::new_with_amount(100, 0, TxId(1))],
                 spent_coins: vec![],
                 n_locktime: 1,
             },
         };
         let spending_tx = DummyTxData {
             id: TxId(2),
-            outputs: vec![DummyTxOutData::new_with_amount(100)],
+            outputs: vec![DummyTxOutData::new_with_amount(100, 0, TxId(2))],
             spent_coins: vec![],
             n_locktime: 1,
         };

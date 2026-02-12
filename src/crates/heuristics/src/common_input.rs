@@ -36,8 +36,8 @@ mod tests {
         let tx = DummyTxData {
             id: TxId(100),
             outputs: vec![
-                DummyTxOutData::new_with_amount(500),
-                DummyTxOutData::new_with_amount(300),
+                DummyTxOutData::new_with_amount(500, 0, TxId(100)),
+                DummyTxOutData::new_with_amount(300, 1, TxId(100)),
             ],
             spent_coins: vec![
                 TxOutId::new(TxId(1), 0),

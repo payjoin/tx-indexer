@@ -3,31 +3,26 @@ use pipeline::expr::Expr;
 use pipeline::node::{Node, NodeId};
 use pipeline::value::{Index, TxOutClustering, TxSet};
 use tx_indexer_primitives::abstract_types::{IdFamily, IntoTxHandle};
-use tx_indexer_primitives::graph_index::IndexedGraph;
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
+use tx_indexer_primitives::graph_index::IndexedGraph;
 
 /// Node that implements the Multi-Input Heuristic.
 ///
 /// The MIH assumes that all inputs to a transaction are controlled by the same entity.
 /// This node creates a clustering where all spent outputs (inputs) of each transaction
 /// are in the same cluster.
-pub struct MultiInputHeuristicNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>
-{
+pub struct MultiInputHeuristicNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> {
     input: Expr<TxSet<I>>,
     index: Expr<Index<G>>,
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>
-    MultiInputHeuristicNode<I, G>
-{
+impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> MultiInputHeuristicNode<I, G> {
     pub fn new(input: Expr<TxSet<I>>, index: Expr<Index<G>>) -> Self {
         Self { input, index }
     }
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node
-    for MultiInputHeuristicNode<I, G>
-{
+impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for MultiInputHeuristicNode<I, G> {
     type OutputValue = TxOutClustering<I>;
 
     fn dependencies(&self) -> Vec<NodeId> {
@@ -44,8 +39,7 @@ impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node
 
         for tx_id in &tx_ids {
             let tx = tx_id.with_index(&*index_guard);
-            let coins: Vec<I::TxOutId> =
-                tx.inputs().map(|input| input.prev_txout_id()).collect();
+            let coins: Vec<I::TxOutId> = tx.inputs().map(|input| input.prev_txout_id()).collect();
             if coins.len() > 1 {
                 let set = SparseDisjointSet::new();
                 for i in 1..coins.len() {

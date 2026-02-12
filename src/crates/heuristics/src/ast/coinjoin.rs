@@ -24,9 +24,7 @@ impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> IsCoinJoinNode<I, G> {
     }
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node
-    for IsCoinJoinNode<I, G>
-{
+impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for IsCoinJoinNode<I, G> {
     type OutputValue = Mask<I::TxId>;
 
     fn dependencies(&self) -> Vec<NodeId> {

@@ -86,13 +86,13 @@ impl AbstractTransaction for TxHandle<'_> {
     }
 
     // TODO: this should be returning an Arc pointer not allocated box
-    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut>> + '_> {
+    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut<I = Self::I>>> + '_> {
         let tx = self
             .index
             .tx(&self.id.into())
             .expect("Tx should always exist if we have a handle");
         // TODO: is this not a infinite loop?
-        let output_boxes: Vec<Box<dyn AbstractTxOut>> = tx.outputs().collect();
+        let output_boxes: Vec<Box<dyn AbstractTxOut<I = Self::I>>> = tx.outputs().collect();
         Box::new(output_boxes.into_iter())
     }
 
@@ -103,7 +103,7 @@ impl AbstractTransaction for TxHandle<'_> {
             .output_len()
     }
 
-    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>> {
+    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut<I = Self::I>>> {
         // Delegate to the stored transaction in the index
         self.index
             .tx(&self.id.into())
@@ -261,6 +261,11 @@ impl<'a> TxOutHandle<'a> {
 }
 
 impl<'a> AbstractTxOut for TxOutHandle<'a> {
+    type I = LooseIds;
+    fn id(&self) -> <Self::I as IdFamily>::TxOutId {
+        self.id
+    }
+
     fn value(&self) -> Amount {
         self.amount()
     }

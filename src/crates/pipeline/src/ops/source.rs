@@ -6,8 +6,8 @@
 use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
 
-use tx_indexer_primitives::loose::LooseIds;
 use tx_indexer_primitives::loose;
+use tx_indexer_primitives::loose::LooseIds;
 use tx_indexer_primitives::loose::storage::InMemoryIndex;
 
 use crate::context::PipelineContext;

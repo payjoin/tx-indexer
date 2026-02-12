@@ -1,27 +1,22 @@
 use pipeline::expr::Expr;
 use pipeline::node::Node;
 use pipeline::value::{Index, TxOutClustering, TxSet};
-use tx_indexer_primitives::abstract_types::{IdFamily, IntoTxHandle, TxIdOps};
+use tx_indexer_primitives::abstract_types::{IdFamily, IntoTxHandle};
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
-use tx_indexer_primitives::graph_index::{IndexedGraph};
+use tx_indexer_primitives::graph_index::IndexedGraph;
 
-pub struct SameAddressClusteringNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>
-{
+pub struct SameAddressClusteringNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> {
     txs: Expr<TxSet<I>>,
     index: Expr<Index<G>>,
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>
-    SameAddressClusteringNode<I, G>
-{
+impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> SameAddressClusteringNode<I, G> {
     pub fn new(txs: Expr<TxSet<I>>, index: Expr<Index<G>>) -> Self {
         Self { txs, index }
     }
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node
-    for SameAddressClusteringNode<I, G>
-{
+impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for SameAddressClusteringNode<I, G> {
     type OutputValue = TxOutClustering<I>;
 
     fn dependencies(&self) -> Vec<pipeline::NodeId> {
@@ -36,12 +31,8 @@ impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node
 
         for tx_id in txs.iter() {
             let tx = tx_id.with_index(&*index_guard);
-            let output_count = tx.output_len();
-            for vout in 0..output_count {
-                let txout_id = tx_id.txout_id(vout as u32);
-                let output = tx
-                    .output_at(vout)
-                    .expect("output should exist");
+            for output in tx.outputs() {
+                let txout_id = output.id();
                 if let Some(first_txout) =
                     index_guard.script_pubkey_to_txout_id(&output.script_pubkey_hash())
                 {
@@ -81,9 +72,7 @@ mod tests {
 
     use super::*;
 
-    fn setup_test_fixture() -> Vec<
-        Arc<dyn AbstractTransaction<I = LooseIds> + Send + Sync>,
-    > {
+    fn setup_test_fixture() -> Vec<Arc<dyn AbstractTransaction<I = LooseIds> + Send + Sync>> {
         // Fixture: two coinbase txs, spent by two txs; two outputs each, both change outputs share same spk
         let shared_spk = [42u8; 20];
         let unique_spk1 = [1u8; 20];
@@ -92,7 +81,7 @@ mod tests {
         // Coinbase 1
         let coinbase1 = DummyTxData {
             id: TxId(0),
-            outputs: vec![DummyTxOutData::new(10_000, unique_spk1)],
+            outputs: vec![DummyTxOutData::new(10_000, unique_spk1, 0, TxId(0))],
             spent_coins: vec![],
             n_locktime: 0,
         };
@@ -100,7 +89,7 @@ mod tests {
         // Coinbase 2
         let coinbase2 = DummyTxData {
             id: TxId(1),
-            outputs: vec![DummyTxOutData::new(10_000, unique_spk2)],
+            outputs: vec![DummyTxOutData::new(10_000, unique_spk2, 0, TxId(1))],
             spent_coins: vec![],
             n_locktime: 0,
         };
@@ -110,8 +99,8 @@ mod tests {
             id: TxId(2),
             spent_coins: vec![TxOutId::new(TxId(0), 0)],
             outputs: vec![
-                DummyTxOutData::new(4_000, unique_spk1), // payment
-                DummyTxOutData::new(5_000, shared_spk),  // change (shared with spend2)
+                DummyTxOutData::new(4_000, unique_spk1, 0, TxId(2)), // payment
+                DummyTxOutData::new(5_000, shared_spk, 1, TxId(2)),  // change (shared with spend2)
             ],
             n_locktime: 0,
         };
@@ -121,8 +110,8 @@ mod tests {
             id: TxId(3),
             spent_coins: vec![TxOutId::new(TxId(1), 0)],
             outputs: vec![
-                DummyTxOutData::new(4_000, unique_spk2), // payment
-                DummyTxOutData::new(5_000, shared_spk),  // change (shared with spend1)
+                DummyTxOutData::new(4_000, unique_spk2, 0, TxId(3)), // payment
+                DummyTxOutData::new(5_000, shared_spk, 1, TxId(3)),  // change (shared with spend1)
             ],
             n_locktime: 0,
         };

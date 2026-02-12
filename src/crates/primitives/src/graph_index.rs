@@ -47,8 +47,9 @@ pub trait GlobalClusteringIndex {
 
 // TODO: seprate out into rw and ro traits
 pub trait IndexedGraph<I: IdFamily>:
-Send + Sync +
-    PrevOutIndex<I = I>
+    Send
+    + Sync
+    + PrevOutIndex<I = I>
     + TxInIndex<I = I>
     + ScriptPubkeyIndex<I = I>
     + TxIndex<I = I>

@@ -48,7 +48,7 @@ impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Arc<T> {
         (**self).inputs()
     }
 
-    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut>> + '_> {
+    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut<I = Self::I>>> + '_> {
         (**self).outputs()
     }
 
@@ -56,7 +56,7 @@ impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Arc<T> {
         (**self).output_len()
     }
 
-    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>> {
+    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut<I = Self::I>>> {
         (**self).output_at(index)
     }
 
@@ -101,7 +101,7 @@ impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Box<T> {
         (**self).inputs()
     }
 
-    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut>> + '_> {
+    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut<I = Self::I>>> + '_> {
         (**self).outputs()
     }
 
@@ -109,7 +109,7 @@ impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Box<T> {
         (**self).output_len()
     }
 
-    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>> {
+    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut<I = Self::I>>> {
         (**self).output_at(index)
     }
 
@@ -131,6 +131,8 @@ pub trait AbstractTxIn {
 
 /// Trait for transaction outputs
 pub trait AbstractTxOut {
+    type I: IdFamily;
+    fn id(&self) -> <Self::I as IdFamily>::TxOutId;
     /// Returns the value of the output
     fn value(&self) -> Amount;
     /// Returns the script pubkey hash (20-byte hash) if available
@@ -146,24 +148,20 @@ pub trait AbstractTransaction {
     /// Returns an iterator over transaction inputs
     fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn<I = Self::I>>> + '_>;
     /// Returns an iterator over transaction outputs
-    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut>> + '_>;
+    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut<I = Self::I>>> + '_>;
     /// Returns the number of outputs
     fn output_len(&self) -> usize;
     /// Returns the output at the given index, if it exists
-    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>>;
+    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut<I = Self::I>>>;
 
     fn locktime(&self) -> u32;
 }
 
 pub trait IdFamily: Sized + Send + Sync + 'static {
-    type TxId: Eq + Hash + Copy + Send + Sync + IntoTxHandle<Self> + TxIdOps<Self>;
+    type TxId: Eq + Hash + Copy + Send + Sync + IntoTxHandle<Self>;
+    // TODO: define IntoTxInHandle<Self>
     type TxInId: Eq + Hash + Copy + Send + Sync + TxInIdOps<Self>;
     type TxOutId: Eq + Hash + Copy + Send + Sync + IntoTxOutHandle<Self> + TxOutIdOps<Self>;
-}
-
-pub trait TxIdOps<I: IdFamily>: Copy {
-    fn txout_id(self, vout: u32) -> I::TxOutId;
-    fn txin_id(self, vin: u32) -> I::TxInId;
 }
 
 pub trait TxOutIdOps<I: IdFamily>: Copy {
@@ -182,7 +180,7 @@ pub trait IntoTxHandle<I: IdFamily> {
 }
 
 pub trait IntoTxOutHandle<I: IdFamily> {
-    fn with_index<'a>(self, index: &'a dyn IndexedGraph<I>) -> Box<dyn AbstractTxOut + 'a>;
+    fn with_index<'a>(self, index: &'a dyn IndexedGraph<I>) -> Box<dyn AbstractTxOut<I = I> + 'a>;
 }
 
 pub trait IntoTxInHandle<I: IdFamily> {

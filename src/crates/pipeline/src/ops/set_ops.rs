@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 use std::hash::Hash;
 
-use tx_indexer_primitives::abstract_types::{IdFamily, IntoTxHandle, TxIdOps, TxOutIdOps};
+use tx_indexer_primitives::abstract_types::{IdFamily, IntoTxHandle, TxOutIdOps};
 use tx_indexer_primitives::disjoint_set::SparseDisjointSet;
 use tx_indexer_primitives::graph_index::IndexedGraph;
 
@@ -43,9 +43,8 @@ impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for OutputsNode<I
         let mut outputs = HashSet::new();
         for id in tx_ids {
             let tx = id.with_index(&*index_guard);
-            let output_count = tx.output_len();
-            for vout in 0..output_count {
-                outputs.insert(id.txout_id(vout as u32));
+            for output in tx.outputs() {
+                outputs.insert(output.id());
             }
         }
         outputs

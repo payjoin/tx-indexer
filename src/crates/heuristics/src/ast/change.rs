@@ -4,32 +4,25 @@ use pipeline::engine::EvalContext;
 use pipeline::expr::Expr;
 use pipeline::node::{Node, NodeId};
 use pipeline::value::{Index, TxMask, TxOutClustering, TxOutMask, TxOutSet, TxSet};
-use tx_indexer_primitives::abstract_types::{
-    IdFamily, TxIdOps, TxInIdOps, TxOutIdOps,
-};
+use tx_indexer_primitives::abstract_types::{IdFamily, IntoTxHandle, TxInIdOps, TxOutIdOps};
 use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
 use tx_indexer_primitives::graph_index::IndexedGraph;
 
 /// Node that identifies change outputs in transactions.
 ///
 /// Uses a naive heuristic: the last output of a transaction is assumed to be change.
-pub struct ChangeIdentificationNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>
-{
+pub struct ChangeIdentificationNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> {
     input: Expr<TxOutSet<I>>,
     index: Expr<Index<G>>,
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>
-    ChangeIdentificationNode<I, G>
-{
+impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> ChangeIdentificationNode<I, G> {
     pub fn new(input: Expr<TxOutSet<I>>, index: Expr<Index<G>>) -> Self {
         Self { input, index }
     }
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node
-    for ChangeIdentificationNode<I, G>
-{
+impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for ChangeIdentificationNode<I, G> {
     type OutputValue = TxOutMask<I>;
 
     fn dependencies(&self) -> Vec<NodeId> {
@@ -54,7 +47,12 @@ impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node
                 continue;
             }
 
-            let last_output = tx_id.txout_id(output_count as u32 - 1);
+            let last_output = tx_id
+                .with_index(&*index_guard)
+                .outputs()
+                .last()
+                .expect("Tx should have at least one output")
+                .id();
             result.insert(*output_id, *output_id == last_output);
         }
 
@@ -99,7 +97,8 @@ impl FingerPrintChangeIdentification {
     }
 }
 
-pub struct FingerPrintChangeIdentificationNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> {
+pub struct FingerPrintChangeIdentificationNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>
+{
     input: Expr<TxOutSet<I>>,
     index: Expr<Index<G>>,
 }
@@ -183,9 +182,7 @@ impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> IsUnilateralNode<I, G>
     }
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node
-    for IsUnilateralNode<I, G>
-{
+impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for IsUnilateralNode<I, G> {
     type OutputValue = TxMask<I>;
 
     fn dependencies(&self) -> Vec<NodeId> {
@@ -205,10 +202,7 @@ impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node
             let Some(tx) = index_guard.tx(tx_id) else {
                 continue;
             };
-            let inputs: Vec<I::TxOutId> = tx
-                .inputs()
-                .map(|input| input.prev_txout_id())
-                .collect();
+            let inputs: Vec<I::TxOutId> = tx.inputs().map(|input| input.prev_txout_id()).collect();
 
             let is_unilateral = if inputs.is_empty() {
                 false // Coinbase - no inputs to cluster
@@ -260,9 +254,7 @@ pub struct ChangeClusteringNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'sta
     index: Expr<Index<G>>,
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>
-    ChangeClusteringNode<I, G>
-{
+impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> ChangeClusteringNode<I, G> {
     pub fn new(
         txs: Expr<TxSet<I>>,
         change_mask: Expr<TxOutMask<I>>,
@@ -276,9 +268,7 @@ impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>
     }
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node
-    for ChangeClusteringNode<I, G>
-{
+impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for ChangeClusteringNode<I, G> {
     type OutputValue = TxOutClustering<I>;
 
     fn dependencies(&self) -> Vec<NodeId> {
@@ -298,18 +288,15 @@ impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node
             let Some(tx) = index_guard.tx(tx_id) else {
                 continue;
             };
-            let first_input: Option<I::TxOutId> = tx
-                .inputs()
-                .next()
-                .map(|input| input.prev_txout_id());
+            let first_input: Option<I::TxOutId> =
+                tx.inputs().next().map(|input| input.prev_txout_id());
 
             let Some(root_input) = first_input else {
                 continue; // Coinbase
             };
 
-            let output_count = tx.output_len();
-            for vout in 0..output_count {
-                let txout_id = tx_id.txout_id(vout as u32);
+            for output in tx.outputs() {
+                let txout_id = output.id();
                 if change_mask.get(&txout_id).copied().unwrap_or(false) {
                     clustering.union(txout_id, root_input);
                 }

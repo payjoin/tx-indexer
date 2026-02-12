@@ -9,8 +9,8 @@ mod tests {
     use pipeline::ops::source::AllLooseTxs;
     use pipeline::value::TxOutClustering;
     use tx_indexer_primitives::abstract_types::AbstractTransaction;
-    use tx_indexer_primitives::loose::LooseIds;
     use tx_indexer_primitives::disjoint_set::DisJointSet;
+    use tx_indexer_primitives::loose::LooseIds;
     use tx_indexer_primitives::loose::{TxId, TxOutId};
     use tx_indexer_primitives::test_utils::{DummyTxData, DummyTxOutData};
 
@@ -27,9 +27,9 @@ mod tests {
                 id: TxId(2),
                 outputs: vec![
                     // Payment output
-                    DummyTxOutData::new(100, [1u8; 20]),
+                    DummyTxOutData::new(100, [1u8; 20], 0, TxId(2)),
                     // Change output
-                    DummyTxOutData::new(150, [1u8; 20]),
+                    DummyTxOutData::new(150, [1u8; 20], 1, TxId(2)),
                 ],
                 spent_coins: vec![TxOutId::new(TxId(0), 0), TxOutId::new(TxId(1), 0)],
                 n_locktime: 0,
@@ -40,8 +40,8 @@ mod tests {
             DummyTxData {
                 id: TxId(0),
                 outputs: vec![
-                    DummyTxOutData::new(100, [1u8; 20]),
-                    DummyTxOutData::new(150, [1u8; 20]),
+                    DummyTxOutData::new(100, [1u8; 20], 0, TxId(0)),
+                    DummyTxOutData::new(150, [1u8; 20], 1, TxId(0)),
                 ],
                 spent_coins: vec![],
                 n_locktime: 0,
@@ -51,7 +51,7 @@ mod tests {
         fn coinbase2() -> DummyTxData {
             DummyTxData {
                 id: TxId(1),
-                outputs: vec![DummyTxOutData::new(150, [1u8; 20])],
+                outputs: vec![DummyTxOutData::new(150, [1u8; 20], 0, TxId(1))],
                 spent_coins: vec![],
                 n_locktime: 0,
             }
@@ -66,9 +66,7 @@ mod tests {
         }
     }
 
-    fn setup_test_fixture() -> Vec<
-        Arc<dyn AbstractTransaction<I = LooseIds> + Send + Sync>,
-    > {
+    fn setup_test_fixture() -> Vec<Arc<dyn AbstractTransaction<I = LooseIds> + Send + Sync>> {
         vec![
             Arc::new(TestFixture::coinbase1()),
             Arc::new(TestFixture::coinbase2()),
@@ -84,8 +82,8 @@ mod tests {
         let normal_tx = DummyTxData {
             id: TxId(0),
             outputs: vec![
-                DummyTxOutData::new(100, spk_hash),
-                DummyTxOutData::new(200, spk_hash),
+                DummyTxOutData::new(100, spk_hash, 0, TxId(0)),
+                DummyTxOutData::new(200, spk_hash, 1, TxId(0)),
             ],
             spent_coins: vec![],
             n_locktime: 0,
@@ -95,21 +93,16 @@ mod tests {
         let coinjoin_tx = DummyTxData {
             id: TxId(1),
             outputs: vec![
-                DummyTxOutData::new(100, spk_hash),
-                DummyTxOutData::new(100, spk_hash),
-                DummyTxOutData::new(100, spk_hash),
+                DummyTxOutData::new(100, spk_hash, 0, TxId(1)),
+                DummyTxOutData::new(100, spk_hash, 1, TxId(1)),
+                DummyTxOutData::new(100, spk_hash, 2, TxId(1)),
             ],
             spent_coins: vec![],
             n_locktime: 0,
         };
 
-        let all_txs: Vec<
-            Arc<
-                dyn AbstractTransaction<I = LooseIds>
-                    + Send
-                    + Sync,
-            >,
-        > = vec![Arc::new(normal_tx), Arc::new(coinjoin_tx)];
+        let all_txs: Vec<Arc<dyn AbstractTransaction<I = LooseIds> + Send + Sync>> =
+            vec![Arc::new(normal_tx), Arc::new(coinjoin_tx)];
 
         let ctx = Arc::new(PipelineContext::new());
         let mut engine = Engine::new(ctx.clone());
@@ -191,15 +184,9 @@ mod tests {
         let result = engine.eval(&change_mask);
 
         // Payment output (vout=0) should not be change
-        assert_eq!(
-            result.get(&TestFixture::payment_output()),
-            Some(&false)
-        );
+        assert_eq!(result.get(&TestFixture::payment_output()), Some(&false));
         // Change output (vout=1, last output) should be change
-        assert_eq!(
-            result.get(&TestFixture::change_output()),
-            Some(&true)
-        );
+        assert_eq!(result.get(&TestFixture::change_output()), Some(&true));
     }
 
     #[test]
@@ -249,10 +236,7 @@ mod tests {
         let result = engine.eval(&is_unilateral_mask);
 
         // The spending tx should be unilateral
-        assert_eq!(
-            result.get(&TestFixture::spending_tx().id),
-            Some(&true)
-        );
+        assert_eq!(result.get(&TestFixture::spending_tx().id), Some(&true));
     }
 
     #[test]
@@ -279,18 +263,22 @@ mod tests {
         let change_mask = ChangeIdentification::new(all_txs.outputs(index.clone()), index.clone());
 
         // For IsUnilateral, we use MIH clustering
-        let unilateral_mask =
-            IsUnilateral::with_clustering(non_coinjoin.clone(), mih_clustering.clone(), index.clone());
+        let unilateral_mask = IsUnilateral::with_clustering(
+            non_coinjoin.clone(),
+            mih_clustering.clone(),
+            index.clone(),
+        );
 
         // Get outputs that are marked as change
-        let change_outputs = non_coinjoin.outputs(index.clone()).filter_with_mask(change_mask.clone());
+        let change_outputs = non_coinjoin
+            .outputs(index.clone())
+            .filter_with_mask(change_mask.clone());
         let txs_with_change = change_outputs.txs();
 
         // Filter to unilateral txs with change
         let unilateral_with_change = txs_with_change.filter_with_mask(unilateral_mask);
 
-        let change_clustering =
-            ChangeClustering::new(unilateral_with_change, change_mask, index);
+        let change_clustering = ChangeClustering::new(unilateral_with_change, change_mask, index);
 
         let combined = change_clustering.join(mih_clustering);
 
@@ -326,8 +314,7 @@ mod tests {
         let index = source.index();
 
         // Create a placeholder for global clustering
-        let global_clustering =
-            Placeholder::<TxOutClustering<LooseIds>>::new(&ctx);
+        let global_clustering = Placeholder::<TxOutClustering<LooseIds>>::new(&ctx);
 
         // MIH clustering
         let mih_clustering = MultiInputHeuristic::new(all_txs.clone(), index);
@@ -381,7 +368,7 @@ mod tests {
 
         let coinbase = DummyTxData {
             id: TxId(0),
-            outputs: vec![DummyTxOutData::new(1000, spk_hash)],
+            outputs: vec![DummyTxOutData::new(1000, spk_hash, 0, TxId(0))],
             spent_coins: vec![],
             n_locktime: 0,
         };
@@ -390,8 +377,8 @@ mod tests {
         let tx1 = DummyTxData {
             id: TxId(1),
             outputs: vec![
-                DummyTxOutData::new(700, spk_hash), // payment (vout=0)
-                DummyTxOutData::new(300, spk_hash), // change (vout=1, last)
+                DummyTxOutData::new(700, spk_hash, 0, TxId(1)), // payment (vout=0)
+                DummyTxOutData::new(300, spk_hash, 1, TxId(1)), // change (vout=1, last)
             ],
             spent_coins: vec![TxOutId::new(TxId(0), 0)],
             n_locktime: 0,
@@ -402,7 +389,7 @@ mod tests {
         // with coinbase, tx2's MIH should cluster its inputs
         let coinbase2 = DummyTxData {
             id: TxId(2),
-            outputs: vec![DummyTxOutData::new(500, spk_hash)],
+            outputs: vec![DummyTxOutData::new(500, spk_hash, 0, TxId(2))],
             spent_coins: vec![],
             n_locktime: 0,
         };
@@ -410,8 +397,8 @@ mod tests {
         let tx2 = DummyTxData {
             id: TxId(3),
             outputs: vec![
-                DummyTxOutData::new(400, spk_hash), // payment
-                DummyTxOutData::new(100, spk_hash), // change
+                DummyTxOutData::new(400, spk_hash, 0, TxId(3)), // payment
+                DummyTxOutData::new(100, spk_hash, 1, TxId(3)), // change
             ],
             spent_coins: vec![
                 TxOutId::new(TxId(1), 1), // spends tx1's change
@@ -419,13 +406,7 @@ mod tests {
             ],
             n_locktime: 0,
         };
-        let all_txs: Vec<
-            Arc<
-                dyn AbstractTransaction<I = LooseIds>
-                    + Send
-                    + Sync,
-            >,
-        > = vec![
+        let all_txs: Vec<Arc<dyn AbstractTransaction<I = LooseIds> + Send + Sync>> = vec![
             Arc::new(coinbase),
             Arc::new(tx1),
             Arc::new(coinbase2),
@@ -450,12 +431,14 @@ mod tests {
         let mih_clustering = MultiInputHeuristic::new(non_coinjoin.clone(), index.clone());
 
         // Create placeholder for global clustering -- the cyclic dependency
-        let global_clustering =
-            Placeholder::<TxOutClustering<LooseIds>>::new(&ctx);
+        let global_clustering = Placeholder::<TxOutClustering<LooseIds>>::new(&ctx);
 
         // IsUnilateral uses the placeholder (creates dependency on cycle)
-        let unilateral_mask =
-            IsUnilateral::with_clustering(non_coinjoin.clone(), global_clustering.as_expr(), index.clone());
+        let unilateral_mask = IsUnilateral::with_clustering(
+            non_coinjoin.clone(),
+            global_clustering.as_expr(),
+            index.clone(),
+        );
 
         // Filter to txs that are unilateral (all inputs clustered)
         let unilateral_txs = non_coinjoin.filter_with_mask(unilateral_mask);
@@ -528,7 +511,7 @@ mod tests {
         // Coinbase
         let coinbase = DummyTxData {
             id: TxId(0),
-            outputs: vec![DummyTxOutData::new(1000, spk_hash)],
+            outputs: vec![DummyTxOutData::new(1000, spk_hash, 0, TxId(0))],
             spent_coins: vec![],
             n_locktime: 0,
         };
@@ -537,8 +520,8 @@ mod tests {
         let spending_tx = DummyTxData {
             id: TxId(1),
             outputs: vec![
-                DummyTxOutData::new(700, spk_hash), // payment
-                DummyTxOutData::new(300, spk_hash), // change
+                DummyTxOutData::new(700, spk_hash, 0, TxId(1)), // payment
+                DummyTxOutData::new(300, spk_hash, 1, TxId(1)), // change
             ],
             spent_coins: vec![TxOutId::new(TxId(0), 0)],
             n_locktime: 1, // fingerprint: same as child so change is classified as change
@@ -549,25 +532,19 @@ mod tests {
         // Tx that spends the change output (vout 1 of spending_tx)
         let change_spend_tx = DummyTxData {
             id: TxId(2),
-            outputs: vec![DummyTxOutData::new(300, spk_hash)],
+            outputs: vec![DummyTxOutData::new(300, spk_hash, 0, TxId(2))],
             spent_coins: vec![change_output],
             n_locktime: 1, // matches spending_tx -> fingerprint says change
         };
 
         let payment_spend_tx = DummyTxData {
             id: TxId(3),
-            outputs: vec![DummyTxOutData::new(700, spk_hash)],
+            outputs: vec![DummyTxOutData::new(700, spk_hash, 0, TxId(3))],
             spent_coins: vec![payment_output],
             n_locktime: 0,
         };
 
-        let all_txs: Vec<
-            Arc<
-                dyn AbstractTransaction<I = LooseIds>
-                    + Send
-                    + Sync,
-            >,
-        > = vec![
+        let all_txs: Vec<Arc<dyn AbstractTransaction<I = LooseIds> + Send + Sync>> = vec![
             Arc::new(coinbase),
             Arc::new(spending_tx),
             Arc::new(change_spend_tx),
