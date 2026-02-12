@@ -1,6 +1,6 @@
 use crate::{
     ScriptPubkeyHash,
-    abstract_types::{AbstractTransaction, IdFamily},
+    abstract_types::AbstractTransaction,
     disjoint_set::{DisJointSet, SparseDisjointSet},
     graph_index::{
         GlobalClusteringIndex, IndexedGraph, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex,
@@ -105,7 +105,7 @@ impl InMemoryIndex {
 
 impl PrevOutIndex for InMemoryIndex {
     type I = LooseIds;
-    fn prev_txout(&self, id: &<Self::I as IdFamily>::TxInId) -> <Self::I as IdFamily>::TxOutId {
+    fn prev_txout(&self, id: &TxInId) -> TxOutId {
         *self
             .prev_txouts
             .get(id)
@@ -114,10 +114,7 @@ impl PrevOutIndex for InMemoryIndex {
 }
 impl TxInIndex for InMemoryIndex {
     type I = LooseIds;
-    fn spending_txin(
-        &self,
-        tx_out: &<Self::I as IdFamily>::TxOutId,
-    ) -> Option<<Self::I as IdFamily>::TxInId> {
+    fn spending_txin(&self, tx_out: &TxOutId) -> Option<TxInId> {
         self.spending_txins.get(tx_out).cloned()
     }
 }
@@ -131,10 +128,7 @@ impl ScriptPubkeyIndex for InMemoryIndex {
 
 impl TxIndex for InMemoryIndex {
     type I = LooseIds;
-    fn tx(
-        &self,
-        txid: &<Self::I as IdFamily>::TxId,
-    ) -> Option<Arc<dyn AbstractTransaction<I = Self::I> + Send + Sync>> {
+    fn tx(&self, txid: &TxId) -> Option<Arc<dyn AbstractTransaction<I = Self::I> + Send + Sync>> {
         self.txs.get(txid).cloned()
     }
 }
@@ -149,118 +143,3 @@ impl GlobalClusteringIndex for InMemoryIndex {
         self.global_clustering.union(txout_id1, txout_id2);
     }
 }
-
-/* Concrete rust bitcoin transaction types */
-
-// Wrapper types for implementing abstract traits on bitcoin types
-// These own their data to avoid lifetime issues when stored
-// struct BitcoinTxInWrapper {
-//     prev_txid: TxId,
-//     prev_vout: u32,
-// }
-
-// impl AbstractTxIn for BitcoinTxInWrapper {
-//     fn prev_txid(&self) -> TxId {
-//         self.prev_txid
-//     }
-
-//     fn prev_vout(&self) -> u32 {
-//         self.prev_vout
-//     }
-
-//     fn prev_txout_id(&self) -> crate::unified::TxOutId {
-//         todo!()
-//     }
-// }
-
-// struct BitcoinTxOutWrapper {
-//     value: bitcoin::Amount,
-//     script_pubkey: bitcoin::ScriptBuf,
-// }
-
-// impl AbstractTxOut for BitcoinTxOutWrapper {
-//     fn value(&self) -> bitcoin::Amount {
-//         self.value
-//     }
-
-//     fn script_pubkey_hash(&self) -> ScriptPubkeyHash {
-//         extract_script_pubkey_hash(&self.script_pubkey)
-//     }
-// }
-
-// fn extract_script_pubkey_hash(script: &bitcoin::ScriptBuf) -> ScriptPubkeyHash {
-//     let script_hash = script.script_hash();
-
-//     let mut hash = [0u8; 20];
-//     hash.copy_from_slice(&script_hash.to_raw_hash()[..]);
-//     hash
-// }
-
-// struct BitcoinTransactionWrapper(bitcoin::Transaction);
-
-// impl Deref for BitcoinTransactionWrapper {
-//     type Target = bitcoin::Transaction;
-
-//     fn deref(&self) -> &Self::Target {
-//         &self.0
-//     }
-// }
-
-// impl AbstractTransaction for BitcoinTransactionWrapper {
-//     fn id(&self) -> unified::TxId {
-//         InMemoryIndex::compute_txid(self.compute_txid()).into()
-//     }
-
-//     fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn>> + '_> {
-//         // Collect into a vector to avoid lifetime issues with the iterator
-//         let inputs: Vec<Box<dyn AbstractTxIn>> = self
-//             .input
-//             .iter()
-//             .map(|txin| {
-//                 Box::new(BitcoinTxInWrapper {
-//                     prev_txid: InMemoryIndex::compute_txid(txin.previous_output.txid),
-//                     prev_vout: txin.previous_output.vout,
-//                 }) as Box<dyn AbstractTxIn>
-//             })
-//             .collect();
-//         Box::new(inputs.into_iter())
-//     }
-
-//     fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut>> + '_> {
-//         // Collect into a vector to avoid lifetime issues with the iterator
-//         let outputs: Vec<Box<dyn AbstractTxOut>> = self
-//             .output
-//             .iter()
-//             .map(|txout| {
-//                 Box::new(BitcoinTxOutWrapper {
-//                     value: txout.value,
-//                     script_pubkey: txout.script_pubkey.clone(),
-//                 }) as Box<dyn AbstractTxOut>
-//             })
-//             .collect();
-//         Box::new(outputs.into_iter())
-//     }
-
-//     fn output_len(&self) -> usize {
-//         self.output.len()
-//     }
-
-//     fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>> {
-//         self.output.get(index).map(|txout| {
-//             Box::new(BitcoinTxOutWrapper {
-//                 value: txout.value,
-//                 script_pubkey: txout.script_pubkey.clone(),
-//             }) as Box<dyn AbstractTxOut>
-//         })
-//     }
-
-//     fn locktime(&self) -> u32 {
-//         self.lock_time.to_consensus_u32()
-//     }
-// }
-
-// impl From<bitcoin::Transaction> for Box<dyn AbstractTransaction + Send + Sync> {
-//     fn from(val: bitcoin::Transaction) -> Self {
-//         Box::new(BitcoinTransactionWrapper(val))
-//     }
-// }
