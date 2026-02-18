@@ -164,7 +164,6 @@ impl Engine {
         // Sort nodes topologically (best effort - cycles will be handled)
         let sorted_ids = self.topological_sort(&all_ids);
 
-        // TODO: get source node ids, and handle them separately before entering the fixpoint loop
         for &id in self.ctx.all_source_node_ids().iter() {
             self.evaluate_source_node(id);
         }
@@ -183,6 +182,10 @@ impl Engine {
 
             // Evaluate all nodes in topological order
             for &id in &sorted_ids {
+                if let Some(_) = self.ctx.get_source_node(id) {
+                    // FIXME: this is a hack. Source nodes should be excluded from the topological sort.
+                    continue;
+                }
                 let changed = self.evaluate_node_for_fixpoint(id, self.iteration);
                 if changed {
                     any_changed = true;
@@ -246,7 +249,6 @@ impl Engine {
         for &id in nodes {
             visit(id, &self.ctx, &mut visited, &mut in_stack, &mut result);
         }
-
         result
     }
 
@@ -257,11 +259,10 @@ impl Engine {
     /// one dependency has produced more output since we last read. This prevents infinite
     /// loops where source nodes re-append every iteration and downstream always sees "new" facts.
     fn evaluate_node_for_fixpoint(&mut self, id: NodeId, iteration: usize) -> bool {
-        let node = match self.ctx.get_node(id) {
-            Some(n) => n,
-            None => return false, // TODO: panic? This points to a bug
-        };
-
+        let node = self
+            .ctx
+            .get_node(id)
+            .expect(&format!("Node should always be registered: {:?}", id));
         let deps = node.dependencies();
         let is_first_eval = !self.storage.contains(id);
         let new_deps_facts = deps.iter().any(|dep_id| {

@@ -89,10 +89,10 @@ impl NodeStorage {
     /// Returns `None` if the node hasn't been evaluated yet or if the
     /// type doesn't match.
     pub fn get<T: ExprValue>(&self, producer: NodeId, dependent: NodeId) -> Option<&T::Output> {
-        let index = self.last_read_index(dependent, producer);
+        let last_read_index = self.last_read_index(dependent, producer);
         let res = self.slots.get(&producer).and_then(|slot_vec| {
             slot_vec
-                .get(index)
+                .get(last_read_index)
                 .and_then(|boxed| boxed.as_ref().downcast_ref::<T::Output>())
         });
 
@@ -102,7 +102,15 @@ impl NodeStorage {
             self.cursor
                 .write()
                 .expect("lock poisoned")
-                .insert((dependent, producer), index + 1);
+                .insert((dependent, producer), last_read_index + 1);
+        } else if self.slot_count(producer) == last_read_index {
+            // the producer has not produced any new values so we get the last value
+            // This is a edge case for cyclic dependencies that have multiple dependencies
+            // Some dependencies may have produced new values but not all of them.
+            // TODO: Perhaps it would make more sense to return the combined value of all the dependencies in this case.
+            return self
+                .get_last(producer)
+                .and_then(|boxed| boxed.downcast_ref::<T::Output>());
         }
 
         res

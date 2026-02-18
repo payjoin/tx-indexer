@@ -36,7 +36,7 @@ impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for OutputsNode<I
     }
 
     fn evaluate(&self, ctx: &EvalContext) -> HashSet<I::TxOutId> {
-        let tx_ids = ctx.get(&self.input);
+        let tx_ids = ctx.get_or_default(&self.input);
         let index_handle = ctx.get(&self.index);
         let index_guard = index_handle.as_arc().read().expect("lock poisoned");
 

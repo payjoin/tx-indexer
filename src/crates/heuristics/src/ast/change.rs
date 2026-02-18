@@ -199,9 +199,7 @@ impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for IsUnilateralN
         let mut result = HashMap::new();
 
         for tx_id in &tx_ids {
-            let Some(tx) = index_guard.tx(tx_id) else {
-                continue;
-            };
+            let tx = tx_id.with_index(&*index_guard);
             let inputs: Vec<I::TxOutId> = tx.inputs().map(|input| input.prev_txout_id()).collect();
 
             let is_unilateral = if inputs.is_empty() {
@@ -285,9 +283,8 @@ impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for ChangeCluster
         let clustering = SparseDisjointSet::new();
 
         for tx_id in &tx_ids {
-            let Some(tx) = index_guard.tx(tx_id) else {
-                continue;
-            };
+            let tx = tx_id.with_index(&*index_guard);
+
             let first_input: Option<I::TxOutId> =
                 tx.inputs().next().map(|input| input.prev_txout_id());
 
