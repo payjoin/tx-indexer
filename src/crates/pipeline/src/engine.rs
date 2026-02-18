@@ -213,6 +213,8 @@ impl Engine {
     }
 
     /// Topologically sort nodes (best effort with cycles).
+    /// Will panic if:
+    /// - duplicate dependencies
     fn topological_sort(&self, nodes: &[NodeId]) -> Vec<NodeId> {
         let mut result = Vec::new();
         let mut visited = HashSet::new();
@@ -236,7 +238,11 @@ impl Engine {
             in_stack.insert(id);
 
             if let Some(node) = ctx.get_node(id) {
-                for dep_id in node.dependencies() {
+                let deps = node.dependencies();
+                if deps.len() != deps.iter().collect::<HashSet<_>>().len() {
+                    panic!("Duplicate dependencies detected for node: {:?}", id);
+                }
+                for dep_id in deps {
                     visit(dep_id, ctx, visited, in_stack, result);
                 }
             }
