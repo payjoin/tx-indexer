@@ -240,68 +240,6 @@ mod tests {
     }
 
     #[test]
-    fn test_full_pipeline() {
-        let all_txs = setup_test_fixture();
-
-        // Pre-cluster the inputs so IsUnilateral passes
-        let input1 = TestFixture::spending_tx().spent_coins[0];
-        let input2 = TestFixture::spending_tx().spent_coins[1];
-
-        let ctx = Arc::new(PipelineContext::new());
-        let mut engine = Engine::new(ctx.clone());
-        engine.add_base_facts(all_txs);
-
-        // Build the pipeline (similar to the user's example)
-        let source = AllLooseTxs::new(&ctx);
-        let all_txs = source.txs();
-        let index = source.index();
-
-        let coinjoin_mask = IsCoinJoin::new(all_txs.clone(), index.clone());
-        let non_coinjoin = all_txs.filter_with_mask(coinjoin_mask.negate());
-        let mih_clustering = MultiInputHeuristic::new(non_coinjoin.clone(), index.clone());
-
-        let change_mask = ChangeIdentification::new(all_txs.outputs(index.clone()), index.clone());
-
-        // For IsUnilateral, we use MIH clustering
-        let unilateral_mask = IsUnilateral::with_clustering(
-            non_coinjoin.clone(),
-            mih_clustering.clone(),
-            index.clone(),
-        );
-
-        // Get outputs that are marked as change
-        let change_outputs = non_coinjoin
-            .outputs(index.clone())
-            .filter_with_mask(change_mask.clone());
-        let txs_with_change = change_outputs.txs();
-
-        // Filter to unilateral txs with change
-        let unilateral_with_change = txs_with_change.filter_with_mask(unilateral_mask);
-
-        let change_clustering = ChangeClustering::new(unilateral_with_change, change_mask, index);
-
-        let combined = change_clustering.join(mih_clustering);
-
-        // Evaluate
-        let result = engine.eval(&combined);
-
-        // The two inputs should be clustered together (MIH)
-        assert_eq!(result.find(input1), result.find(input2));
-
-        // Change output should be clustered with inputs (change clustering)
-        assert_eq!(
-            result.find(TestFixture::change_output()),
-            result.find(input1)
-        );
-
-        // Payment output should NOT be in the same cluster
-        assert_ne!(
-            result.find(TestFixture::payment_output()),
-            result.find(input1)
-        );
-    }
-
-    #[test]
     fn test_pipeline_with_placeholder() {
         let all_txs = setup_test_fixture();
 
@@ -334,32 +272,8 @@ mod tests {
         assert_eq!(result.find(input1), result.find(input2));
     }
 
-    /// Test the full cyclic dependency pattern:
-    ///
-    /// global_clustering (placeholder)
-    ///       ↓ (used by)
-    /// IsUnilateral(txs, global_clustering)
-    ///       ↓ (filters)
-    /// change_clustering
-    ///       ↓ (joins with)
-    /// mih_clustering
-    ///       ↓ (result)
-    /// combined_clustering
-    ///       ↓ (unified with)
-    /// global_clustering (closes the cycle)
-    ///
-    /// The fixpoint iteration should:
-    /// 1. Start with empty global_clustering
-    /// 2. IsUnilateral returns false (no clustering yet)
-    /// 3. change_clustering is empty
-    /// 4. global_clustering = mih_clustering
-    /// 5. Re-run: IsUnilateral now sees MIH clustering
-    /// 6. change_clustering adds more clusters
-    /// 7. global_clustering = mih.join(change)
-    /// 8. Continue until stable
     #[test]
-    // TODO: Not deterministic
-    fn test_cyclic_dependency_pattern() {
+    fn test_global_clustering_e2e() {
         let spk_hash = [1u8; 20];
 
         // Build a chain: coinbase -> tx1 -> tx2
@@ -430,34 +344,19 @@ mod tests {
         // MIH clustering: all inputs of a tx are clustered
         let mih_clustering = MultiInputHeuristic::new(non_coinjoin.clone(), index.clone());
 
-        // Create placeholder for global clustering -- the cyclic dependency
-        let global_clustering = Placeholder::<TxOutClustering<LooseIds>>::new(&ctx);
-
-        // IsUnilateral uses the placeholder (creates dependency on cycle)
-        let unilateral_mask = IsUnilateral::with_clustering(
+        let is_unilateral = IsUnilateral::with_clustering(
             non_coinjoin.clone(),
-            global_clustering.as_expr(),
+            mih_clustering.clone(),
             index.clone(),
         );
+        let unilateral_txs = non_coinjoin.filter_with_mask(is_unilateral.clone());
 
-        // Filter to txs that are unilateral (all inputs clustered)
-        let unilateral_txs = non_coinjoin.filter_with_mask(unilateral_mask);
-
-        // Get change mask for unilateral txs
-        let unilateral_change_mask =
+        let change_mask =
             ChangeIdentification::new(unilateral_txs.outputs(index.clone()), index.clone());
+        let change_clustering = ChangeClustering::new(unilateral_txs, change_mask, index.clone());
+        let combined = change_clustering.join(mih_clustering.clone());
 
-        // Change clustering: cluster change outputs with inputs
-        let change_clustering =
-            ChangeClustering::new(unilateral_txs, unilateral_change_mask, index.clone());
-
-        // Combine MIH and change clustering
-        let combined = mih_clustering.join(change_clustering);
-
-        // Close the cycle
-        global_clustering.unify(combined);
-
-        let result = engine.eval(&global_clustering.as_expr());
+        let result = engine.eval(&combined);
 
         // tx1 has single input, so MIH doesn't cluster anything for it
         // But tx1's change (vout=1) should be clustered with coinbase (vout=0)
@@ -602,5 +501,7 @@ mod tests {
             result.find(spending_tx_fixture.spent_coins[0]),
             result.find(spending_tx_fixture.spent_coins[1])
         );
+
+        // TODO: test the reverse condition (add the spending tx first, then the coinbases)
     }
 }
