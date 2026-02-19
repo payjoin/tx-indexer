@@ -1,10 +1,14 @@
-use pipeline::engine::EvalContext;
-use pipeline::expr::Expr;
-use pipeline::node::{Node, NodeId};
-use pipeline::value::{Index, TxOutClustering, TxSet};
-use tx_indexer_primitives::abstract_types::{IdFamily, IntoTxHandle};
-use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
-use tx_indexer_primitives::graph_index::IndexedGraph;
+use tx_indexer_pipeline::{
+    engine::EvalContext,
+    expr::Expr,
+    node::{Node, NodeId},
+    value::{Index, TxOutClustering, TxSet},
+};
+use tx_indexer_primitives::{
+    abstract_types::{IdFamily, IntoTxHandle},
+    disjoint_set::{DisJointSet, SparseDisjointSet},
+    graph_index::IndexedGraph,
+};
 
 /// Node that implements the Multi-Input Heuristic.
 ///

@@ -1,11 +1,15 @@
 use std::collections::HashMap;
 
-use pipeline::engine::EvalContext;
-use pipeline::expr::Expr;
-use pipeline::node::{Node, NodeId};
-use pipeline::value::{Index, Mask, TxSet};
-use tx_indexer_primitives::abstract_types::{IdFamily, IntoTxHandle};
-use tx_indexer_primitives::graph_index::IndexedGraph;
+use tx_indexer_pipeline::{
+    engine::EvalContext,
+    expr::Expr,
+    node::{Node, NodeId},
+    value::{Index, Mask, TxSet},
+};
+use tx_indexer_primitives::{
+    abstract_types::{IdFamily, IntoTxHandle},
+    graph_index::IndexedGraph,
+};
 
 use crate::coinjoin_detection::NaiveCoinjoinDetection;
 

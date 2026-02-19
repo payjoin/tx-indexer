@@ -1,9 +1,15 @@
-use pipeline::expr::Expr;
-use pipeline::node::Node;
-use pipeline::value::{Index, TxOutClustering, TxSet};
-use tx_indexer_primitives::abstract_types::{IdFamily, IntoTxHandle};
-use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
-use tx_indexer_primitives::graph_index::IndexedGraph;
+use tx_indexer_pipeline::{
+    engine::EvalContext,
+    expr::Expr,
+    node::{Node, NodeId},
+    value::{Index, TxOutClustering, TxSet},
+};
+
+use tx_indexer_primitives::{
+    abstract_types::{IdFamily, IntoTxHandle},
+    disjoint_set::{DisJointSet, SparseDisjointSet},
+    graph_index::IndexedGraph,
+};
 
 pub struct SameAddressClusteringNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> {
     txs: Expr<TxSet<I>>,
@@ -19,11 +25,11 @@ impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> SameAddressClusteringN
 impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for SameAddressClusteringNode<I, G> {
     type OutputValue = TxOutClustering<I>;
 
-    fn dependencies(&self) -> Vec<pipeline::NodeId> {
+    fn dependencies(&self) -> Vec<NodeId> {
         vec![self.txs.id(), self.index.id()]
     }
 
-    fn evaluate(&self, ctx: &pipeline::EvalContext) -> SparseDisjointSet<I::TxOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<I::TxOutId> {
         let txs = ctx.get(&self.txs);
         let index_handle = ctx.get(&self.index);
         let index_guard = index_handle.as_arc().read().expect("lock poisoned");
@@ -63,14 +69,13 @@ impl SameAddressClustering {
 mod tests {
     use std::sync::Arc;
 
-    use pipeline::ops::AllLooseTxs;
-    use pipeline::{Engine, PipelineContext};
-    use tx_indexer_primitives::abstract_types::AbstractTransaction;
-    use tx_indexer_primitives::loose::LooseIds;
-    use tx_indexer_primitives::loose::{TxId, TxOutId};
-    use tx_indexer_primitives::test_utils::{DummyTxData, DummyTxOutData};
-
     use super::*;
+    use tx_indexer_pipeline::{Engine, PipelineContext, ops::AllLooseTxs};
+    use tx_indexer_primitives::{
+        abstract_types::AbstractTransaction,
+        loose::{LooseIds, TxId, TxOutId},
+        test_utils::{DummyTxData, DummyTxOutData},
+    };
 
     fn setup_test_fixture() -> Vec<Arc<dyn AbstractTransaction<I = LooseIds> + Send + Sync>> {
         // Fixture: two coinbase txs, spent by two txs; two outputs each, both change outputs share same spk

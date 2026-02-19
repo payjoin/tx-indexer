@@ -3,16 +3,16 @@
 mod tests {
     use std::sync::Arc;
 
-    use pipeline::Placeholder;
-    use pipeline::context::PipelineContext;
-    use pipeline::engine::Engine;
-    use pipeline::ops::source::AllLooseTxs;
-    use pipeline::value::TxOutClustering;
-    use tx_indexer_primitives::abstract_types::AbstractTransaction;
-    use tx_indexer_primitives::disjoint_set::DisJointSet;
-    use tx_indexer_primitives::loose::LooseIds;
-    use tx_indexer_primitives::loose::{TxId, TxOutId};
-    use tx_indexer_primitives::test_utils::{DummyTxData, DummyTxOutData};
+    use tx_indexer_pipeline::{
+        Placeholder, context::PipelineContext, engine::Engine, ops::source::AllLooseTxs,
+        value::TxOutClustering,
+    };
+    use tx_indexer_primitives::{
+        abstract_types::AbstractTransaction,
+        disjoint_set::DisJointSet,
+        loose::{LooseIds, TxId, TxOutId},
+        test_utils::{DummyTxData, DummyTxOutData},
+    };
 
     use crate::ast::{
         ChangeClustering, ChangeIdentification, FingerPrintChangeIdentification, IsCoinJoin,

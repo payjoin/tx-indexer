@@ -1,12 +1,16 @@
 use std::collections::HashMap;
 
-use pipeline::engine::EvalContext;
-use pipeline::expr::Expr;
-use pipeline::node::{Node, NodeId};
-use pipeline::value::{Index, TxMask, TxOutClustering, TxOutMask, TxOutSet, TxSet};
-use tx_indexer_primitives::abstract_types::{IdFamily, IntoTxHandle, TxInIdOps, TxOutIdOps};
-use tx_indexer_primitives::disjoint_set::{DisJointSet, SparseDisjointSet};
-use tx_indexer_primitives::graph_index::IndexedGraph;
+use tx_indexer_pipeline::{
+    engine::EvalContext,
+    expr::Expr,
+    node::{Node, NodeId},
+    value::{Index, TxMask, TxOutClustering, TxOutMask, TxOutSet, TxSet},
+};
+use tx_indexer_primitives::{
+    abstract_types::{IdFamily, IntoTxHandle, TxInIdOps, TxOutIdOps},
+    disjoint_set::{DisJointSet, SparseDisjointSet},
+    graph_index::IndexedGraph,
+};
 
 /// Node that identifies change outputs in transactions.
 ///
