@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use tx_indexer_disjoint_set::{DisJointSet, SparseDisjointSet};
 use tx_indexer_pipeline::{
     engine::EvalContext,
     expr::Expr,
@@ -8,7 +9,6 @@ use tx_indexer_pipeline::{
 };
 use tx_indexer_primitives::{
     abstract_types::{IdFamily, IntoTxHandle, TxInIdOps, TxOutIdOps},
-    disjoint_set::{DisJointSet, SparseDisjointSet},
     graph_index::IndexedGraph,
 };
 

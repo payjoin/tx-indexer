@@ -3,13 +3,13 @@
 mod tests {
     use std::sync::Arc;
 
+    use tx_indexer_disjoint_set::DisJointSet;
     use tx_indexer_pipeline::{
         Placeholder, context::PipelineContext, engine::Engine, ops::source::AllLooseTxs,
         value::TxOutClustering,
     };
     use tx_indexer_primitives::{
         abstract_types::AbstractTransaction,
-        disjoint_set::DisJointSet,
         loose::{LooseIds, TxId, TxOutId},
         test_utils::{DummyTxData, DummyTxOutData},
     };

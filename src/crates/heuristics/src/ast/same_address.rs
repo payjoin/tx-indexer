@@ -5,9 +5,9 @@ use tx_indexer_pipeline::{
     value::{Index, TxOutClustering, TxSet},
 };
 
+use tx_indexer_disjoint_set::{DisJointSet, SparseDisjointSet};
 use tx_indexer_primitives::{
     abstract_types::{IdFamily, IntoTxHandle},
-    disjoint_set::{DisJointSet, SparseDisjointSet},
     graph_index::IndexedGraph,
 };
 

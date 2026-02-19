@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 tx-indexer-primitives = { path = "../primitives" }
+tx-indexer-disjoint-set = { path = "../disjoint-set" }

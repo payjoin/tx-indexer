@@ -8,8 +8,8 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::{Arc, RwLock};
 
+use tx_indexer_disjoint_set::SparseDisjointSet;
 use tx_indexer_primitives::abstract_types::IdFamily;
-use tx_indexer_primitives::disjoint_set::SparseDisjointSet;
 
 /// Trait for types that can be the value of an expression.
 ///

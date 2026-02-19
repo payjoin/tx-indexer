@@ -4,17 +4,20 @@
 //! - `txs`: TxOutSet -> TxSet (get transactions containing outputs)
 //! - `join`: Clustering x Clustering -> Clustering (merge clusterings)
 
-use std::collections::HashSet;
-use std::hash::Hash;
+use std::{collections::HashSet, hash::Hash};
 
-use tx_indexer_primitives::abstract_types::{IdFamily, IntoTxHandle, TxOutIdOps};
-use tx_indexer_primitives::disjoint_set::SparseDisjointSet;
-use tx_indexer_primitives::graph_index::IndexedGraph;
+use tx_indexer_disjoint_set::SparseDisjointSet;
+use tx_indexer_primitives::{
+    abstract_types::{IdFamily, IntoTxHandle, TxOutIdOps},
+    graph_index::IndexedGraph,
+};
 
-use crate::engine::EvalContext;
-use crate::expr::Expr;
-use crate::node::{Node, NodeId};
-use crate::value::{Clustering, Index, TxOutSet, TxSet};
+use crate::{
+    engine::EvalContext,
+    expr::Expr,
+    node::{Node, NodeId},
+    value::{Clustering, Index, TxOutSet, TxSet},
+};
 
 /// Node that extracts all TxOut ids from a set of transactions.
 pub struct OutputsNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> {

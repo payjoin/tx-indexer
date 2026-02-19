@@ -674,11 +674,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tx-indexer-disjoint-set"
+version = "0.1.0"
+
+[[package]]
 name = "tx-indexer-heuristics"
 version = "0.1.0"
 dependencies = [
  "bitcoin 0.32.8",
  "rand",
+ "tx-indexer-disjoint-set",
  "tx-indexer-pipeline",
  "tx-indexer-primitives",
 ]
@@ -687,6 +692,7 @@ dependencies = [
 name = "tx-indexer-pipeline"
 version = "0.1.0"
 dependencies = [
+ "tx-indexer-disjoint-set",
  "tx-indexer-primitives",
 ]
 

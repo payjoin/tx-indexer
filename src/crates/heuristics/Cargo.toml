@@ -7,6 +7,7 @@ edition = "2024"
 bitcoin = { workspace = true }
 tx-indexer-primitives = { path = "../primitives" }
 tx-indexer-pipeline = { path = "../pipeline" }
+tx-indexer-disjoint-set = { path = "../disjoint-set" }
 
 [dev-dependencies]
 rand = "0.8.5"

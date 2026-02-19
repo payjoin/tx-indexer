@@ -1,7 +1,5 @@
-use tx_indexer_primitives::{
-    abstract_types::{AbstractTransaction, EnumerateSpentTxOuts, IdFamily},
-    disjoint_set::{DisJointSet, SparseDisjointSet},
-};
+use tx_indexer_disjoint_set::{DisJointSet, SparseDisjointSet};
+use tx_indexer_primitives::abstract_types::{AbstractTransaction, EnumerateSpentTxOuts, IdFamily};
 
 pub struct MultiInputHeuristic;
 
@@ -23,8 +21,8 @@ impl MultiInputHeuristic {
 
 #[cfg(test)]
 mod tests {
+    use tx_indexer_disjoint_set::DisJointSet;
     use tx_indexer_primitives::{
-        disjoint_set::DisJointSet,
         loose::{TxId, TxOutId},
         test_utils::{DummyTxData, DummyTxOutData},
     };
