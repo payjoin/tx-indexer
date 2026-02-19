@@ -3,9 +3,6 @@ name = "tx-indexer-primitives"
 version = "0.1.0"
 edition = "2024"
 
-[features]
-integration-test = []
-
 [dependencies]
 bitcoin = {workspace = true}
 bitcoin_slices = { workspace = true, features = ["bitcoin"]}

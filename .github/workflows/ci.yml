@@ -48,10 +48,3 @@ jobs:
       
       - name: Run unit tests
         run: cargo test --lib --no-fail-fast
-      
-      - name: Run integration tests
-        run: cargo test --test integration_test --no-fail-fast
-        env:
-          RUST_LOG: info
-
- 

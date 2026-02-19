@@ -5,7 +5,7 @@ pub mod disjoint_set;
 pub mod graph_index;
 pub mod loose;
 
-#[cfg(any(test, feature = "integration-test"))]
+#[cfg(test)]
 pub mod integration;
 
 pub type ScriptPubkeyHash = [u8; 20];
