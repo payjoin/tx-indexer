@@ -180,12 +180,8 @@ impl Engine {
 
             let mut any_changed = false;
 
-            // Evaluate all nodes in topological order
+            // Evaluate all nodes in topological order (source nodes are not in sorted_ids)
             for &id in &sorted_ids {
-                if let Some(_) = self.ctx.get_source_node(id) {
-                    // FIXME: this is a hack. Source nodes should be excluded from the topological sort.
-                    continue;
-                }
                 let changed = self.evaluate_node_for_fixpoint(id, self.iteration);
                 if changed {
                     any_changed = true;
@@ -249,7 +245,10 @@ impl Engine {
 
             in_stack.remove(&id);
             visited.insert(id);
-            result.push(id);
+            // Exclude source nodes from the sort; they are evaluated separately.
+            if ctx.get_source_node(id).is_none() {
+                result.push(id);
+            }
         }
 
         for &id in nodes {
