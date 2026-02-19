@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 bitcoin = {workspace = true}
-bitcoin_slices = { workspace = true, features = ["bitcoin"]}
+bitcoin_slices = { version = "0.7.0", features = ["bitcoin"] }
 
 [dev-dependencies]
 anyhow = "1.0"

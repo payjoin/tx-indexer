@@ -7,4 +7,3 @@ members = ["src/crates/heuristics", "src/crates/primitives", "src/crates/pipelin
 
 [workspace.dependencies]
 bitcoin = { version = "0.32.0", features = ["rand"] }
-bitcoin_slices = { version = "0.7.0", features = ["bitcoin"] }
