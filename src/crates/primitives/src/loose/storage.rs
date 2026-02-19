@@ -1,10 +1,7 @@
 use crate::{
     ScriptPubkeyHash,
     abstract_types::AbstractTransaction,
-    disjoint_set::{DisJointSet, SparseDisjointSet},
-    graph_index::{
-        GlobalClusteringIndex, IndexedGraph, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex,
-    },
+    graph_index::{IndexedGraph, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex},
     loose::{LooseIds, TxId, TxInId, TxOutId, handle::TxHandle},
 };
 
@@ -23,7 +20,6 @@ pub struct InMemoryIndex {
     pub spending_txins: HashMap<TxOutId, TxInId>,
     // TODO: test that insertion order does not make a difference
     pub txs: HashMap<TxId, Arc<dyn AbstractTransaction<I = LooseIds> + Send + Sync>>,
-    pub global_clustering: SparseDisjointSet<TxOutId>,
     /// Index mapping script pubkey hash (20 bytes) and the first transaction output ID that uses it
     pub spk_to_txout_ids: HashMap<ScriptPubkeyHash, TxOutId>,
 }
@@ -50,7 +46,6 @@ impl InMemoryIndex {
             prev_txouts: HashMap::new(),
             spending_txins: HashMap::new(),
             txs: HashMap::new(),
-            global_clustering: SparseDisjointSet::new(),
             spk_to_txout_ids: HashMap::new(),
         }
     }
@@ -130,16 +125,5 @@ impl TxIndex for InMemoryIndex {
     type I = LooseIds;
     fn tx(&self, txid: &TxId) -> Option<Arc<dyn AbstractTransaction<I = Self::I> + Send + Sync>> {
         self.txs.get(txid).cloned()
-    }
-}
-
-impl GlobalClusteringIndex for InMemoryIndex {
-    type I = LooseIds;
-    fn find(&self, txout_id: TxOutId) -> TxOutId {
-        self.global_clustering.find(txout_id)
-    }
-
-    fn union(&self, txout_id1: TxOutId, txout_id2: TxOutId) {
-        self.global_clustering.union(txout_id1, txout_id2);
     }
 }

@@ -6,7 +6,7 @@ use crate::{
         EnumerateSpentTxOuts, IdFamily, OutputCount, TxConstituent,
     },
     graph_index::IndexedGraph,
-    loose::{LooseIds, TxId, TxInId, TxOutId, storage::InMemoryIndex},
+    loose::{LooseIds, TxId, TxInId, TxOutId},
 };
 
 use bitcoin::Amount;
@@ -51,19 +51,6 @@ impl<'a> TxHandle<'a> {
 
     pub fn is_coinbase(&self) -> bool {
         self.spent_coins().count() == 0
-    }
-
-    pub fn inputs_are_clustered(&self) -> bool {
-        let inputs = self.spent_coins().collect::<Vec<_>>();
-        if inputs.is_empty() {
-            return false;
-        }
-        let first_root = self.index.find(inputs[0].into());
-        inputs.iter().all(|input| {
-            let other = self.index.find((*input).into());
-
-            other == first_root
-        })
     }
 }
 
@@ -192,25 +179,26 @@ impl<'a> AbstractTxIn for TxInHandle<'a> {
     }
 }
 
-pub struct ClusterHandle<'a> {
-    txout_id: TxOutId,
-    index: &'a InMemoryIndex,
-    // TODO: this is specific for global clustering. not any particular clustering fact.
-    // Should specify which disjoin sets structure it is using.
-}
+// Commented out bc clustering is a dependency not something global available via the index
+// pub struct ClusterHandle<'a> {
+//     txout_id: TxOutId,
+//     index: &'a InMemoryIndex,
+//     // TODO: this is specific for global clustering. not any particular clustering fact.
+//     // Should specify which disjoin sets structure it is using.
+// }
 
-impl<'a> ClusterHandle<'a> {
-    pub fn new(txout_id: TxOutId, index: &'a InMemoryIndex) -> Self {
-        Self { txout_id, index }
-    }
+// impl<'a> ClusterHandle<'a> {
+//     pub fn new(txout_id: TxOutId, index: &'a InMemoryIndex) -> Self {
+//         Self { txout_id, index }
+//     }
 
-    pub fn iter_txouts(&self) -> impl Iterator<Item = TxOutHandle<'a>> {
-        self.index
-            .global_clustering
-            .iter_set(self.txout_id)
-            .map(|txout_id| txout_id.with(self.index))
-    }
-}
+//     pub fn iter_txouts(&self) -> impl Iterator<Item = TxOutHandle<'a>> {
+//         self.index
+//             .global_clustering
+//             .iter_set(self.txout_id)
+//             .map(|txout_id| txout_id.with(self.index))
+//     }
+// }
 
 pub struct TxOutHandle<'a> {
     id: TxOutId,

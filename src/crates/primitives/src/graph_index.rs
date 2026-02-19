@@ -33,24 +33,8 @@ pub trait TxIndex {
     ) -> Option<std::sync::Arc<dyn AbstractTransaction<I = Self::I> + Send + Sync>>;
 }
 
-pub trait GlobalClusteringIndex {
-    type I: IdFamily;
-    fn find(&self, txout_id: <Self::I as IdFamily>::TxOutId) -> <Self::I as IdFamily>::TxOutId;
-    fn union(
-        &self,
-        txout_id1: <Self::I as IdFamily>::TxOutId,
-        txout_id2: <Self::I as IdFamily>::TxOutId,
-    );
-}
-
 // TODO: seprate out into rw and ro traits
 pub trait IndexedGraph<I: IdFamily>:
-    Send
-    + Sync
-    + PrevOutIndex<I = I>
-    + TxInIndex<I = I>
-    + ScriptPubkeyIndex<I = I>
-    + TxIndex<I = I>
-    + GlobalClusteringIndex<I = I>
+    Send + Sync + PrevOutIndex<I = I> + TxInIndex<I = I> + ScriptPubkeyIndex<I = I> + TxIndex<I = I>
 {
 }

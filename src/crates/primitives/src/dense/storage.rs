@@ -8,10 +8,7 @@ use crate::{
     ScriptPubkeyHash,
     abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut, TxOutIdOps},
     dense::{BlockFileError, DenseIds, Parser, TxId, TxInId, TxOutId},
-    disjoint_set::{DisJointSet, SparseDisjointSet},
-    graph_index::{
-        GlobalClusteringIndex, IndexedGraph, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex,
-    },
+    graph_index::{IndexedGraph, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex},
 };
 
 pub struct InMemoryIndexBuilder;
@@ -34,7 +31,6 @@ pub struct InMemoryIndex {
     spending_txins: HashMap<TxOutId, TxInId>,
     prev_txouts: HashMap<TxInId, TxOutId>,
     spk_to_txout_ids: HashMap<ScriptPubkeyHash, TxOutId>,
-    global_clustering: SparseDisjointSet<TxOutId>,
 }
 
 impl InMemoryIndex {
@@ -45,7 +41,6 @@ impl InMemoryIndex {
             spending_txins: HashMap::new(),
             prev_txouts: HashMap::new(),
             spk_to_txout_ids: HashMap::new(),
-            global_clustering: SparseDisjointSet::new(),
         }
     }
 
@@ -191,15 +186,6 @@ impl PrevOutIndex for Arc<InMemoryIndex> {
         self.as_ref().prev_txout(ot)
     }
 }
-impl GlobalClusteringIndex for Arc<InMemoryIndex> {
-    type I = DenseIds;
-    fn find(&self, txout_id: TxOutId) -> TxOutId {
-        self.as_ref().find(txout_id)
-    }
-    fn union(&self, txout_id1: TxOutId, txout_id2: TxOutId) {
-        self.as_ref().union(txout_id1, txout_id2)
-    }
-}
 impl TxInIndex for Arc<InMemoryIndex> {
     type I = DenseIds;
     fn spending_txin(&self, txout_id: &TxOutId) -> Option<TxInId> {
@@ -219,17 +205,6 @@ impl PrevOutIndex for InMemoryIndex {
     fn prev_txout(&self, ot: &TxInId) -> TxOutId {
         // TODO: remove unwrap
         self.prev_txouts.get(ot).cloned().unwrap()
-    }
-}
-
-impl GlobalClusteringIndex for InMemoryIndex {
-    type I = DenseIds;
-    fn find(&self, txout_id: TxOutId) -> TxOutId {
-        self.global_clustering.find(txout_id)
-    }
-
-    fn union(&self, txout_id1: TxOutId, txout_id2: TxOutId) {
-        self.global_clustering.union(txout_id1, txout_id2);
     }
 }
 
