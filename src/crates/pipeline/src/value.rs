@@ -85,6 +85,7 @@ where
 pub struct Index<G>(PhantomData<G>);
 
 #[derive(Debug)]
+// TODO: lock seems unnecessary here as writing is only happening during index building.
 pub struct IndexHandle<G>(Option<Arc<RwLock<G>>>);
 
 impl<G> Clone for IndexHandle<G> {

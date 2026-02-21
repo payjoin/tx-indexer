@@ -1,6 +1,6 @@
 //! Integration tests for the AST-based pipeline DSL.
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Arc;
 
     use tx_indexer_disjoint_set::DisJointSet;
@@ -19,10 +19,10 @@ mod tests {
         IsUnilateral, MultiInputHeuristic,
     };
 
-    struct TestFixture;
+    pub struct TestFixture;
 
     impl TestFixture {
-        fn spending_tx() -> DummyTxData {
+        pub fn spending_tx() -> DummyTxData {
             DummyTxData {
                 id: TxId(2),
                 outputs: vec![
@@ -36,7 +36,7 @@ mod tests {
             }
         }
 
-        fn coinbase1() -> DummyTxData {
+        pub fn coinbase1() -> DummyTxData {
             DummyTxData {
                 id: TxId(0),
                 outputs: vec![
@@ -48,7 +48,7 @@ mod tests {
             }
         }
 
-        fn coinbase2() -> DummyTxData {
+        pub fn coinbase2() -> DummyTxData {
             DummyTxData {
                 id: TxId(1),
                 outputs: vec![DummyTxOutData::new(150, [1u8; 20], 0, TxId(1))],
@@ -57,12 +57,25 @@ mod tests {
             }
         }
 
-        fn payment_output() -> TxOutId {
+        pub fn payment_output() -> TxOutId {
             TxOutId::new(TxId(2), 0)
         }
 
-        fn change_output() -> TxOutId {
+        pub fn change_output() -> TxOutId {
             TxOutId::new(TxId(2), 1)
+        }
+
+        /// Single-input spending tx (spends coinbase2). Used for UIH2 single-input tests.
+        pub fn single_input_spending_tx() -> DummyTxData {
+            DummyTxData {
+                id: TxId(2),
+                outputs: vec![
+                    DummyTxOutData::new_with_amount(200, 0, TxId(2)),
+                    DummyTxOutData::new_with_amount(300, 1, TxId(2)),
+                ],
+                spent_coins: vec![TxOutId::new(TxId(1), 0)],
+                n_locktime: 0,
+            }
         }
     }
 
@@ -330,8 +343,6 @@ mod tests {
         let ctx = Arc::new(PipelineContext::new());
         let mut engine = Engine::new(ctx.clone());
         engine.add_base_facts(all_txs);
-
-        // === Build the cyclic pipeline ===
 
         let source = AllLooseTxs::new(&ctx);
         let all_txs = source.txs();
