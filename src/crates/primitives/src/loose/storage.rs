@@ -24,6 +24,38 @@ pub struct InMemoryIndex {
     pub spk_to_txout_ids: HashMap<ScriptPubkeyHash, TxOutId>,
 }
 
+pub struct LooseIndexBuilder {
+    txs: Vec<Arc<dyn AbstractTransaction<I = LooseIds> + Send + Sync>>,
+}
+
+impl LooseIndexBuilder {
+    pub fn new() -> Self {
+        Self { txs: Vec::new() }
+    }
+
+    pub fn add_tx(
+        &mut self,
+        tx: Arc<dyn AbstractTransaction<I = LooseIds> + Send + Sync>,
+    ) -> &mut Self {
+        self.txs.push(tx);
+        self
+    }
+
+    pub fn build(self) -> InMemoryIndex {
+        let mut index = InMemoryIndex::new();
+        for tx in self.txs {
+            index.add_tx(tx);
+        }
+        index
+    }
+}
+
+impl Default for LooseIndexBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl std::fmt::Debug for InMemoryIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InMemoryIndex")

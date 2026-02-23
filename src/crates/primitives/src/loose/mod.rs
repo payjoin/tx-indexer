@@ -72,6 +72,10 @@ impl TxId {
         Self(txid)
     }
 
+    pub fn index(self) -> u32 {
+        self.0
+    }
+
     pub fn txout_id(self, vout: u32) -> TxOutId {
         TxOutId::new(self, vout)
     }
