@@ -11,8 +11,7 @@ use corepc_node::{Conf, Node};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::confirmed::{BlockTxIndex, ConfirmedTxPtrIndex, InPrevoutIndex, OutSpentByIndex};
-use crate::dense::{Parser, TxId};
+use crate::dense::{DenseStorage, IndexPaths, TxId, build_indices};
 
 /// Holds a running regtest node and its wallet RPC client. Dropping stops the node.
 pub struct NodeHarness {
@@ -110,7 +109,12 @@ pub struct HarnessOut {
 pub fn run_harness<A, E>(action: A, expected: E) -> Result<()>
 where
     A: FnOnce(&mut NodeHarness) -> Result<HarnessOut>,
-    E: FnOnce(&NodeHarness, &mut Parser, &HarnessOut, &HashMap<bitcoin::Txid, TxId>) -> Result<()>,
+    E: FnOnce(
+        &NodeHarness,
+        &DenseStorage,
+        &HarnessOut,
+        &HashMap<bitcoin::Txid, TxId>,
+    ) -> Result<()>,
 {
     let mut harness = NodeHarness::new(None)?;
     let address = harness.client().new_address()?;
@@ -137,26 +141,16 @@ where
 
     // block_count_after is chain height (0-based); we need to parse height+1 blocks to include the tip.
     let num_blocks = out.block_count_after + 1;
-    let txptr_path = temp_txptr_path();
-    let txptr_index = ConfirmedTxPtrIndex::create(&txptr_path)?;
-    let block_tx_path = temp_block_tx_path();
-    let block_tx_index = BlockTxIndex::create(&block_tx_path)?;
-    let in_prevout_path = temp_in_prevout_path();
-    let in_prevout_index = InPrevoutIndex::create(&in_prevout_path)?;
-    let out_spent_path = temp_out_spent_path();
-    let out_spent_index = OutSpentByIndex::create(&out_spent_path)?;
-    let mut parser = Parser::new(
-        harness.blocks_dir.clone(),
-        txptr_index,
-        block_tx_index,
-        in_prevout_index,
-        out_spent_index,
-    );
-    let txids = parser
-        .parse_blocks(0..num_blocks)
+    let paths = IndexPaths {
+        txptr: temp_txptr_path(),
+        block_tx: temp_block_tx_path(),
+        in_prevout: temp_in_prevout_path(),
+        out_spent: temp_out_spent_path(),
+    };
+    let (storage, txids) = build_indices(harness.blocks_dir.clone(), 0..num_blocks, paths)
         .map_err(|e| anyhow::anyhow!("parse_blocks: {:?}", e))?;
 
-    expected(&harness, &mut parser, &out, &txids)
+    expected(&harness, &storage, &out, &txids)
 }
 
 fn temp_txptr_path() -> PathBuf {

@@ -1,17 +1,15 @@
 use std::{
     collections::HashMap,
-    fs::File,
-    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 
 use bitcoin_slices::bitcoin_hashes::Hash;
-// TODO: remove this once bitcoin slices updates to use bitcoin 0.32.0
-use bitcoin::hashes::Hash as BitcoinHash;
 use bitcoin_slices::{Visit, Visitor, bsl};
+
+use bitcoin::hashes::Hash as _;
 use core::ops::ControlFlow;
 
-use super::{BlockFileId, TxId, TxInId, TxOutId};
+use super::{BlockFileId, TxId};
 use crate::confirmed::{
     BlockTxIndex, ConfirmedTxPtrIndex, INID_NONE, InPrevoutIndex, OUTID_NONE, OutSpentByIndex,
     TxPtr,
@@ -26,15 +24,10 @@ const BLOCK_START_LEN: usize = 8;
 /// Storage for dense IDs backed by Bitcoin Core block files.
 ///
 /// Parses blocks via bitcoin_slices (Visitor pattern), maintains an in-memory
-/// block index, and supports lookup of transactions, inputs, and outputs by
-/// dense ID (file + byte offset).
+/// block index.
 #[derive(Debug)]
 pub struct Parser {
     blocks_dir: PathBuf,
-    txptr_index: ConfirmedTxPtrIndex,
-    block_tx_index: BlockTxIndex,
-    in_prevout_index: InPrevoutIndex,
-    out_spent_index: OutSpentByIndex,
     // TODO: this can be replaced with the kernel
     /// For each parsed block: (BlockFileId, block_start, block_len).
     /// Used to find which block contains a given byte offset.
@@ -42,25 +35,19 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn new(
-        blocks_dir: impl Into<PathBuf>,
-        txptr_index: ConfirmedTxPtrIndex,
-        block_tx_index: BlockTxIndex,
-        in_prevout_index: InPrevoutIndex,
-        out_spent_index: OutSpentByIndex,
-    ) -> Self {
+    pub fn new(blocks_dir: impl Into<PathBuf>) -> Self {
         Self {
             blocks_dir: blocks_dir.into(),
-            txptr_index,
-            block_tx_index,
-            in_prevout_index,
-            out_spent_index,
             block_index: Vec::new(),
         }
     }
 
     pub fn blocks_dir(&self) -> &Path {
         &self.blocks_dir
+    }
+
+    pub fn block_index(&self) -> &[(BlockFileId, u64, u64)] {
+        &self.block_index
     }
 
     fn block_file_path(&self, block_file: BlockFileId) -> PathBuf {
@@ -75,6 +62,10 @@ impl Parser {
     pub fn parse_blocks(
         &mut self,
         range: std::ops::Range<u64>,
+        txptr_index: &mut ConfirmedTxPtrIndex,
+        block_tx_index: &mut BlockTxIndex,
+        in_prevout_index: &mut InPrevoutIndex,
+        out_spent_index: &mut OutSpentByIndex,
     ) -> Result<HashMap<bitcoin::Txid, TxId>, BlockFileError> {
         let file_id = BlockFileId(0);
         let path = self.block_file_path(file_id);
@@ -83,9 +74,8 @@ impl Parser {
         let mut txids = HashMap::new();
         let mut offset = 0usize;
         let mut blocks_parsed = 0u64;
-        let (mut tx_in_total, mut tx_out_total) = self.tx_io_totals();
-        let mut tx_total = self
-            .block_tx_index
+        let (mut tx_in_total, mut tx_out_total) = tx_io_totals(txptr_index);
+        let mut tx_total = block_tx_index
             .last()
             .map_err(BlockFileError::Io)?
             .unwrap_or(0) as u64;
@@ -115,15 +105,15 @@ impl Parser {
                     block_start_in_file,
                     block_slice,
                     txids: &mut txids,
-                    txptr_index: &mut self.txptr_index,
+                    txptr_index,
                     error: None,
                     tx_in_total: &mut tx_in_total,
                     tx_out_total: &mut tx_out_total,
                     tx_count: 0,
                     current_in: 0,
                     current_out: 0,
-                    in_prevout_index: &mut self.in_prevout_index,
-                    out_spent_index: &mut self.out_spent_index,
+                    in_prevout_index,
+                    out_spent_index,
                 };
                 bsl::Block::visit(block_slice, &mut collector)
                     .map_err(|e| BlockFileError::Parse(e))?;
@@ -134,7 +124,7 @@ impl Parser {
                 if tx_total > u32::MAX as u64 {
                     return Err(BlockFileError::CorruptId());
                 }
-                self.block_tx_index
+                block_tx_index
                     .append(tx_total as u32)
                     .map_err(BlockFileError::Io)?;
 
@@ -147,325 +137,6 @@ impl Parser {
         }
 
         Ok(txids)
-    }
-
-    /// Find the block that contains the given file offset. Returns (block_file, block_start, block_len).
-    fn find_block(
-        &self,
-        file_id: BlockFileId,
-        file_offset: u32,
-    ) -> Option<(BlockFileId, u64, u64)> {
-        let file_offset = file_offset as u64;
-        self.block_index.iter().find_map(|&(id, start, len)| {
-            if id == file_id && file_offset >= start && file_offset < start + len {
-                Some((id, start, len))
-            } else {
-                None
-            }
-        })
-    }
-
-    fn tx_ptr(&self, txid: TxId) -> TxPtr {
-        match self.txptr_index.get(txid) {
-            Ok(Some(ptr)) => ptr,
-            Ok(None) => panic!(
-                "Corrupted data store: transaction not found for txid: {:?}",
-                txid
-            ),
-            Err(e) => panic!("Corrupted data store: error reading txptr: {:?}", e),
-        }
-    }
-
-    /// Return the range of TxIds for the given block height.
-    pub fn tx_range_for_block(&self, height: u64) -> (u32, u32) {
-        let end = self
-            .block_tx_index
-            .get(height)
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Corrupted data store: error reading block tx index: {:?}",
-                    e
-                )
-            })
-            .unwrap_or_else(|| {
-                panic!(
-                    "Corrupted data store: block height out of range: {}",
-                    height
-                )
-            });
-        if height == 0 {
-            (0, end)
-        } else {
-            let start = self
-                .block_tx_index
-                .get(height - 1)
-                .unwrap_or_else(|e| {
-                    panic!(
-                        "Corrupted data store: error reading block tx index: {:?}",
-                        e
-                    )
-                })
-                .unwrap_or_else(|| {
-                    panic!(
-                        "Corrupted data store: block height out of range: {}",
-                        height - 1
-                    )
-                });
-            (start, end)
-        }
-    }
-
-    pub fn block_of_tx(&self, txid: TxId) -> u64 {
-        let target = txid.index();
-        let mut lo = 0u64;
-        let mut hi = self.block_tx_index.len();
-        while lo < hi {
-            let mid = lo + (hi - lo) / 2;
-            let mid_end = self
-                .block_tx_index
-                .get(mid)
-                .unwrap_or_else(|e| {
-                    panic!(
-                        "Corrupted data store: error reading block tx index: {:?}",
-                        e
-                    )
-                })
-                .unwrap_or_else(|| {
-                    panic!("Corrupted data store: block height out of range: {}", mid)
-                });
-            if mid_end > target {
-                hi = mid;
-            } else {
-                lo = mid + 1;
-            }
-        }
-        if lo >= self.block_tx_index.len() {
-            panic!(
-                "Corrupted data store: txid out of range for block index: {}",
-                target
-            );
-        }
-        lo
-    }
-
-    fn tx_io_totals(&self) -> (u64, u64) {
-        let len = self.txptr_index.len();
-        if len == 0 {
-            return (0, 0);
-        }
-        let last = TxId::new((len - 1) as u32);
-        let ptr = self.tx_ptr(last);
-        (ptr.tx_in_end(), ptr.tx_out_end())
-    }
-
-    fn tx_in_range(&self, txid: TxId) -> (u64, u64) {
-        let end = self.tx_ptr(txid).tx_in_end();
-        if txid.index() == 0 {
-            (0, end)
-        } else {
-            let prev = self.tx_ptr(TxId::new(txid.index() - 1)).tx_in_end();
-            (prev, end)
-        }
-    }
-
-    fn tx_out_range(&self, txid: TxId) -> (u64, u64) {
-        let end = self.tx_ptr(txid).tx_out_end();
-        if txid.index() == 0 {
-            (0, end)
-        } else {
-            let prev = self.tx_ptr(TxId::new(txid.index() - 1)).tx_out_end();
-            (prev, end)
-        }
-    }
-
-    fn upper_bound_tx_out(&self, out_id: u64) -> TxId {
-        let mut lo = 0u64;
-        let mut hi = self.txptr_index.len();
-        while lo < hi {
-            let mid = lo + (hi - lo) / 2;
-            let mid_id = TxId::new(mid as u32);
-            let mid_end = self.tx_ptr(mid_id).tx_out_end();
-            if mid_end > out_id {
-                hi = mid;
-            } else {
-                lo = mid + 1;
-            }
-        }
-        if lo >= self.txptr_index.len() {
-            panic!("Corrupted data store: output id out of range: {}", out_id);
-        }
-        TxId::new(lo as u32)
-    }
-
-    fn upper_bound_tx_in(&self, in_id: u64) -> TxId {
-        let mut lo = 0u64;
-        let mut hi = self.txptr_index.len();
-        while lo < hi {
-            let mid = lo + (hi - lo) / 2;
-            let mid_id = TxId::new(mid as u32);
-            let mid_end = self.tx_ptr(mid_id).tx_in_end();
-            if mid_end > in_id {
-                hi = mid;
-            } else {
-                lo = mid + 1;
-            }
-        }
-        if lo >= self.txptr_index.len() {
-            panic!("Corrupted data store: input id out of range: {}", in_id);
-        }
-        TxId::new(lo as u32)
-    }
-
-    fn txid_and_vout_for_out(&self, out_id: TxOutId) -> (TxId, u32) {
-        let txid = self.upper_bound_tx_out(out_id.index());
-        let (start, _end) = self.tx_out_range(txid);
-        let vout = out_id.index() - start;
-        (txid, vout as u32)
-    }
-
-    fn txid_and_vin_for_in(&self, in_id: TxInId) -> (TxId, u32) {
-        let txid = self.upper_bound_tx_in(in_id.index());
-        let (start, _end) = self.tx_in_range(txid);
-        let vin = in_id.index() - start;
-        (txid, vin as u32)
-    }
-
-    pub fn prevout_for_in(&self, in_id: TxInId) -> Option<TxOutId> {
-        let out_id = self
-            .in_prevout_index
-            .get(in_id.index())
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Corrupted data store: error reading in_prevout index: {:?}",
-                    e
-                )
-            })
-            .unwrap_or_else(|| {
-                panic!(
-                    "Corrupted data store: input id out of range: {}",
-                    in_id.index()
-                )
-            });
-        if out_id == OUTID_NONE {
-            None
-        } else {
-            Some(TxOutId::new(out_id))
-        }
-    }
-
-    pub fn spender_for_out(&self, out_id: TxOutId) -> Option<TxInId> {
-        let in_id = self
-            .out_spent_index
-            .get(out_id.index())
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Corrupted data store: error reading out_spent index: {:?}",
-                    e
-                )
-            })
-            .unwrap_or_else(|| {
-                panic!(
-                    "Corrupted data store: output id out of range: {}",
-                    out_id.index()
-                )
-            });
-        if in_id == INID_NONE {
-            None
-        } else {
-            Some(TxInId::new(in_id))
-        }
-    }
-
-    /// Read a block from disk into a buffer.
-    fn read_block(
-        &self,
-        block_file: BlockFileId,
-        block_start: u64,
-        block_len: u64,
-    ) -> Result<Vec<u8>, BlockFileError> {
-        let path = self.block_file_path(block_file);
-        let mut f = File::open(&path).map_err(BlockFileError::Io)?;
-        f.seek(SeekFrom::Start(block_start))
-            .map_err(BlockFileError::Io)?;
-        let mut buf = vec![0u8; block_len as usize];
-        f.read_exact(&mut buf).map_err(BlockFileError::Io)?;
-        Ok(buf)
-    }
-
-    /// Return the transaction at the given dense TxId as a rust-bitcoin Transaction.
-    pub fn get_tx(&self, txid: TxId) -> bitcoin::Transaction {
-        let ptr = self.tx_ptr(txid);
-        let block_file = BlockFileId(ptr.blk_file_no());
-        let tx_offset = ptr.blk_file_off();
-        let (block_file, block_start, block_len) =
-            self.find_block(block_file, tx_offset).unwrap_or_else(|| {
-                panic!(
-                    "Corrupted data store: transaction not found for txid: {:?}",
-                    txid
-                );
-            });
-        let block_bytes = self
-            .read_block(block_file, block_start, block_len)
-            .unwrap_or_else(|e| panic!("Corrupted data store: error reading block: {:?}", e));
-        let block_slice = &block_bytes[..];
-        // Offset of this tx within the block (block_bytes starts at 0).
-        let target_offset_in_block = tx_offset as u64 - block_start;
-        let mut finder = FindTxVisitor {
-            block_slice,
-            target_offset_in_block,
-            result: None,
-        };
-        bsl::Block::visit(block_slice, &mut finder).unwrap_or_else(|e| {
-            panic!("Corrupted data store: error parsing block: {:?}", e);
-        });
-        finder.result.unwrap_or_else(|| {
-            panic!(
-                "Corrupted data store: transaction not found for txid: {:?}",
-                txid
-            );
-        })
-    }
-
-    /// Return the transaction output at the given dense TxOutId as a rust-bitcoin TxOut.
-    pub fn get_txout(&self, id: TxOutId) -> bitcoin::TxOut {
-        let (txid, vout) = self.txid_and_vout_for_out(id);
-        let tx = self.get_tx(txid);
-        tx.output
-            .get(vout as usize)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Corrupted data store: transaction output not found for id: {:?}",
-                    id
-                );
-            })
-            .clone()
-    }
-
-    /// Return the transaction input at the given dense TxInId as a rust-bitcoin TxIn.
-    pub fn get_txin(&self, id: TxInId) -> bitcoin::TxIn {
-        let (txid, vin) = self.txid_and_vin_for_in(id);
-        let tx = self.get_tx(txid);
-        tx.input
-            .get(vin as usize)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Corrupted data store: transaction input not found for id: {:?}",
-                    id
-                );
-            })
-            .clone()
-    }
-
-    /// Return all dense TxInIds for the transaction at the given dense TxId.
-    pub fn get_txin_ids(&self, txid: TxId) -> Vec<TxInId> {
-        let (start, end) = self.tx_in_range(txid);
-        (start..end).map(TxInId::new).collect()
-    }
-
-    /// Return all dense TxOutIds for the transaction at the given dense TxId.
-    pub fn get_txout_ids(&self, txid: TxId) -> Vec<TxOutId> {
-        let (start, end) = self.tx_out_range(txid);
-        (start..end).map(TxOutId::new).collect()
     }
 }
 
@@ -567,6 +238,24 @@ impl Visitor for TxIdCollector<'_> {
     }
 }
 
+fn tx_io_totals(txptr_index: &ConfirmedTxPtrIndex) -> (u64, u64) {
+    let len = txptr_index.len();
+    if len == 0 {
+        return (0, 0);
+    }
+    let last = TxId::new((len - 1) as u32);
+    let ptr = txptr_index
+        .get(last)
+        .unwrap_or_else(|e| panic!("Corrupted data store: error reading txptr: {:?}", e))
+        .unwrap_or_else(|| {
+            panic!(
+                "Corrupted data store: transaction not found for txid: {:?}",
+                last
+            )
+        });
+    (ptr.tx_in_end(), ptr.tx_out_end())
+}
+
 fn is_null_prevout(prevout: &bsl::OutPoint<'_>) -> bool {
     prevout.vout() == u32::MAX && prevout.txid().iter().all(|b| *b == 0)
 }
@@ -591,26 +280,6 @@ fn tx_out_range_for(txid: TxId, txptr_index: &ConfirmedTxPtrIndex) -> (u64, u64)
             })
             .tx_out_end();
         (prev, end)
-    }
-}
-
-/// Visitor that finds the single transaction at target_offset_in_block and parses it to bitcoin::Transaction.
-struct FindTxVisitor<'a> {
-    block_slice: &'a [u8],
-    target_offset_in_block: u64,
-    result: Option<bitcoin::Transaction>,
-}
-
-impl Visitor for FindTxVisitor<'_> {
-    fn visit_transaction(&mut self, tx: &bsl::Transaction<'_>) -> ControlFlow<()> {
-        let tx_slice = tx.as_ref();
-        let offset_in_block = tx_slice.as_ptr() as usize - self.block_slice.as_ptr() as usize;
-        if offset_in_block as u64 == self.target_offset_in_block {
-            if let Ok(tx) = bitcoin::consensus::deserialize::<bitcoin::Transaction>(tx_slice) {
-                self.result = Some(tx);
-            }
-        }
-        ControlFlow::Continue(())
     }
 }
 
@@ -671,7 +340,7 @@ mod tests {
                     block_count_after: count,
                 })
             },
-            |_harness, parser, out, dense_txids| {
+            |_harness, storage, out, dense_txids| {
                 assert_eq!(out.expected_txids.len(), 1, "one coinbase tx");
                 let want = out.expected_txids[0];
                 // We parsed block_count_after blocks; last block is the one we just mined
@@ -683,7 +352,7 @@ mod tests {
                 let dense_id = dense_txids
                     .get(&want)
                     .ok_or_else(|| anyhow::anyhow!("no dense TxId for coinbase {}", want))?;
-                let tx = parser.get_tx(*dense_id);
+                let tx = storage.get_tx(*dense_id);
                 assert_eq!(tx.compute_txid(), want);
                 // Coinbase has one input (null prevout) and at least one output
                 assert_eq!(tx.input.len(), 1);
@@ -720,21 +389,21 @@ mod tests {
                     block_count_after: count,
                 })
             },
-            |harness, parser, out, dense_txids| {
+            |harness, storage, out, dense_txids| {
                 for want in &out.expected_txids {
                     let dense_id = dense_txids
                         .get(want)
                         .ok_or_else(|| anyhow::anyhow!("no dense TxId for {}", want))?;
-                    let tx = parser.get_tx(*dense_id);
+                    let tx = storage.get_tx(*dense_id);
                     assert_eq!(tx.compute_txid(), *want);
                     let rpc_tx = harness.get_raw_transaction(*want)?;
                     assert_eq!(tx.compute_txid(), rpc_tx.compute_txid());
                     assert_eq!(tx.input.len(), rpc_tx.input.len());
                     assert_eq!(tx.output.len(), rpc_tx.output.len());
 
-                    let block = parser.block_of_tx(*dense_id);
+                    let block = storage.block_of_tx(*dense_id);
                     assert_eq!(block, out.block_count_after);
-                    let (start, end) = parser.tx_range_for_block(block);
+                    let (start, end) = storage.tx_range_for_block(block);
                     assert!(dense_id.index() >= start);
                     assert!(dense_id.index() < end);
                 }
@@ -762,7 +431,7 @@ mod tests {
                     block_count_after: count,
                 })
             },
-            |harness, parser, out, dense_txids| {
+            |harness, storage, out, dense_txids| {
                 // Pick a non-coinbase tx to test input/output ID round-trips
                 let want = out
                     .expected_txids
@@ -778,11 +447,11 @@ mod tests {
                     .get(&want)
                     .ok_or_else(|| anyhow::anyhow!("no dense TxId for {}", want))?;
 
-                let tx = parser.get_tx(*dense_id);
-                let txin_ids = parser.get_txin_ids(*dense_id);
-                let txout_ids = parser.get_txout_ids(*dense_id);
-                let (in_start, in_end) = parser.tx_in_range(*dense_id);
-                let (out_start, out_end) = parser.tx_out_range(*dense_id);
+                let tx = storage.get_tx(*dense_id);
+                let txin_ids = storage.get_txin_ids(*dense_id);
+                let txout_ids = storage.get_txout_ids(*dense_id);
+                let (in_start, in_end) = storage.tx_in_range(*dense_id);
+                let (out_start, out_end) = storage.tx_out_range(*dense_id);
 
                 assert_eq!(txin_ids.len(), tx.input.len());
                 assert_eq!(txout_ids.len(), tx.output.len());
@@ -797,11 +466,11 @@ mod tests {
                 }
 
                 for (i, id) in txin_ids.iter().enumerate() {
-                    let txin = parser.get_txin(*id);
+                    let txin = storage.get_txin(*id);
                     assert_eq!(txin.previous_output, tx.input[i].previous_output);
                 }
                 for (i, id) in txout_ids.iter().enumerate() {
-                    let txout = parser.get_txout(*id);
+                    let txout = storage.get_txout(*id);
                     assert_eq!(txout.value, tx.output[i].value);
                     assert_eq!(txout.script_pubkey, tx.output[i].script_pubkey);
                 }
@@ -832,7 +501,7 @@ mod tests {
                     block_count_after: count,
                 })
             },
-            |harness, parser, out, dense_txids| {
+            |harness, storage, out, dense_txids| {
                 let want = out
                     .expected_txids
                     .iter()
@@ -846,25 +515,25 @@ mod tests {
                 let dense_id = dense_txids
                     .get(&want)
                     .ok_or_else(|| anyhow::anyhow!("no dense TxId for {}", want))?;
-                let tx = parser.get_tx(*dense_id);
-                let txin_ids = parser.get_txin_ids(*dense_id);
+                let tx = storage.get_tx(*dense_id);
+                let txin_ids = storage.get_txin_ids(*dense_id);
 
                 assert_eq!(txin_ids.len(), tx.input.len());
 
                 for (i, in_id) in txin_ids.iter().enumerate() {
-                    let txin = parser.get_txin(*in_id);
+                    let txin = storage.get_txin(*in_id);
                     assert_eq!(txin.previous_output, tx.input[i].previous_output);
                     if txin.previous_output.is_null() {
-                        assert_eq!(parser.prevout_for_in(*in_id), None);
+                        assert_eq!(storage.prevout_for_in(*in_id), None);
                     } else {
                         let prev_txid = txin.previous_output.txid;
                         let prev_dense = dense_txids
                             .get(&prev_txid)
                             .ok_or_else(|| anyhow::anyhow!("no dense TxId for {}", prev_txid))?;
-                        let (start, _end) = parser.tx_out_range(*prev_dense);
+                        let (start, _end) = storage.tx_out_range(*prev_dense);
                         let out_id = TxOutId::new(start + txin.previous_output.vout as u64);
-                        assert_eq!(parser.prevout_for_in(*in_id), Some(out_id));
-                        assert_eq!(parser.spender_for_out(out_id), Some(*in_id));
+                        assert_eq!(storage.prevout_for_in(*in_id), Some(out_id));
+                        assert_eq!(storage.spender_for_out(out_id), Some(*in_id));
                     }
                 }
 

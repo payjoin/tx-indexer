@@ -2,6 +2,7 @@ pub mod parser;
 
 pub mod storage;
 pub use parser::{BlockFileError, Parser};
+pub use storage::{DenseStorage, IndexPaths, build_indices};
 
 #[repr(transparent)]
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Ord, PartialOrd)]
