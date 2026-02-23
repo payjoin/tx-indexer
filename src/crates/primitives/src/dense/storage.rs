@@ -1,17 +1,6 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-    sync::Arc,
-};
+use crate::ScriptPubkeyHash;
 
-use crate::{
-    ScriptPubkeyHash,
-    abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut, TxOutIdOps},
-    confirmed::ConfirmedTxPtrIndex,
-    dense::{BlockFileError, Parser, TxId, TxInId, TxOutId},
-    graph_index::{IndexedGraph, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex},
-};
-
+#[allow(unused)]
 fn extract_script_pubkey_hash(script: &bitcoin::ScriptBuf) -> ScriptPubkeyHash {
     let script_hash = script.script_hash();
 

@@ -1,6 +1,5 @@
 pub mod parser;
 
-// pub mod handle;
 pub mod storage;
 pub use parser::{BlockFileError, Parser};
 
