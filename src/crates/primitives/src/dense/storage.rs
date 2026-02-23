@@ -5,9 +5,6 @@ use std::{
     path::PathBuf,
 };
 
-use bitcoin_slices::{Visit, Visitor, bsl};
-use core::ops::ControlFlow;
-
 use super::{BlockFileError, BlockFileId, Parser, TxId, TxInId, TxOutId};
 use crate::ScriptPubkeyHash;
 use crate::confirmed::{
@@ -23,7 +20,7 @@ pub struct IndexPaths {
 }
 
 pub struct DenseStorage {
-    parser: Parser,
+    blocks_dir: PathBuf,
     txptr_index: ConfirmedTxPtrIndex,
     block_tx_index: BlockTxIndex,
     in_prevout_index: InPrevoutIndex,
@@ -50,7 +47,7 @@ pub fn build_indices(
         &mut out_spent_index,
     )?;
     let storage = DenseStorage {
-        parser,
+        blocks_dir: parser.blocks_dir().to_path_buf(),
         txptr_index,
         block_tx_index,
         in_prevout_index,
@@ -62,26 +59,7 @@ pub fn build_indices(
 impl DenseStorage {
     fn block_file_path(&self, block_file: BlockFileId) -> PathBuf {
         let file_name = format!("blk{:05}.dat", block_file.0);
-        self.parser.blocks_dir().join(file_name)
-    }
-
-    /// Find the block that contains the given file offset. Returns (block_file, block_start, block_len).
-    fn find_block(
-        &self,
-        file_id: BlockFileId,
-        file_offset: u32,
-    ) -> Option<(BlockFileId, u64, u64)> {
-        let file_offset = file_offset as u64;
-        self.parser
-            .block_index()
-            .iter()
-            .find_map(|&(id, start, len)| {
-                if id == file_id && file_offset >= start && file_offset < start + len {
-                    Some((id, start, len))
-                } else {
-                    None
-                }
-            })
+        self.blocks_dir.join(file_name)
     }
 
     fn tx_ptr(&self, txid: TxId) -> TxPtr {
@@ -285,18 +263,18 @@ impl DenseStorage {
         }
     }
 
-    /// Read a block from disk into a buffer.
-    fn read_block(
+    /// Read a transaction from disk into a buffer.
+    fn read_tx(
         &self,
         block_file: BlockFileId,
-        block_start: u64,
-        block_len: u64,
+        tx_offset: u32,
+        tx_len: u32,
     ) -> Result<Vec<u8>, BlockFileError> {
         let path = self.block_file_path(block_file);
         let mut f = File::open(&path).map_err(BlockFileError::Io)?;
-        f.seek(SeekFrom::Start(block_start))
+        f.seek(SeekFrom::Start(tx_offset as u64))
             .map_err(BlockFileError::Io)?;
-        let mut buf = vec![0u8; block_len as usize];
+        let mut buf = vec![0u8; tx_len as usize];
         f.read_exact(&mut buf).map_err(BlockFileError::Io)?;
         Ok(buf)
     }
@@ -306,32 +284,11 @@ impl DenseStorage {
         let ptr = self.tx_ptr(txid);
         let block_file = BlockFileId(ptr.blk_file_no());
         let tx_offset = ptr.blk_file_off();
-        let (block_file, block_start, block_len) =
-            self.find_block(block_file, tx_offset).unwrap_or_else(|| {
-                panic!(
-                    "Corrupted data store: transaction not found for txid: {:?}",
-                    txid
-                );
-            });
-        let block_bytes = self
-            .read_block(block_file, block_start, block_len)
-            .unwrap_or_else(|e| panic!("Corrupted data store: error reading block: {:?}", e));
-        let block_slice = &block_bytes[..];
-        // Offset of this tx within the block (block_bytes starts at 0).
-        let target_offset_in_block = tx_offset as u64 - block_start;
-        let mut finder = FindTxVisitor {
-            block_slice,
-            target_offset_in_block,
-            result: None,
-        };
-        bsl::Block::visit(block_slice, &mut finder).unwrap_or_else(|e| {
-            panic!("Corrupted data store: error parsing block: {:?}", e);
-        });
-        finder.result.unwrap_or_else(|| {
-            panic!(
-                "Corrupted data store: transaction not found for txid: {:?}",
-                txid
-            );
+        let tx_bytes = self
+            .read_tx(block_file, tx_offset, ptr.tx_len())
+            .unwrap_or_else(|e| panic!("Corrupted data store: error reading tx: {:?}", e));
+        bitcoin::consensus::deserialize::<bitcoin::Transaction>(&tx_bytes).unwrap_or_else(|e| {
+            panic!("Corrupted data store: error parsing tx: {:?}", e);
         })
     }
 
@@ -375,26 +332,6 @@ impl DenseStorage {
     pub fn get_txout_ids(&self, txid: TxId) -> Vec<TxOutId> {
         let (start, end) = self.tx_out_range(txid);
         (start..end).map(TxOutId::new).collect()
-    }
-}
-
-/// Visitor that finds the single transaction at target_offset_in_block and parses it to bitcoin::Transaction.
-struct FindTxVisitor<'a> {
-    block_slice: &'a [u8],
-    target_offset_in_block: u64,
-    result: Option<bitcoin::Transaction>,
-}
-
-impl Visitor for FindTxVisitor<'_> {
-    fn visit_transaction(&mut self, tx: &bsl::Transaction<'_>) -> ControlFlow<()> {
-        let tx_slice = tx.as_ref();
-        let offset_in_block = tx_slice.as_ptr() as usize - self.block_slice.as_ptr() as usize;
-        if offset_in_block as u64 == self.target_offset_in_block {
-            if let Ok(tx) = bitcoin::consensus::deserialize::<bitcoin::Transaction>(tx_slice) {
-                self.result = Some(tx);
-            }
-        }
-        ControlFlow::Continue(())
     }
 }
 

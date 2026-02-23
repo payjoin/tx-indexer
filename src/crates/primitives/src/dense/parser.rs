@@ -23,31 +23,21 @@ const BLOCK_START_LEN: usize = 8;
 
 /// Storage for dense IDs backed by Bitcoin Core block files.
 ///
-/// Parses blocks via bitcoin_slices (Visitor pattern), maintains an in-memory
-/// block index.
+/// Parses blocks via bitcoin_slices (Visitor pattern).
 #[derive(Debug)]
 pub struct Parser {
     blocks_dir: PathBuf,
-    // TODO: this can be replaced with the kernel
-    /// For each parsed block: (BlockFileId, block_start, block_len).
-    /// Used to find which block contains a given byte offset.
-    block_index: Vec<(BlockFileId, u64, u64)>,
 }
 
 impl Parser {
     pub fn new(blocks_dir: impl Into<PathBuf>) -> Self {
         Self {
             blocks_dir: blocks_dir.into(),
-            block_index: Vec::new(),
         }
     }
 
     pub fn blocks_dir(&self) -> &Path {
         &self.blocks_dir
-    }
-
-    pub fn block_index(&self) -> &[(BlockFileId, u64, u64)] {
-        &self.block_index
     }
 
     fn block_file_path(&self, block_file: BlockFileId) -> PathBuf {
@@ -56,9 +46,8 @@ impl Parser {
     }
 
     /// Parse the first `range.len()` blocks from the first block file (blk00000.dat).
-    /// Returns the dense TxIds of all transactions in those blocks, appends
-    /// block boundaries to the internal index, and writes tx pointers to the
-    /// confirmed tx pointer index.
+    /// Returns the dense TxIds of all transactions in those blocks and writes
+    /// tx pointers to the confirmed tx pointer index.
     pub fn parse_blocks(
         &mut self,
         range: std::ops::Range<u64>,
@@ -127,9 +116,6 @@ impl Parser {
                 block_tx_index
                     .append(tx_total as u32)
                     .map_err(BlockFileError::Io)?;
-
-                self.block_index
-                    .push((file_id, block_start_in_file, block_size as u64));
             }
 
             offset = block_end;
@@ -209,6 +195,11 @@ impl Visitor for TxIdCollector<'_> {
             return ControlFlow::Break(());
         }
         let tx_slice = tx.as_ref();
+        let tx_len = tx_slice.len();
+        if tx_len > u32::MAX as usize {
+            self.error = Some(BlockFileError::CorruptId());
+            return ControlFlow::Break(());
+        }
         let offset_in_block = tx_slice.as_ptr() as usize - self.block_slice.as_ptr() as usize;
         let file_offset = self.block_start_in_file + offset_in_block as u64;
         *self.tx_in_total += self.current_in;
@@ -216,6 +207,7 @@ impl Visitor for TxIdCollector<'_> {
         let ptr = TxPtr::new(
             self.block_file.0,
             file_offset as u32,
+            tx_len as u32,
             *self.tx_in_total,
             *self.tx_out_total,
         );

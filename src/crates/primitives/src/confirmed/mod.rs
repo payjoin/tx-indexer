@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::dense::TxId;
 
-const TXPTR_LEN_BYTES: u64 = 24;
+const TXPTR_LEN_BYTES: u64 = 28;
 const BLOCK_TX_END_LEN_BYTES: u64 = 4;
 const LINK_LEN_BYTES: u64 = 8;
 
@@ -17,15 +17,23 @@ pub const INID_NONE: u64 = u64::MAX;
 pub struct TxPtr {
     blk_file_no: u32,
     blk_file_off: u32,
+    tx_len: u32,
     tx_in_end: u64,
     tx_out_end: u64,
 }
 
 impl TxPtr {
-    pub fn new(blk_file_no: u32, blk_file_off: u32, tx_in_end: u64, tx_out_end: u64) -> Self {
+    pub fn new(
+        blk_file_no: u32,
+        blk_file_off: u32,
+        tx_len: u32,
+        tx_in_end: u64,
+        tx_out_end: u64,
+    ) -> Self {
         Self {
             blk_file_no,
             blk_file_off,
+            tx_len,
             tx_in_end,
             tx_out_end,
         }
@@ -39,6 +47,10 @@ impl TxPtr {
         self.blk_file_off
     }
 
+    pub fn tx_len(self) -> u32 {
+        self.tx_len
+    }
+
     pub fn tx_in_end(self) -> u64 {
         self.tx_in_end
     }
@@ -47,23 +59,26 @@ impl TxPtr {
         self.tx_out_end
     }
 
-    fn to_le_bytes(self) -> [u8; 24] {
-        let mut out = [0u8; 24];
+    fn to_le_bytes(self) -> [u8; 28] {
+        let mut out = [0u8; 28];
         out[..4].copy_from_slice(&self.blk_file_no.to_le_bytes());
         out[4..8].copy_from_slice(&self.blk_file_off.to_le_bytes());
-        out[8..16].copy_from_slice(&self.tx_in_end.to_le_bytes());
-        out[16..].copy_from_slice(&self.tx_out_end.to_le_bytes());
+        out[8..12].copy_from_slice(&self.tx_len.to_le_bytes());
+        out[12..20].copy_from_slice(&self.tx_in_end.to_le_bytes());
+        out[20..].copy_from_slice(&self.tx_out_end.to_le_bytes());
         out
     }
 
-    fn from_le_bytes(bytes: [u8; 24]) -> Self {
+    fn from_le_bytes(bytes: [u8; 28]) -> Self {
         let blk_file_no = u32::from_le_bytes(bytes[..4].try_into().expect("slice length"));
         let blk_file_off = u32::from_le_bytes(bytes[4..8].try_into().expect("slice length"));
-        let tx_in_end = u64::from_le_bytes(bytes[8..16].try_into().expect("slice length"));
-        let tx_out_end = u64::from_le_bytes(bytes[16..].try_into().expect("slice length"));
+        let tx_len = u32::from_le_bytes(bytes[8..12].try_into().expect("slice length"));
+        let tx_in_end = u64::from_le_bytes(bytes[12..20].try_into().expect("slice length"));
+        let tx_out_end = u64::from_le_bytes(bytes[20..].try_into().expect("slice length"));
         Self {
             blk_file_no,
             blk_file_off,
+            tx_len,
             tx_in_end,
             tx_out_end,
         }
@@ -111,7 +126,7 @@ impl ConfirmedTxPtrIndex {
         if len_bytes % TXPTR_LEN_BYTES != 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "confirmed tx ptr file length is not a multiple of 8 bytes",
+                "confirmed tx ptr file length is not a multiple of 28 bytes",
             ));
         }
         Ok(Self {
@@ -144,7 +159,7 @@ impl ConfirmedTxPtrIndex {
             return Ok(None);
         }
         let offset = index * TXPTR_LEN_BYTES;
-        let mut buf = [0u8; 24];
+        let mut buf = [0u8; 28];
         self.file.read_exact_at(&mut buf, offset)?;
         Ok(Some(TxPtr::from_le_bytes(buf)))
     }
@@ -332,15 +347,15 @@ mod tests {
     fn append_and_read_round_trip() {
         let path = temp_path();
         let mut index = ConfirmedTxPtrIndex::create(&path).expect("create");
-        let tx0 = index.append(TxPtr::new(1, 10, 3, 5)).expect("append");
-        let tx1 = index.append(TxPtr::new(2, 20, 6, 9)).expect("append");
+        let tx0 = index.append(TxPtr::new(1, 10, 100, 3, 5)).expect("append");
+        let tx1 = index.append(TxPtr::new(2, 20, 200, 6, 9)).expect("append");
 
         assert_eq!(tx0, TxId::new(0));
         assert_eq!(tx1, TxId::new(1));
         assert_eq!(index.len(), 2);
         assert_eq!(
             index.get(TxId::new(0)).expect("get"),
-            Some(TxPtr::new(1, 10, 3, 5))
+            Some(TxPtr::new(1, 10, 100, 3, 5))
         );
 
         drop(index);
@@ -349,7 +364,7 @@ mod tests {
         assert_eq!(reopened.len(), 2);
         assert_eq!(
             reopened.get(TxId::new(1)).expect("get"),
-            Some(TxPtr::new(2, 20, 6, 9))
+            Some(TxPtr::new(2, 20, 200, 6, 9))
         );
 
         let _ = fs::remove_file(&path);
