@@ -9,7 +9,9 @@ use bitcoin::{Address, Amount, Block, BlockHash, Transaction, Txid};
 use corepc_node::{Conf, Node};
 
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::confirmed::{BlockTxIndex, ConfirmedTxPtrIndex};
 use crate::dense::{Parser, TxId};
 
 /// Holds a running regtest node and its wallet RPC client. Dropping stops the node.
@@ -135,10 +137,30 @@ where
 
     // block_count_after is chain height (0-based); we need to parse height+1 blocks to include the tip.
     let num_blocks = out.block_count_after + 1;
-    let mut parser = Parser::new(harness.blocks_dir.clone());
+    let txptr_path = temp_txptr_path();
+    let txptr_index = ConfirmedTxPtrIndex::create(&txptr_path)?;
+    let block_tx_path = temp_block_tx_path();
+    let block_tx_index = BlockTxIndex::create(&block_tx_path)?;
+    let mut parser = Parser::new(harness.blocks_dir.clone(), txptr_index, block_tx_index);
     let txids = parser
         .parse_blocks(0..num_blocks)
         .map_err(|e| anyhow::anyhow!("parse_blocks: {:?}", e))?;
 
     expected(&harness, &mut parser, &out, &txids)
+}
+
+fn temp_txptr_path() -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time went backwards")
+        .as_nanos();
+    std::env::temp_dir().join(format!("confirmed_txptr_{}.bin", nanos))
+}
+
+fn temp_block_tx_path() -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time went backwards")
+        .as_nanos();
+    std::env::temp_dir().join(format!("block_tx_end_{}.bin", nanos))
 }

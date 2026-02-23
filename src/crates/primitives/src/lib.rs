@@ -1,5 +1,6 @@
 pub mod abstract_fingerprints;
 pub mod abstract_types;
+pub mod confirmed;
 pub mod dense;
 pub mod graph_index;
 pub mod loose;
