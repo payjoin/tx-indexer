@@ -3,8 +3,6 @@
 use std::collections::HashSet;
 use std::hash::Hash;
 
-use tx_indexer_primitives::abstract_types::IdFamily;
-
 use crate::engine::EvalContext;
 use crate::expr::Expr;
 use crate::node::{Node, NodeId};
@@ -25,14 +23,14 @@ impl<T: ExprValue, K: Eq + Hash + Clone + Send + Sync + 'static> FilterWithMaskN
     }
 }
 
-impl<I: IdFamily + Send + Sync + 'static> Node for FilterWithMaskNode<TxSet<I>, I::TxId> {
-    type OutputValue = TxSet<I>;
+impl Node for FilterWithMaskNode<TxSet, tx_indexer_primitives::unified::id::AnyTxId> {
+    type OutputValue = TxSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id(), self.mask.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<I::TxId> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashSet<tx_indexer_primitives::unified::id::AnyTxId> {
         let input_set = ctx.get_or_default(&self.input);
         let mask = ctx.get_or_default(&self.mask);
 
@@ -48,14 +46,14 @@ impl<I: IdFamily + Send + Sync + 'static> Node for FilterWithMaskNode<TxSet<I>, 
     }
 }
 
-impl<I: IdFamily + Send + Sync + 'static> Node for FilterWithMaskNode<TxOutSet<I>, I::TxOutId> {
-    type OutputValue = TxOutSet<I>;
+impl Node for FilterWithMaskNode<TxOutSet, tx_indexer_primitives::unified::id::AnyOutId> {
+    type OutputValue = TxOutSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id(), self.mask.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<I::TxOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashSet<tx_indexer_primitives::unified::id::AnyOutId> {
         let input_set = ctx.get_or_default(&self.input);
         let mask = ctx.get_or_default(&self.mask);
 
@@ -72,22 +70,28 @@ impl<I: IdFamily + Send + Sync + 'static> Node for FilterWithMaskNode<TxOutSet<I
 }
 
 // Extension methods on Expr<TxSet>
-impl<I: IdFamily + Send + Sync + 'static> Expr<TxSet<I>> {
+impl Expr<TxSet> {
     /// Filter transactions using a boolean mask.
     ///
     /// Keeps transactions where the mask value is `true`.
-    pub fn filter_with_mask(&self, mask: Expr<Mask<I::TxId>>) -> Expr<TxSet<I>> {
+    pub fn filter_with_mask(
+        &self,
+        mask: Expr<Mask<tx_indexer_primitives::unified::id::AnyTxId>>,
+    ) -> Expr<TxSet> {
         self.ctx
             .register(FilterWithMaskNode::new(self.clone(), mask))
     }
 }
 
 // Extension methods on Expr<TxOutSet>
-impl<I: IdFamily + Send + Sync + 'static> Expr<TxOutSet<I>> {
+impl Expr<TxOutSet> {
     /// Filter transaction outputs using a boolean mask.
     ///
     /// Keeps outputs where the mask value is `true`.
-    pub fn filter_with_mask(&self, mask: Expr<Mask<I::TxOutId>>) -> Expr<TxOutSet<I>> {
+    pub fn filter_with_mask(
+        &self,
+        mask: Expr<Mask<tx_indexer_primitives::unified::id::AnyOutId>>,
+    ) -> Expr<TxOutSet> {
         self.ctx
             .register(FilterWithMaskNode::new(self.clone(), mask))
     }
@@ -106,14 +110,14 @@ impl<T: ExprValue, K: Eq + Hash + Clone + Send + Sync + 'static> FilterExcludeNo
     }
 }
 
-impl<I: IdFamily + Send + Sync + 'static> Node for FilterExcludeNode<TxSet<I>, I::TxId> {
-    type OutputValue = TxSet<I>;
+impl Node for FilterExcludeNode<TxSet, tx_indexer_primitives::unified::id::AnyTxId> {
+    type OutputValue = TxSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id(), self.mask.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<I::TxId> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashSet<tx_indexer_primitives::unified::id::AnyTxId> {
         let input_set = ctx.get(&self.input);
         let mask = ctx.get(&self.mask);
 
@@ -129,14 +133,14 @@ impl<I: IdFamily + Send + Sync + 'static> Node for FilterExcludeNode<TxSet<I>, I
     }
 }
 
-impl<I: IdFamily + Send + Sync + 'static> Node for FilterExcludeNode<TxOutSet<I>, I::TxOutId> {
-    type OutputValue = TxOutSet<I>;
+impl Node for FilterExcludeNode<TxOutSet, tx_indexer_primitives::unified::id::AnyOutId> {
+    type OutputValue = TxOutSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id(), self.mask.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<I::TxOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashSet<tx_indexer_primitives::unified::id::AnyOutId> {
         let input_set = ctx.get(&self.input);
         let mask = ctx.get(&self.mask);
 

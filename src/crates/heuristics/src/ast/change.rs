@@ -5,54 +5,45 @@ use tx_indexer_pipeline::{
     engine::EvalContext,
     expr::Expr,
     node::{Node, NodeId},
-    value::{Index, TxMask, TxOutClustering, TxOutMask, TxOutSet, TxSet},
+    value::{TxMask, TxOutClustering, TxOutMask, TxOutSet, TxSet},
 };
-use tx_indexer_primitives::{
-    abstract_types::{IdFamily, IntoTxHandle, TxInIdOps, TxOutIdOps},
-    graph_index::IndexedGraph,
-};
+use tx_indexer_primitives::unified::id::{AnyOutId, AnyTxId};
 
 /// Node that identifies change outputs in transactions.
 ///
 /// Uses a naive heuristic: the last output of a transaction is assumed to be change.
-pub struct ChangeIdentificationNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> {
-    input: Expr<TxOutSet<I>>,
-    index: Expr<Index<G>>,
+pub struct ChangeIdentificationNode {
+    input: Expr<TxOutSet>,
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> ChangeIdentificationNode<I, G> {
-    pub fn new(input: Expr<TxOutSet<I>>, index: Expr<Index<G>>) -> Self {
-        Self { input, index }
+impl ChangeIdentificationNode {
+    pub fn new(input: Expr<TxOutSet>) -> Self {
+        Self { input }
     }
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for ChangeIdentificationNode<I, G> {
-    type OutputValue = TxOutMask<I>;
+impl Node for ChangeIdentificationNode {
+    type OutputValue = TxOutMask;
 
     fn dependencies(&self) -> Vec<NodeId> {
-        vec![self.input.id(), self.index.id()]
+        vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashMap<I::TxOutId, bool> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashMap<AnyOutId, bool> {
         // Use get_or_default since input might be part of a cycle
         let txouts = ctx.get_or_default(&self.input);
-        let index_handle = ctx.get(&self.index);
-        let index_guard = index_handle.as_arc().read().expect("lock poisoned");
 
         let mut result = HashMap::new();
 
         for output_id in txouts.iter() {
-            let tx_id = output_id.containing_txid();
-            let Some(tx) = index_guard.tx(&tx_id) else {
-                continue;
-            };
+            let tx_id = ctx.unified_storage().txid_for_out(*output_id);
+            let tx = ctx.unified_storage().tx(tx_id);
             let output_count = tx.output_len();
             if output_count == 0 {
                 continue;
             }
 
-            let last_output = tx_id
-                .with_index(&*index_guard)
+            let last_output = tx
                 .outputs()
                 .last()
                 .expect("Tx should have at least one output")
@@ -75,12 +66,9 @@ impl ChangeIdentification {
     /// Identify change outputs in the given transactions.
     ///
     /// Returns a mask over outputs where `true` indicates the output is likely change.
-    pub fn new<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>(
-        input: Expr<TxOutSet<I>>,
-        index: Expr<Index<G>>,
-    ) -> Expr<TxOutMask<I>> {
+    pub fn new(input: Expr<TxOutSet>) -> Expr<TxOutMask> {
         let ctx = input.context().clone();
-        ctx.register(ChangeIdentificationNode::new(input, index))
+        ctx.register(ChangeIdentificationNode::new(input))
     }
 }
 
@@ -92,63 +80,50 @@ impl ChangeIdentification {
 pub struct FingerPrintChangeIdentification;
 
 impl FingerPrintChangeIdentification {
-    pub fn new<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>(
-        input: Expr<TxOutSet<I>>,
-        index: Expr<Index<G>>,
-    ) -> Expr<TxOutMask<I>> {
+    pub fn new(input: Expr<TxOutSet>) -> Expr<TxOutMask> {
         let ctx = input.context().clone();
-        ctx.register(FingerPrintChangeIdentificationNode::new(input, index))
+        ctx.register(FingerPrintChangeIdentificationNode::new(input))
     }
 }
 
-pub struct FingerPrintChangeIdentificationNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>
-{
-    input: Expr<TxOutSet<I>>,
-    index: Expr<Index<G>>,
+pub struct FingerPrintChangeIdentificationNode {
+    input: Expr<TxOutSet>,
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>
-    FingerPrintChangeIdentificationNode<I, G>
-{
-    pub fn new(input: Expr<TxOutSet<I>>, index: Expr<Index<G>>) -> Self {
-        Self { input, index }
+impl FingerPrintChangeIdentificationNode {
+    pub fn new(input: Expr<TxOutSet>) -> Self {
+        Self { input }
     }
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node
-    for FingerPrintChangeIdentificationNode<I, G>
-{
-    type OutputValue = TxOutMask<I>;
+impl Node for FingerPrintChangeIdentificationNode {
+    type OutputValue = TxOutMask;
 
     fn dependencies(&self) -> Vec<NodeId> {
-        vec![self.input.id(), self.index.id()]
+        vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashMap<I::TxOutId, bool> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashMap<AnyOutId, bool> {
         // Use get_or_default since input might be part of a cycle
         let txouts = ctx.get_or_default(&self.input);
-        let index_handle = ctx.get(&self.index);
-        let index_guard = index_handle.as_arc().read().expect("lock poisoned");
 
         let mut result = HashMap::new();
 
         for output_id in txouts.iter() {
-            let tx_id = output_id.containing_txid();
-            let Some(containing_tx) = index_guard.tx(&tx_id) else {
-                continue;
-            };
-            let Some(spending_txin) = index_guard.spending_txin(output_id) else {
-                continue;
-            };
-            let spending_txid = spending_txin.containing_txid();
-            let Some(spending_tx) = index_guard.tx(&spending_txid) else {
-                continue;
-            };
+            let tx_id = ctx.unified_storage().txid_for_out(*output_id);
+            let containing_tx = ctx.unified_storage().tx(tx_id);
 
-            let is_change = if containing_tx.locktime() == 0 && spending_tx.locktime() == 0 {
-                false
-            } else {
-                containing_tx.locktime() > 0 && spending_tx.locktime() > 0
+            let is_change = match ctx.unified_storage().spender_for_out(*output_id) {
+                Some(spending_txin) => {
+                    let spending_txid = ctx.unified_storage().txid_for_in(spending_txin);
+                    let spending_tx = ctx.unified_storage().tx(spending_txid);
+                    if containing_tx.locktime() == 0 && spending_tx.locktime() == 0 {
+                        false
+                    } else {
+                        containing_tx.locktime() > 0 && spending_tx.locktime() > 0
+                    }
+                }
+                None => false, // Unspent output: not change by fingerprint
             };
 
             result.insert(*output_id, is_change);
@@ -166,45 +141,34 @@ impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node
 ///
 /// This is used to gate change clustering - we only cluster change with inputs
 /// if we're confident all inputs belong to the same entity.
-pub struct IsUnilateralNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> {
-    txs: Expr<TxSet<I>>,
-    clustering: Expr<TxOutClustering<I>>,
-    index: Expr<Index<G>>,
+pub struct IsUnilateralNode {
+    txs: Expr<TxSet>,
+    clustering: Expr<TxOutClustering>,
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> IsUnilateralNode<I, G> {
-    pub fn new(
-        txs: Expr<TxSet<I>>,
-        clustering: Expr<TxOutClustering<I>>,
-        index: Expr<Index<G>>,
-    ) -> Self {
-        Self {
-            txs,
-            clustering,
-            index,
-        }
+impl IsUnilateralNode {
+    pub fn new(txs: Expr<TxSet>, clustering: Expr<TxOutClustering>) -> Self {
+        Self { txs, clustering }
     }
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for IsUnilateralNode<I, G> {
-    type OutputValue = TxMask<I>;
+impl Node for IsUnilateralNode {
+    type OutputValue = TxMask;
 
     fn dependencies(&self) -> Vec<NodeId> {
-        vec![self.txs.id(), self.clustering.id(), self.index.id()]
+        vec![self.txs.id(), self.clustering.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashMap<I::TxId, bool> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashMap<AnyTxId, bool> {
         // Use get_or_default for both; txs or clustering may not be ready yet in cyclic pipelines
         let tx_ids = ctx.get_or_default(&self.txs);
         let clustering = ctx.get_or_default(&self.clustering);
-        let index_handle = ctx.get(&self.index);
-        let index_guard = index_handle.as_arc().read().expect("lock poisoned");
 
         let mut result = HashMap::new();
 
         for tx_id in &tx_ids {
-            let tx = tx_id.with_index(&*index_guard);
-            let inputs: Vec<I::TxOutId> = tx.inputs().map(|input| input.prev_txout_id()).collect();
+            let tx = ctx.unified_storage().tx(*tx_id);
+            let inputs: Vec<AnyOutId> = tx.inputs().map(|input| input.prev_txout_id()).collect();
 
             let is_unilateral = if inputs.is_empty() {
                 false // Coinbase - no inputs to cluster
@@ -236,13 +200,9 @@ impl IsUnilateral {
     ///
     /// Takes a set of transactions and a clustering, returns a mask where `true`
     /// indicates all inputs of that transaction are in the same cluster.
-    pub fn with_clustering<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>(
-        txs: Expr<TxSet<I>>,
-        clustering: Expr<TxOutClustering<I>>,
-        index: Expr<Index<G>>,
-    ) -> Expr<TxMask<I>> {
+    pub fn with_clustering(txs: Expr<TxSet>, clustering: Expr<TxOutClustering>) -> Expr<TxMask> {
         let ctx = txs.context().clone();
-        ctx.register(IsUnilateralNode::new(txs, clustering, index))
+        ctx.register(IsUnilateralNode::new(txs, clustering))
     }
 }
 
@@ -250,56 +210,43 @@ impl IsUnilateral {
 ///
 /// For each transaction, if inputs are unilateral (all in same cluster) and has change outputs,
 /// cluster the change outputs with the inputs.
-pub struct ChangeClusteringNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> {
-    txs: Expr<TxSet<I>>,
-    change_mask: Expr<TxOutMask<I>>,
-    index: Expr<Index<G>>,
+pub struct ChangeClusteringNode {
+    txs: Expr<TxSet>,
+    change_mask: Expr<TxOutMask>,
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> ChangeClusteringNode<I, G> {
-    pub fn new(
-        txs: Expr<TxSet<I>>,
-        change_mask: Expr<TxOutMask<I>>,
-        index: Expr<Index<G>>,
-    ) -> Self {
-        Self {
-            txs,
-            change_mask,
-            index,
-        }
+impl ChangeClusteringNode {
+    pub fn new(txs: Expr<TxSet>, change_mask: Expr<TxOutMask>) -> Self {
+        Self { txs, change_mask }
     }
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for ChangeClusteringNode<I, G> {
-    type OutputValue = TxOutClustering<I>;
+impl Node for ChangeClusteringNode {
+    type OutputValue = TxOutClustering;
 
     fn dependencies(&self) -> Vec<NodeId> {
-        vec![self.txs.id(), self.change_mask.id(), self.index.id()]
+        vec![self.txs.id(), self.change_mask.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<I::TxOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> SparseDisjointSet<AnyOutId> {
         // Use get_or_default since txs and change_mask might be part of a cycle
         let tx_ids = ctx.get_or_default(&self.txs);
         let change_mask = ctx.get_or_default(&self.change_mask);
-        let index_handle = ctx.get(&self.index);
-        let index_guard = index_handle.as_arc().read().expect("lock poisoned");
 
         let clustering = SparseDisjointSet::new();
 
         for tx_id in &tx_ids {
-            let tx = tx_id.with_index(&*index_guard);
+            let tx = ctx.unified_storage().tx(*tx_id);
 
-            let first_input: Option<I::TxOutId> =
+            let first_input: Option<AnyOutId> =
                 tx.inputs().next().map(|input| input.prev_txout_id());
 
-            let Some(root_input) = first_input else {
-                continue; // Coinbase
-            };
-
-            for output in tx.outputs() {
-                let txout_id = output.id();
-                if change_mask.get(&txout_id).copied().unwrap_or(false) {
-                    clustering.union(txout_id, root_input);
+            if let Some(root_input) = first_input {
+                for output in tx.outputs() {
+                    let txout_id = output.id();
+                    if change_mask.get(&txout_id).copied().unwrap_or(false) {
+                        clustering.union(txout_id, root_input);
+                    }
                 }
             }
         }
@@ -320,12 +267,8 @@ impl ChangeClustering {
     ///
     /// Takes a set of transactions and a mask identifying change outputs.
     /// Returns a clustering where change outputs are in the same cluster as inputs.
-    pub fn new<I: IdFamily + 'static, G: IndexedGraph<I> + 'static>(
-        txs: Expr<TxSet<I>>,
-        change_mask: Expr<TxOutMask<I>>,
-        index: Expr<Index<G>>,
-    ) -> Expr<TxOutClustering<I>> {
+    pub fn new(txs: Expr<TxSet>, change_mask: Expr<TxOutMask>) -> Expr<TxOutClustering> {
         let ctx = txs.context().clone();
-        ctx.register(ChangeClusteringNode::new(txs, change_mask, index))
+        ctx.register(ChangeClusteringNode::new(txs, change_mask))
     }
 }

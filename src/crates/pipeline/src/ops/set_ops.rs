@@ -7,48 +7,39 @@
 use std::{collections::HashSet, hash::Hash};
 
 use tx_indexer_disjoint_set::SparseDisjointSet;
-use tx_indexer_primitives::{
-    abstract_types::{IdFamily, IntoTxHandle, TxOutIdOps},
-    graph_index::IndexedGraph,
-};
+use tx_indexer_primitives::unified::id::{AnyOutId, AnyTxId};
 
 use crate::{
     engine::EvalContext,
     expr::Expr,
     node::{Node, NodeId},
-    value::{Clustering, Index, TxOutSet, TxSet},
+    value::{Clustering, TxOutSet, TxSet},
 };
 
 /// Node that extracts all TxOut ids from a set of transactions.
-pub struct OutputsNode<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> {
-    input: Expr<TxSet<I>>,
-    index: Expr<Index<G>>,
+pub struct OutputsNode {
+    input: Expr<TxSet>,
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> OutputsNode<I, G> {
-    pub fn new(input: Expr<TxSet<I>>, index: Expr<Index<G>>) -> Self {
-        Self { input, index }
+impl OutputsNode {
+    pub fn new(input: Expr<TxSet>) -> Self {
+        Self { input }
     }
 }
 
-impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for OutputsNode<I, G> {
-    type OutputValue = TxOutSet<I>;
+impl Node for OutputsNode {
+    type OutputValue = TxOutSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
-        vec![self.input.id(), self.index.id()]
+        vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<I::TxOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AnyOutId> {
         let tx_ids = ctx.get_or_default(&self.input);
-        let index_handle = ctx.get(&self.index);
-        let index_guard = index_handle.as_arc().read().expect("lock poisoned");
-
         let mut outputs = HashSet::new();
         for id in tx_ids {
-            let tx = id.with_index(&*index_guard);
-            for output in tx.outputs() {
-                outputs.insert(output.id());
-            }
+            let tx_outputs = ctx.unified_storage().tx_out_ids(id);
+            outputs.extend(tx_outputs);
         }
         outputs
     }
@@ -59,26 +50,29 @@ impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for OutputsNode<I
 }
 
 /// Node that extracts the containing transactions from a set of outputs.
-pub struct TxsNode<I: IdFamily + 'static> {
-    input: Expr<TxOutSet<I>>,
+pub struct TxsNode {
+    input: Expr<TxOutSet>,
 }
 
-impl<I: IdFamily + 'static> TxsNode<I> {
-    pub fn new(input: Expr<TxOutSet<I>>) -> Self {
+impl TxsNode {
+    pub fn new(input: Expr<TxOutSet>) -> Self {
         Self { input }
     }
 }
 
-impl<I: IdFamily + 'static> Node for TxsNode<I> {
-    type OutputValue = TxSet<I>;
+impl Node for TxsNode {
+    type OutputValue = TxSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<I::TxId> {
+    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AnyTxId> {
         let outputs = ctx.get(&self.input);
-        outputs.iter().map(|out| out.containing_txid()).collect()
+        outputs
+            .iter()
+            .map(|out| ctx.unified_storage().txid_for_out(*out))
+            .collect()
     }
 
     fn name(&self) -> &'static str {
@@ -121,22 +115,18 @@ impl<K: Eq + Hash + Copy + Clone + Send + Sync + 'static> Node for JoinClusterin
     }
 }
 
-// Extension methods on Expr<TxSet> (IdFamily-parameterized so I is constrained)
-impl<I: IdFamily + 'static> Expr<TxSet<I>> {
+// Extension methods on Expr<TxSet>
+impl Expr<TxSet> {
     /// Get all outputs of the transactions in this set.
-    pub fn outputs<G: IndexedGraph<I> + 'static>(
-        &self,
-        index: Expr<Index<G>>,
-    ) -> Expr<TxOutSet<I>> {
-        self.ctx
-            .register(OutputsNode::<I, G>::new(self.clone(), index))
+    pub fn outputs(&self) -> Expr<TxOutSet> {
+        self.ctx.register(OutputsNode::new(self.clone()))
     }
 }
 
 // Extension methods on Expr<TxOutSet>
-impl<I: IdFamily + 'static> Expr<TxOutSet<I>> {
+impl Expr<TxOutSet> {
     /// Get the transactions containing these outputs.
-    pub fn txs(&self) -> Expr<TxSet<I>> {
+    pub fn txs(&self) -> Expr<TxSet> {
         self.ctx.register(TxsNode::new(self.clone()))
     }
 }

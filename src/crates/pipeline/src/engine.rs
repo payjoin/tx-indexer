@@ -9,30 +9,36 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tx_indexer_primitives::loose::LooseTx;
+use tx_indexer_primitives::unified::storage::UnifiedStorage;
 
 use crate::context::PipelineContext;
 use crate::expr::Expr;
 use crate::node::NodeId;
-use crate::storage::{BaseFacts, NodeStorage};
+use crate::storage::NodeStorage;
 use crate::value::ExprValue;
 
 pub struct SourceNodeEvalContext<'a> {
-    pub(crate) base_facts: &'a mut BaseFacts<LooseTx>,
+    pub(crate) unified_storage: &'a UnifiedStorage,
+    pub(crate) processed_loose_len: usize,
     #[allow(unused)]
     pub(crate) node_id: NodeId,
 }
 
 impl<'a> SourceNodeEvalContext<'a> {
-    pub fn new(base_facts: &'a mut BaseFacts<LooseTx>, node_id: NodeId) -> Self {
+    pub fn new(
+        unified_storage: &'a UnifiedStorage,
+        processed_loose_len: usize,
+        node_id: NodeId,
+    ) -> Self {
         Self {
-            base_facts,
+            unified_storage,
+            processed_loose_len,
             node_id,
         }
     }
 
-    pub fn take_base_facts(&mut self) -> Option<Vec<Arc<LooseTx>>> {
-        self.base_facts.take_base_facts()
+    pub fn processed_loose_len(&self) -> usize {
+        self.processed_loose_len
     }
 }
 
@@ -43,14 +49,27 @@ impl<'a> SourceNodeEvalContext<'a> {
 /// - The underlying transaction index
 pub struct EvalContext<'a> {
     pub(crate) storage: &'a NodeStorage,
+    pub(crate) unified_storage: &'a UnifiedStorage,
     /// Node id of the node being evaluated.
     pub(crate) node_id: NodeId,
 }
 
 impl<'a> EvalContext<'a> {
     /// Create a new evaluation context.
-    pub fn new(storage: &'a NodeStorage, node_id: NodeId) -> Self {
-        Self { storage, node_id }
+    pub fn new(
+        storage: &'a NodeStorage,
+        unified_storage: &'a UnifiedStorage,
+        node_id: NodeId,
+    ) -> Self {
+        Self {
+            storage,
+            unified_storage,
+            node_id,
+        }
+    }
+
+    pub fn unified_storage(&self) -> &UnifiedStorage {
+        self.unified_storage
     }
 
     /// Get the result of a dependency expression.
@@ -92,7 +111,8 @@ impl<'a> EvalContext<'a> {
 pub struct Engine {
     ctx: Arc<PipelineContext>,
     storage: NodeStorage,
-    base_facts: BaseFacts<LooseTx>,
+    unified_storage: Arc<UnifiedStorage>,
+    source_cursors: HashMap<NodeId, usize>,
     /// Track which iteration each node was last evaluated in (for cycle detection).
     eval_iteration: HashMap<NodeId, usize>,
     iteration: usize,
@@ -101,11 +121,12 @@ pub struct Engine {
 impl Engine {
     /// Create a new engine.
     ///
-    pub fn new(ctx: Arc<PipelineContext>) -> Self {
+    pub fn new(ctx: Arc<PipelineContext>, unified_storage: Arc<UnifiedStorage>) -> Self {
         Self {
             ctx,
             storage: NodeStorage::new(),
-            base_facts: BaseFacts::new(),
+            unified_storage,
+            source_cursors: HashMap::new(),
             eval_iteration: HashMap::new(),
             iteration: 0,
         }
@@ -116,10 +137,6 @@ impl Engine {
         self.storage
             .non_volatile_get::<T>(expr.id())
             .unwrap_or_default()
-    }
-
-    pub fn add_base_facts(&mut self, facts: impl IntoIterator<Item = Arc<LooseTx>>) {
-        self.base_facts.set_base_facts(facts);
     }
 
     /// Evaluate an expression to a single combined value.
@@ -203,7 +220,12 @@ impl Engine {
             None => return, // TODO: panic? This points to a bug
         };
 
-        let mut eval_ctx = SourceNodeEvalContext::new(&mut self.base_facts, id);
+        let total = self.unified_storage.loose_txids_len();
+        let cursor = self.source_cursors.entry(id).or_insert(0);
+        let processed = *cursor;
+        *cursor = total;
+
+        let mut eval_ctx = SourceNodeEvalContext::new(&self.unified_storage, processed, id);
         let result = node.evaluate_any(&mut eval_ctx);
         self.storage.append(id, result);
     }
@@ -283,7 +305,7 @@ impl Engine {
             return false;
         }
 
-        let eval_ctx = EvalContext::new(&self.storage, id);
+        let eval_ctx = EvalContext::new(&self.storage, &self.unified_storage, id);
         let previous = self.storage.get_last(id);
         let (result, changed) = node.evaluate_any(&eval_ctx, previous);
 

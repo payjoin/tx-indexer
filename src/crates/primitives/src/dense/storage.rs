@@ -210,11 +210,19 @@ impl DenseStorage {
         (txid, vout as u32)
     }
 
+    pub fn txid_for_out(&self, out_id: TxOutId) -> TxId {
+        self.txid_and_vout_for_out(out_id).0
+    }
+
     fn txid_and_vin_for_in(&self, in_id: TxInId) -> (TxId, u32) {
         let txid = self.upper_bound_tx_in(in_id.index());
         let (start, _end) = self.tx_in_range(txid);
         let vin = in_id.index() - start;
         (txid, vin as u32)
+    }
+
+    pub fn txid_for_in(&self, in_id: TxInId) -> TxId {
+        self.txid_and_vin_for_in(in_id).0
     }
 
     pub fn prevout_for_in(&self, in_id: TxInId) -> Option<TxOutId> {

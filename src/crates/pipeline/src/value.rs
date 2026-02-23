@@ -6,10 +6,9 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::marker::PhantomData;
-use std::sync::{Arc, RwLock};
 
 use tx_indexer_disjoint_set::SparseDisjointSet;
-use tx_indexer_primitives::abstract_types::IdFamily;
+use tx_indexer_primitives::unified::id::{AnyOutId, AnyTxId};
 
 /// Trait for types that can be the value of an expression.
 ///
@@ -80,128 +79,12 @@ where
     }
 }
 
-/// Marker type for an index handle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Index<G>(PhantomData<G>);
-
-#[derive(Debug)]
-// TODO: lock seems unnecessary here as writing is only happening during index building.
-pub struct IndexHandle<G>(Option<Arc<RwLock<G>>>);
-
-impl<G> Clone for IndexHandle<G> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-impl<G> Default for IndexHandle<G> {
-    fn default() -> Self {
-        Self(None)
-    }
-}
-
-impl<G> PartialEq for IndexHandle<G> {
-    fn eq(&self, other: &Self) -> bool {
-        match (&self.0, &other.0) {
-            (Some(left), Some(right)) => Arc::ptr_eq(left, right),
-            (None, None) => true,
-            _ => false,
-        }
-    }
-}
-
-impl<G> Eq for IndexHandle<G> {}
-
-impl<G> IndexHandle<G> {
-    pub fn new(index: Arc<RwLock<G>>) -> Self {
-        Self(Some(index))
-    }
-
-    pub fn as_arc(&self) -> &Arc<RwLock<G>> {
-        self.0.as_ref().expect("index handle not initialized")
-    }
-}
-
-impl<G> ExprValue for Index<G>
-where
-    G: Send + Sync + 'static,
-{
-    type Output = IndexHandle<G>;
-
-    fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
-        (*facts.last().expect("no fact present")).clone()
-    }
-}
-
-/// Marker type for a source bundle (index + tx set).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SourceOutput<I, G>(PhantomData<(I, G)>);
-
-#[derive(Debug)]
-pub struct SourceOutputData<I: IdFamily, G> {
-    pub index: IndexHandle<G>,
-    pub txs: HashSet<I::TxId>,
-}
-
-impl<I: IdFamily, G> Clone for SourceOutputData<I, G>
-where
-    I::TxId: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            index: self.index.clone(),
-            txs: self.txs.clone(),
-        }
-    }
-}
-
-impl<I: IdFamily, G> PartialEq for SourceOutputData<I, G>
-where
-    I::TxId: Eq,
-{
-    fn eq(&self, other: &Self) -> bool {
-        self.index == other.index && self.txs == other.txs
-    }
-}
-
-impl<I: IdFamily, G> Eq for SourceOutputData<I, G> where I::TxId: Eq {}
-
-// TODO: index shouldnot impl Default
-impl<I: IdFamily, G> Default for SourceOutputData<I, G> {
-    fn default() -> Self {
-        Self {
-            index: IndexHandle::default(),
-            txs: HashSet::new(),
-        }
-    }
-}
-
-impl<I, G> ExprValue for SourceOutput<I, G>
-where
-    I: IdFamily + 'static,
-    G: Send + Sync + 'static,
-    I::TxId: Eq + Hash + Clone + Send + Sync + 'static,
-{
-    type Output = SourceOutputData<I, G>;
-
-    fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
-        facts
-            .last()
-            .map(|r| (*r).clone())
-            .unwrap_or_else(Self::Output::default)
-    }
-}
-
 // Value Type Aliases for convenience
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TransactionSet<I: IdFamily>(PhantomData<I>);
+pub struct TransactionSet;
 
-impl<I> ExprValue for TransactionSet<I>
-where
-    I: IdFamily + 'static,
-    I::TxId: Eq + Hash + Clone + Send + Sync + 'static,
-{
-    type Output = HashSet<I::TxId>;
+impl ExprValue for TransactionSet {
+    type Output = HashSet<AnyTxId>;
 
     fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
         if facts.is_empty() {
@@ -216,14 +99,10 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TransactionOutSet<I: IdFamily>(PhantomData<I>);
+pub struct TransactionOutSet;
 
-impl<I> ExprValue for TransactionOutSet<I>
-where
-    I: IdFamily + 'static,
-    I::TxOutId: Eq + Hash + Clone + Send + Sync + 'static,
-{
-    type Output = HashSet<I::TxOutId>;
+impl ExprValue for TransactionOutSet {
+    type Output = HashSet<AnyOutId>;
 
     fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
         if facts.is_empty() {
@@ -237,8 +116,8 @@ where
     }
 }
 
-pub type TxSet<I> = TransactionSet<I>;
-pub type TxOutSet<I> = TransactionOutSet<I>;
-pub type TxMask<I> = Mask<<I as IdFamily>::TxId>;
-pub type TxOutMask<I> = Mask<<I as IdFamily>::TxOutId>;
-pub type TxOutClustering<I> = Clustering<<I as IdFamily>::TxOutId>;
+pub type TxSet = TransactionSet;
+pub type TxOutSet = TransactionOutSet;
+pub type TxMask = Mask<AnyTxId>;
+pub type TxOutMask = Mask<AnyOutId>;
+pub type TxOutClustering = Clustering<AnyOutId>;

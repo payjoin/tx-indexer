@@ -4,6 +4,7 @@ pub mod confirmed;
 pub mod dense;
 pub mod graph_index;
 pub mod loose;
+pub mod unified;
 
 #[cfg(test)]
 pub mod integration;
@@ -20,9 +21,10 @@ pub mod test_utils {
         abstract_fingerprints::HasNLockTime,
         abstract_types::{
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
-            EnumerateSpentTxOuts, IdFamily, OutputCount, TxConstituent,
+            EnumerateSpentTxOuts, OutputCount, TxConstituent,
         },
-        loose::{LooseIds, TxId, TxOutId},
+        loose::{TxId, TxOutId},
+        unified::id::{AnyOutId, AnyTxId},
     };
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -63,17 +65,16 @@ pub mod test_utils {
     }
 
     impl AbstractTxIn for DummyTxInWrapper {
-        type I = LooseIds;
-        fn prev_txid(&self) -> <Self::I as IdFamily>::TxId {
-            self.prev_txid
+        fn prev_txid(&self) -> AnyTxId {
+            AnyTxId::from(self.prev_txid)
         }
 
         fn prev_vout(&self) -> u32 {
             self.prev_vout
         }
 
-        fn prev_txout_id(&self) -> TxOutId {
-            TxOutId::new(self.prev_txid, self.prev_vout)
+        fn prev_txout_id(&self) -> AnyOutId {
+            AnyOutId::from(TxOutId::new(self.prev_txid, self.prev_vout))
         }
     }
 
@@ -112,9 +113,8 @@ pub mod test_utils {
     }
 
     impl AbstractTxOut for DummyTxOutData {
-        type I = LooseIds;
-        fn id(&self) -> <Self::I as IdFamily>::TxOutId {
-            TxOutId::new(self.containing_txid, self.vout)
+        fn id(&self) -> AnyOutId {
+            AnyOutId::from(TxOutId::new(self.containing_txid, self.vout))
         }
 
         fn value(&self) -> Amount {
@@ -127,32 +127,31 @@ pub mod test_utils {
     }
 
     impl AbstractTransaction for DummyTxData {
-        type I = LooseIds;
-        fn id(&self) -> <Self::I as IdFamily>::TxId {
-            self.id
+        fn id(&self) -> AnyTxId {
+            AnyTxId::from(self.id)
         }
 
-        fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn<I = Self::I>>> + '_> {
+        fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn>> + '_> {
             // Collect into a vector to avoid lifetime issues
-            let inputs: Vec<Box<dyn AbstractTxIn<I = Self::I>>> = self
+            let inputs: Vec<Box<dyn AbstractTxIn>> = self
                 .spent_coins
                 .iter()
                 .map(|spent| {
                     Box::new(DummyTxInWrapper {
                         prev_txid: spent.txid(),
                         prev_vout: spent.vout(),
-                    }) as Box<dyn AbstractTxIn<I = Self::I>>
+                    }) as Box<dyn AbstractTxIn>
                 })
                 .collect();
             Box::new(inputs.into_iter())
         }
 
-        fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut<I = Self::I>>> + '_> {
+        fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut>> + '_> {
             // Collect into a vector to avoid lifetime issues
-            let outputs: Vec<Box<dyn AbstractTxOut<I = Self::I>>> = self
+            let outputs: Vec<Box<dyn AbstractTxOut>> = self
                 .outputs
                 .iter()
-                .map(|output| Box::new(output.clone()) as Box<dyn AbstractTxOut<I = Self::I>>)
+                .map(|output| Box::new(output.clone()) as Box<dyn AbstractTxOut>)
                 .collect();
             Box::new(outputs.into_iter())
         }
@@ -161,10 +160,10 @@ pub mod test_utils {
             self.outputs.len()
         }
 
-        fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut<I = Self::I>>> {
+        fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>> {
             self.outputs
                 .get(index)
-                .map(|output| Box::new(output.clone()) as Box<dyn AbstractTxOut<I = Self::I>>)
+                .map(|output| Box::new(output.clone()) as Box<dyn AbstractTxOut>)
         }
 
         fn locktime(&self) -> u32 {
@@ -185,12 +184,12 @@ pub mod test_utils {
     }
 
     impl EnumerateSpentTxOuts for DummyTxData {
-        fn spent_coins(&self) -> impl Iterator<Item = TxOutId> {
-            self.spent_coins.iter().copied()
+        fn spent_coins(&self) -> impl Iterator<Item = AnyOutId> {
+            self.spent_coins.iter().copied().map(AnyOutId::from)
         }
     }
 
-    impl From<DummyTxData> for Box<dyn AbstractTransaction<I = LooseIds> + Send + Sync> {
+    impl From<DummyTxData> for Box<dyn AbstractTransaction + Send + Sync> {
         fn from(val: DummyTxData) -> Self {
             Box::new(val)
         }

@@ -17,7 +17,7 @@
 //! let non_coinjoin = all_txs.filter_with_mask(is_coinjoin_mask.negate());
 //!
 //! // Lazy evaluation - nothing runs until eval() is called
-//! let mut engine = Engine::new(&ctx, index);
+//! let mut engine = Engine::new(ctx.clone(), unified_storage);
 //! engine.run_to_fixpoint();
 //! ```
 

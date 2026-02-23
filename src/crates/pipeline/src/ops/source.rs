@@ -1,56 +1,39 @@
 //! Source operations for the pipeline DSL.
 //!
-//! Source nodes produce values from external data (the index) rather than
-//! transforming other expressions.
+//! Source nodes produce values from external data rather than transforming
+//! other expressions.
 
 use std::collections::HashSet;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
-use tx_indexer_primitives::loose;
-use tx_indexer_primitives::loose::LooseIds;
-use tx_indexer_primitives::loose::storage::InMemoryIndex;
+use tx_indexer_primitives::unified::id::AnyTxId;
 
 use crate::context::PipelineContext;
 use crate::engine::SourceNodeEvalContext;
 use crate::expr::Expr;
 use crate::node::{Node, NodeId, SourceNode};
-use crate::value::{Index, IndexHandle, SourceOutput, SourceOutputData, TxSet};
+use crate::value::TxSet;
 
-/// Node that returns the source output (index + all known transaction IDs).
+/// Node that returns all newly observed loose transaction IDs.
 pub struct AllLooseTxsNode {
-    index: Arc<RwLock<InMemoryIndex>>,
+    _marker: Arc<()>,
 }
 
 impl AllLooseTxsNode {
-    pub fn new(index: Arc<RwLock<InMemoryIndex>>) -> Self {
-        Self { index }
+    pub fn new(marker: Arc<()>) -> Self {
+        Self { _marker: marker }
     }
 }
 
 impl SourceNode for AllLooseTxsNode {
-    type OutputValue = SourceOutput<LooseIds, InMemoryIndex>;
+    type OutputValue = TxSet;
 
-    fn evaluate(
-        &self,
-        ctx: &mut SourceNodeEvalContext<'_>,
-    ) -> SourceOutputData<LooseIds, InMemoryIndex> {
-        let base_tx_facts = ctx.take_base_facts();
-        let txs = if let Some(base_tx_facts) = base_tx_facts {
-            let mut res = HashSet::new();
-            let mut index = self.index.write().expect("lock poisoned");
-            for tx in base_tx_facts {
-                res.insert(tx.id());
-                index.add_tx(tx);
-            }
-            res
-        } else {
-            HashSet::new()
-        };
-
-        SourceOutputData {
-            index: IndexHandle::new(Arc::clone(&self.index)),
-            txs,
-        }
+    fn evaluate(&self, ctx: &mut SourceNodeEvalContext<'_>) -> HashSet<AnyTxId> {
+        let start = ctx.processed_loose_len();
+        ctx.unified_storage
+            .loose_txids_from(start)
+            .into_iter()
+            .collect()
     }
 
     fn name(&self) -> &'static str {
@@ -58,51 +41,25 @@ impl SourceNode for AllLooseTxsNode {
     }
 }
 
-pub struct SourceIndexNode {
-    source: Expr<SourceOutput<LooseIds, InMemoryIndex>>,
-}
-
-impl SourceIndexNode {
-    pub fn new(source: Expr<SourceOutput<LooseIds, InMemoryIndex>>) -> Self {
-        Self { source }
-    }
-}
-
-impl Node for SourceIndexNode {
-    type OutputValue = Index<InMemoryIndex>;
-
-    fn dependencies(&self) -> Vec<NodeId> {
-        vec![self.source.id()]
-    }
-
-    fn evaluate(&self, ctx: &crate::engine::EvalContext) -> IndexHandle<InMemoryIndex> {
-        ctx.get(&self.source).index.clone()
-    }
-
-    fn name(&self) -> &'static str {
-        "SourceIndex"
-    }
-}
-
 pub struct SourceTxsNode {
-    source: Expr<SourceOutput<LooseIds, InMemoryIndex>>,
+    source: Expr<TxSet>,
 }
 
 impl SourceTxsNode {
-    pub fn new(source: Expr<SourceOutput<LooseIds, InMemoryIndex>>) -> Self {
+    pub fn new(source: Expr<TxSet>) -> Self {
         Self { source }
     }
 }
 
 impl Node for SourceTxsNode {
-    type OutputValue = TxSet<LooseIds>;
+    type OutputValue = TxSet;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.source.id()]
     }
 
-    fn evaluate(&self, ctx: &crate::engine::EvalContext) -> HashSet<loose::TxId> {
-        ctx.get(&self.source).txs.clone()
+    fn evaluate(&self, ctx: &crate::engine::EvalContext) -> HashSet<AnyTxId> {
+        ctx.get(&self.source).clone()
     }
 
     fn name(&self) -> &'static str {
@@ -112,26 +69,18 @@ impl Node for SourceTxsNode {
 
 /// Factory for creating source expressions.
 pub struct AllLooseTxs {
-    txs: Expr<TxSet<LooseIds>>,
-    index: Expr<Index<InMemoryIndex>>,
+    txs: Expr<TxSet>,
 }
 
 impl AllLooseTxs {
-    /// Create source expressions for the index and all known transaction IDs.
+    /// Create source expressions for all known transaction IDs.
     pub fn new(ctx: &Arc<PipelineContext>) -> Self {
-        let source = ctx.register_source(AllLooseTxsNode::new(Arc::new(RwLock::new(
-            InMemoryIndex::new(),
-        ))));
+        let source = ctx.register_source(AllLooseTxsNode::new(Arc::new(())));
         let txs = ctx.register(SourceTxsNode::new(source.clone()));
-        let index = ctx.register(SourceIndexNode::new(source));
-        Self { txs, index }
+        Self { txs }
     }
 
-    pub fn txs(&self) -> Expr<TxSet<LooseIds>> {
+    pub fn txs(&self) -> Expr<TxSet> {
         self.txs.clone()
-    }
-
-    pub fn index(&self) -> Expr<Index<InMemoryIndex>> {
-        self.index.clone()
     }
 }

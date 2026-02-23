@@ -39,11 +39,11 @@ mod tests {
     #[test]
     fn test_is_coinjoin_tx() {
         let not_coinjoin = DummyTxData {
-            id: TxId(0),
+            id: TxId(1),
             outputs: vec![
-                DummyTxOutData::new_with_amount(100, 0, TxId(0)),
-                DummyTxOutData::new_with_amount(200, 1, TxId(0)),
-                DummyTxOutData::new_with_amount(300, 2, TxId(0)),
+                DummyTxOutData::new_with_amount(100, 0, TxId(1)),
+                DummyTxOutData::new_with_amount(200, 1, TxId(1)),
+                DummyTxOutData::new_with_amount(300, 2, TxId(1)),
             ],
             spent_coins: vec![],
             n_locktime: 0,
@@ -51,17 +51,17 @@ mod tests {
         assert!(!NaiveCoinjoinDetection::is_coinjoin(&not_coinjoin));
 
         let coinjoin = DummyTxData {
-            id: TxId(1),
+            id: TxId(2),
             outputs: vec![
-                DummyTxOutData::new_with_amount(100, 0, TxId(1)),
-                DummyTxOutData::new_with_amount(100, 1, TxId(1)),
-                DummyTxOutData::new_with_amount(100, 2, TxId(1)),
-                DummyTxOutData::new_with_amount(200, 3, TxId(1)),
-                DummyTxOutData::new_with_amount(200, 4, TxId(1)),
-                DummyTxOutData::new_with_amount(200, 5, TxId(1)),
-                DummyTxOutData::new_with_amount(300, 6, TxId(1)),
-                DummyTxOutData::new_with_amount(300, 7, TxId(1)),
-                DummyTxOutData::new_with_amount(300, 8, TxId(1)),
+                DummyTxOutData::new_with_amount(100, 0, TxId(2)),
+                DummyTxOutData::new_with_amount(100, 1, TxId(2)),
+                DummyTxOutData::new_with_amount(100, 2, TxId(2)),
+                DummyTxOutData::new_with_amount(200, 3, TxId(2)),
+                DummyTxOutData::new_with_amount(200, 4, TxId(2)),
+                DummyTxOutData::new_with_amount(200, 5, TxId(2)),
+                DummyTxOutData::new_with_amount(300, 6, TxId(2)),
+                DummyTxOutData::new_with_amount(300, 7, TxId(2)),
+                DummyTxOutData::new_with_amount(300, 8, TxId(2)),
             ],
             spent_coins: vec![],
             n_locktime: 0,
