@@ -1,4 +1,4 @@
-use tx_indexer_disjoint_set::{DisJointSet, SparseDisjointSet};
+use tx_indexer_disjoint_set::SparseDisjointSet;
 use tx_indexer_pipeline::{
     engine::EvalContext,
     expr::Expr,
@@ -43,14 +43,8 @@ impl<I: IdFamily + 'static, G: IndexedGraph<I> + 'static> Node for MultiInputHeu
 
         for tx_id in &tx_ids {
             let tx = tx_id.with_index(&*index_guard);
-            let coins: Vec<I::TxOutId> = tx.inputs().map(|input| input.prev_txout_id()).collect();
-            if coins.len() > 1 {
-                let set = SparseDisjointSet::new();
-                for i in 1..coins.len() {
-                    set.union(coins[0], coins[i]);
-                }
-                clustering = clustering.join(&set);
-            }
+            let set = crate::common_input::MultiInputHeuristic::merge_prevouts(&tx);
+            clustering = clustering.join(&set);
         }
 
         clustering
