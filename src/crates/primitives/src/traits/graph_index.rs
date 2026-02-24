@@ -1,6 +1,6 @@
 use crate::{
     ScriptPubkeyHash,
-    abstract_types::AbstractTransaction,
+    traits::abstract_types::AbstractTransaction,
     unified::id::{AnyInId, AnyOutId, AnyTxId},
 };
 

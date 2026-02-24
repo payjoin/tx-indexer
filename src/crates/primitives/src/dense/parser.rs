@@ -7,6 +7,7 @@ use bitcoin_slices::bitcoin_hashes::Hash;
 use bitcoin_slices::{Visit, Visitor, bsl};
 
 use bitcoin::hashes::Hash as _;
+use bitcoin::hashes::hash160::Hash as Hash160;
 use core::ops::ControlFlow;
 
 use super::{BlockFileId, TxId};
@@ -14,6 +15,8 @@ use crate::confirmed::{
     BlockTxIndex, ConfirmedTxPtrIndex, INID_NONE, InPrevoutIndex, OUTID_NONE, OutSpentByIndex,
     TxPtr,
 };
+use crate::traits::storage::ScriptPubkeyDb;
+use crate::{ScriptPubkeyHash, dense::TxOutId};
 
 /// Block file layout: 4-byte magic + 4-byte block size (LE) + block payload.
 /// Block 0 starts at offset 8.
@@ -55,6 +58,7 @@ impl Parser {
         block_tx_index: &mut BlockTxIndex,
         in_prevout_index: &mut InPrevoutIndex,
         out_spent_index: &mut OutSpentByIndex,
+        spk_db: &mut Box<dyn ScriptPubkeyDb<Error = std::io::Error> + Send + Sync>,
     ) -> Result<HashMap<bitcoin::Txid, TxId>, BlockFileError> {
         let file_id = BlockFileId(0);
         let path = self.block_file_path(file_id);
@@ -103,6 +107,7 @@ impl Parser {
                     current_out: 0,
                     in_prevout_index,
                     out_spent_index,
+                    spk_db,
                 };
                 bsl::Block::visit(block_slice, &mut collector)
                     .map_err(|e| BlockFileError::Parse(e))?;
@@ -141,6 +146,7 @@ struct TxIdCollector<'a> {
     current_out: u64,
     in_prevout_index: &'a mut InPrevoutIndex,
     out_spent_index: &'a mut OutSpentByIndex,
+    spk_db: &'a mut Box<dyn ScriptPubkeyDb<Error = std::io::Error> + Send + Sync>,
 }
 
 impl Visitor for TxIdCollector<'_> {
@@ -176,7 +182,7 @@ impl Visitor for TxIdCollector<'_> {
         ControlFlow::Continue(())
     }
 
-    fn visit_tx_out(&mut self, _vout: usize, _tx_out: &bsl::TxOut<'_>) -> ControlFlow<()> {
+    fn visit_tx_out(&mut self, _vout: usize, tx_out: &bsl::TxOut<'_>) -> ControlFlow<()> {
         let out_id = *self.tx_out_total + self.current_out;
         if let Err(err) = self.out_spent_index.append(INID_NONE) {
             self.error = Some(BlockFileError::Io(err));
@@ -184,6 +190,11 @@ impl Visitor for TxIdCollector<'_> {
         }
         if out_id != self.out_spent_index.len() - 1 {
             self.error = Some(BlockFileError::CorruptId());
+            return ControlFlow::Break(());
+        }
+        let spk_hash = script_pubkey_hash(tx_out.script_pubkey());
+        if let Err(err) = self.spk_db.insert_if_absent(spk_hash, TxOutId::new(out_id)) {
+            self.error = Some(BlockFileError::SpkDb(err));
             return ControlFlow::Break(());
         }
         self.current_out += 1;
@@ -275,11 +286,17 @@ fn tx_out_range_for(txid: TxId, txptr_index: &ConfirmedTxPtrIndex) -> (u64, u64)
     }
 }
 
+fn script_pubkey_hash(script_pubkey: &[u8]) -> ScriptPubkeyHash {
+    let hash = Hash160::hash(script_pubkey);
+    hash.to_byte_array()
+}
+
 #[derive(Debug)]
 pub enum BlockFileError {
     Io(std::io::Error),
     UnexpectedEof { offset: usize, len: usize },
     Parse(bitcoin_slices::Error),
+    SpkDb(std::io::Error),
     CorruptId(),
 }
 
@@ -291,6 +308,7 @@ impl std::fmt::Display for BlockFileError {
                 write!(f, "unexpected eof at offset {} (len {})", offset, len)
             }
             BlockFileError::Parse(e) => write!(f, "parse: {:?}", e),
+            BlockFileError::SpkDb(e) => write!(f, "spk db: {:?}", e),
             BlockFileError::CorruptId() => write!(f, "corrupt id"),
         }
     }
@@ -302,6 +320,7 @@ impl std::error::Error for BlockFileError {
             BlockFileError::Io(e) => Some(e),
             BlockFileError::Parse(_)
             | BlockFileError::UnexpectedEof { .. }
+            | BlockFileError::SpkDb(_)
             | BlockFileError::CorruptId() => None,
         }
     }
@@ -310,7 +329,8 @@ impl std::error::Error for BlockFileError {
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use bitcoin::Amount;
+    use bitcoin::{Amount, hashes::Hash};
+    use std::sync::{Arc, Mutex};
 
     use crate::{
         dense::TxOutId,
@@ -528,6 +548,61 @@ mod tests {
                         assert_eq!(storage.spender_for_out(out_id), Some(*in_id));
                     }
                 }
+
+                Ok(())
+            },
+        )
+    }
+
+    #[test]
+    fn integration_spk_index_lookup() -> Result<()> {
+        let spk_hash = Arc::new(Mutex::new(None));
+
+        run_harness(
+            |harness| {
+                let address = harness.client().new_address()?;
+                let coinbase_addr = harness.client().new_address()?;
+                let spk = address.script_pubkey();
+                let hash = spk.script_hash();
+                let mut bytes = [0u8; 20];
+                bytes.copy_from_slice(&hash.to_raw_hash()[..]);
+                *spk_hash.lock().expect("lock poisoned") = Some(bytes);
+
+                harness.generate_blocks(1, &coinbase_addr)?;
+                let txid = harness.send_to_address(&address, Amount::from_sat(30_000))?;
+                harness.generate_blocks(1, &coinbase_addr)?;
+                let count = harness.get_block_count()?;
+
+                Ok(HarnessOut {
+                    expected_txids: vec![txid],
+                    block_count_after: count,
+                })
+            },
+            |harness, storage, out, dense_txids| {
+                let txid = out.expected_txids[0];
+                let dense_id = dense_txids
+                    .get(&txid)
+                    .ok_or_else(|| anyhow::anyhow!("no dense TxId for {}", txid))?;
+                let tx = harness.get_raw_transaction(txid)?;
+                let (start, _end) = storage.tx_out_range(*dense_id);
+
+                let target_spk = spk_hash
+                    .lock()
+                    .expect("lock poisoned")
+                    .expect("spk hash set");
+                let vout = tx
+                    .output
+                    .iter()
+                    .position(|output| {
+                        *output.script_pubkey.script_hash().as_byte_array() == target_spk
+                    })
+                    .ok_or_else(|| anyhow::anyhow!("no matching output for spk hash"))?;
+                let expected = TxOutId::new(start + vout as u64);
+
+                let got = storage
+                    .script_pubkey_to_txout_id(&target_spk)
+                    .map_err(|e| anyhow::anyhow!("spk lookup failed: {:?}", e))?;
+                assert_eq!(got, Some(expected));
 
                 Ok(())
             },

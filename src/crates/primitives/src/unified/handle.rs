@@ -1,6 +1,8 @@
 use crate::{
-    abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut},
-    graph_index::IndexedGraph,
+    traits::{
+        abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut},
+        graph_index::IndexedGraph,
+    },
     unified::id::AnyTxId,
 };
 

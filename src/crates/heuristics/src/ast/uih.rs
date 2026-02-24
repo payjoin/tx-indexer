@@ -192,10 +192,10 @@ mod tests {
 
     use tx_indexer_pipeline::{context::PipelineContext, engine::Engine, ops::source::AllLooseTxs};
     use tx_indexer_primitives::{
-        abstract_types::AbstractTransaction,
         loose::storage::LooseIndexBuilder,
         loose::{TxId, TxOutId},
         test_utils::{DummyTxData, DummyTxOutData},
+        traits::abstract_types::AbstractTransaction,
         unified::id::{AnyOutId, AnyTxId},
         unified::storage::UnifiedStorageBuilder,
     };

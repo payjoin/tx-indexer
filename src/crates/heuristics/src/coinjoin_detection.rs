@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use tx_indexer_primitives::abstract_types::EnumerateOutputValueInArbitraryOrder;
+use tx_indexer_primitives::traits::abstract_types::EnumerateOutputValueInArbitraryOrder;
 
 #[derive(Debug, PartialEq, Eq)]
 // TODO: use this instead of bool

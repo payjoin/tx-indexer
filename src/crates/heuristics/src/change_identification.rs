@@ -1,6 +1,6 @@
 use tx_indexer_primitives::{
-    abstract_fingerprints::HasNLockTime,
-    abstract_types::{OutputCount, TxConstituent},
+    traits::abstract_fingerprints::HasNLockTime,
+    traits::abstract_types::{OutputCount, TxConstituent},
 };
 
 #[derive(Debug, PartialEq, Eq)]

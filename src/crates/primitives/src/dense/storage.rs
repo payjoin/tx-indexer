@@ -11,6 +11,7 @@ use crate::confirmed::{
     BlockTxIndex, ConfirmedTxPtrIndex, INID_NONE, InPrevoutIndex, OUTID_NONE, OutSpentByIndex,
     TxPtr,
 };
+use crate::traits::storage::ScriptPubkeyDb;
 
 pub struct IndexPaths {
     pub txptr: PathBuf,
@@ -25,12 +26,14 @@ pub struct DenseStorage {
     block_tx_index: BlockTxIndex,
     in_prevout_index: InPrevoutIndex,
     out_spent_index: OutSpentByIndex,
+    spk_db: Box<dyn ScriptPubkeyDb<Error = std::io::Error> + Send + Sync>,
 }
 
 pub fn build_indices(
     blocks_dir: impl Into<PathBuf>,
     range: std::ops::Range<u64>,
     paths: IndexPaths,
+    mut spk_db: Box<dyn ScriptPubkeyDb<Error = std::io::Error> + Send + Sync>,
 ) -> Result<(DenseStorage, HashMap<bitcoin::Txid, TxId>), BlockFileError> {
     let mut parser = Parser::new(blocks_dir);
     let mut txptr_index = ConfirmedTxPtrIndex::create(&paths.txptr).map_err(BlockFileError::Io)?;
@@ -45,6 +48,7 @@ pub fn build_indices(
         &mut block_tx_index,
         &mut in_prevout_index,
         &mut out_spent_index,
+        &mut spk_db,
     )?;
     let storage = DenseStorage {
         blocks_dir: parser.blocks_dir().to_path_buf(),
@@ -52,6 +56,7 @@ pub fn build_indices(
         block_tx_index,
         in_prevout_index,
         out_spent_index,
+        spk_db,
     };
     Ok((storage, txids))
 }
@@ -341,13 +346,14 @@ impl DenseStorage {
         let (start, end) = self.tx_out_range(txid);
         (start..end).map(TxOutId::new).collect()
     }
-}
 
-#[allow(unused)]
-fn extract_script_pubkey_hash(script: &bitcoin::ScriptBuf) -> ScriptPubkeyHash {
-    let script_hash = script.script_hash();
-
-    let mut hash = [0u8; 20];
-    hash.copy_from_slice(&script_hash.to_raw_hash()[..]);
-    hash
+    /// Return the first dense TxOutId that uses the given script pubkey hash.
+    pub fn script_pubkey_to_txout_id(
+        &self,
+        script_pubkey: &ScriptPubkeyHash,
+    ) -> Result<Option<TxOutId>, BlockFileError> {
+        self.spk_db
+            .get(script_pubkey)
+            .map_err(BlockFileError::SpkDb)
+    }
 }

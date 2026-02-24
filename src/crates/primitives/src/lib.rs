@@ -1,9 +1,7 @@
-pub mod abstract_fingerprints;
-pub mod abstract_types;
 pub mod confirmed;
 pub mod dense;
-pub mod graph_index;
 pub mod loose;
+pub mod traits;
 pub mod unified;
 
 #[cfg(test)]
@@ -18,12 +16,12 @@ pub mod test_utils {
 
     use crate::{
         ScriptPubkeyHash,
-        abstract_fingerprints::HasNLockTime,
-        abstract_types::{
+        loose::{TxId, TxOutId},
+        traits::abstract_fingerprints::HasNLockTime,
+        traits::abstract_types::{
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
             EnumerateSpentTxOuts, OutputCount, TxConstituent,
         },
-        loose::{TxId, TxOutId},
         unified::id::{AnyOutId, AnyTxId},
     };
 

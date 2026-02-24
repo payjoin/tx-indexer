@@ -1,8 +1,8 @@
 use crate::{
     ScriptPubkeyHash,
-    abstract_types::AbstractTransaction,
-    graph_index::{IndexedGraph, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex},
     loose::{TxId, TxInId, TxOutId},
+    traits::abstract_types::AbstractTransaction,
+    traits::graph_index::{IndexedGraph, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex},
     unified::{
         handle::TxHandle,
         id::{AnyInId, AnyOutId, AnyTxId},

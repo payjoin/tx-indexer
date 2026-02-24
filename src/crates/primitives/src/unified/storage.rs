@@ -6,6 +6,7 @@ use crate::{
         self,
         storage::{InMemoryIndex, LooseIndexBuilder},
     },
+    traits::storage::ScriptPubkeyDb,
     unified::id::{AnyInId, AnyOutId, AnyTxId},
 };
 
@@ -13,6 +14,7 @@ pub struct DenseBuildSpec {
     pub blocks_dir: PathBuf,
     pub range: Range<u64>,
     pub paths: IndexPaths,
+    pub spk_db: Box<dyn ScriptPubkeyDb<Error = std::io::Error> + Send + Sync>,
 }
 
 pub struct UnifiedStorageBuilder {
@@ -41,7 +43,8 @@ impl UnifiedStorageBuilder {
     // TODO: specific error for unified storage
     pub fn build(self) -> Result<UnifiedStorageBuild, BlockFileError> {
         let (dense, dense_txids) = if let Some(spec) = self.dense {
-            let (storage, txids) = build_indices(spec.blocks_dir, spec.range, spec.paths)?;
+            let (storage, txids) =
+                build_indices(spec.blocks_dir, spec.range, spec.paths, spec.spk_db)?;
             (Some(storage), Some(txids))
         } else {
             (None, None)
@@ -191,7 +194,7 @@ impl UnifiedStorage {
     pub fn tx(
         &self,
         txid: AnyTxId,
-    ) -> std::sync::Arc<dyn crate::abstract_types::AbstractTransaction + Send + Sync> {
+    ) -> std::sync::Arc<dyn crate::traits::abstract_types::AbstractTransaction + Send + Sync> {
         if let Some(loose_txid) = txid.loose_txid() {
             let loose = self
                 .loose
@@ -210,14 +213,19 @@ impl UnifiedStorage {
         &self,
         script_pubkey: &crate::ScriptPubkeyHash,
     ) -> Option<AnyOutId> {
-        let loose = self
-            .loose
-            .as_ref()
-            .expect("loose storage missing for script pubkey index");
-        loose
-            .spk_to_txout_ids
-            .get(script_pubkey)
-            .copied()
-            .map(AnyOutId::from)
+        if let Some(loose) = self.loose.as_ref() {
+            if let Some(out_id) = loose.spk_to_txout_ids.get(script_pubkey).copied() {
+                return Some(AnyOutId::from(out_id));
+            }
+        }
+
+        if let Some(dense) = self.dense.as_ref() {
+            // TODO: handle error
+            return dense
+                .script_pubkey_to_txout_id(script_pubkey)
+                .unwrap_or(None)
+                .map(AnyOutId::from);
+        }
+        None
     }
 }

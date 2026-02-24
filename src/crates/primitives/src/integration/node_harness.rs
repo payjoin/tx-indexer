@@ -147,7 +147,8 @@ where
         in_prevout: temp_in_prevout_path(),
         out_spent: temp_out_spent_path(),
     };
-    let (storage, txids) = build_indices(harness.blocks_dir.clone(), 0..num_blocks, paths)
+    let spk_db = Box::new(crate::traits::storage::InMemoryScriptPubkeyDb::new());
+    let (storage, txids) = build_indices(harness.blocks_dir.clone(), 0..num_blocks, paths, spk_db)
         .map_err(|e| anyhow::anyhow!("parse_blocks: {:?}", e))?;
 
     expected(&harness, &storage, &out, &txids)
