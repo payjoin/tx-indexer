@@ -1,8 +1,5 @@
-use crate::{
-    ScriptPubkeyHash,
-    traits::abstract_types::AbstractTransaction,
-    unified::id::{AnyInId, AnyOutId, AnyTxId},
-};
+use crate::traits::abstract_types::AbstractTransaction;
+use crate::{AnyInId, AnyOutId, AnyTxId, ScriptPubkeyHash};
 
 pub trait PrevOutIndex {
     // TODO: consider handle wrappers converting ids to the actual types.

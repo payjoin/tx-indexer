@@ -10,13 +10,16 @@ use bitcoin::hashes::Hash as _;
 use bitcoin::hashes::hash160::Hash as Hash160;
 use core::ops::ControlFlow;
 
-use super::{BlockFileId, TxId};
-use crate::confirmed::{
-    BlockTxIndex, ConfirmedTxPtrIndex, INID_NONE, InPrevoutIndex, OUTID_NONE, OutSpentByIndex,
-    TxPtr,
+use crate::{
+    ScriptPubkeyHash,
+    dense::{BlockFileId, TxId, TxOutId},
+    indecies::{
+        BlockTxIndex, ConfirmedTxPtrIndex, INID_NONE, InPrevoutIndex, OUTID_NONE, OutSpentByIndex,
+        TxPtr,
+    },
+    sled::spk_db::{SledScriptPubkeyDb, SledScriptPubkeyDbError},
+    traits::ScriptPubkeyDb,
 };
-use crate::traits::storage::ScriptPubkeyDb;
-use crate::{ScriptPubkeyHash, dense::TxOutId};
 
 /// Block file layout: 4-byte magic + 4-byte block size (LE) + block payload.
 /// Block 0 starts at offset 8.
@@ -58,7 +61,7 @@ impl Parser {
         block_tx_index: &mut BlockTxIndex,
         in_prevout_index: &mut InPrevoutIndex,
         out_spent_index: &mut OutSpentByIndex,
-        spk_db: &mut Box<dyn ScriptPubkeyDb<Error = std::io::Error> + Send + Sync>,
+        spk_db: &mut SledScriptPubkeyDb,
     ) -> Result<HashMap<bitcoin::Txid, TxId>, BlockFileError> {
         let file_id = BlockFileId(0);
         let path = self.block_file_path(file_id);
@@ -146,7 +149,7 @@ struct TxIdCollector<'a> {
     current_out: u64,
     in_prevout_index: &'a mut InPrevoutIndex,
     out_spent_index: &'a mut OutSpentByIndex,
-    spk_db: &'a mut Box<dyn ScriptPubkeyDb<Error = std::io::Error> + Send + Sync>,
+    spk_db: &'a mut SledScriptPubkeyDb,
 }
 
 impl Visitor for TxIdCollector<'_> {
@@ -297,7 +300,7 @@ pub enum BlockFileError {
     Io(std::io::Error),
     UnexpectedEof { offset: usize, len: usize },
     Parse(bitcoin_slices::Error),
-    SpkDb(std::io::Error),
+    SpkDb(SledScriptPubkeyDbError),
     CorruptId(),
 }
 

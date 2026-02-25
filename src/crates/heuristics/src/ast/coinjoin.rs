@@ -6,7 +6,7 @@ use tx_indexer_pipeline::{
     node::{Node, NodeId},
     value::{Mask, TxSet},
 };
-use tx_indexer_primitives::unified::id::AnyTxId;
+use tx_indexer_primitives::unified::AnyTxId;
 
 use crate::coinjoin_detection::NaiveCoinjoinDetection;
 

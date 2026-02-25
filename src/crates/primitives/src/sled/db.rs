@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::spk_db::{SPK_TREE_NAME, SledScriptPubkeyDb};
+use crate::sled::spk_db::{SPK_TREE_NAME, SledScriptPubkeyDb};
 use sled::Db;
 
 pub struct SledDBFactory {

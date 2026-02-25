@@ -1,5 +1,5 @@
 use tx_indexer_disjoint_set::{DisJointSet, SparseDisjointSet};
-use tx_indexer_primitives::{traits::abstract_types::EnumerateSpentTxOuts, unified::id::AnyOutId};
+use tx_indexer_primitives::{traits::abstract_types::EnumerateSpentTxOuts, unified::AnyOutId};
 
 pub struct MultiInputHeuristic;
 
@@ -23,7 +23,7 @@ mod tests {
     use tx_indexer_primitives::{
         loose::{TxId, TxOutId},
         test_utils::{DummyTxData, DummyTxOutData},
-        unified::id::AnyOutId,
+        unified::AnyOutId,
     };
 
     use super::MultiInputHeuristic;

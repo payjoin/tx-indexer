@@ -7,7 +7,7 @@ use tx_indexer_pipeline::{
     node::{Node, NodeId},
     value::{TxMask, TxOutClustering, TxOutMask, TxOutSet, TxSet},
 };
-use tx_indexer_primitives::unified::id::{AnyOutId, AnyTxId};
+use tx_indexer_primitives::unified::{AnyOutId, AnyTxId};
 
 /// Node that identifies change outputs in transactions.
 ///

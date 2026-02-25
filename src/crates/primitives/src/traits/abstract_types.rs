@@ -2,10 +2,7 @@ use std::sync::Arc;
 
 use bitcoin::Amount;
 
-use crate::{
-    ScriptPubkeyHash,
-    unified::id::{AnyOutId, AnyTxId},
-};
+use crate::{AnyOutId, AnyTxId, ScriptPubkeyHash};
 
 // Should be implemented by any type that is contained within a transaction.
 pub trait TxConstituent {

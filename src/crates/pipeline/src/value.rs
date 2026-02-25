@@ -8,7 +8,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 
 use tx_indexer_disjoint_set::SparseDisjointSet;
-use tx_indexer_primitives::unified::id::{AnyOutId, AnyTxId};
+use tx_indexer_primitives::unified::{AnyOutId, AnyTxId};
 
 /// Trait for types that can be the value of an expression.
 ///

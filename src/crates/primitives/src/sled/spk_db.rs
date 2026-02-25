@@ -1,5 +1,6 @@
+use crate::traits::ScriptPubkeyDb;
+use crate::{ScriptPubkeyHash, dense::TxOutId};
 use sled::{IVec, Tree};
-use tx_indexer_primitives::{ScriptPubkeyHash, dense::TxOutId, traits::storage::ScriptPubkeyDb};
 
 pub const SPK_TREE_NAME: &str = "script_pubkey_index";
 const OUT_ID_LEN: usize = 8;
@@ -94,7 +95,6 @@ impl ScriptPubkeyDb for SledScriptPubkeyDb {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tx_indexer_primitives::dense::TxOutId;
 
     fn temp_tree() -> (tempfile::TempDir, Tree) {
         let dir = tempfile::tempdir().unwrap();

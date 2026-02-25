@@ -13,7 +13,7 @@ use tx_indexer_pipeline::{
     node::{Node, NodeId},
     value::{TxMask, TxOutSet, TxSet},
 };
-use tx_indexer_primitives::unified::id::{AnyOutId, AnyTxId};
+use tx_indexer_primitives::unified::{AnyOutId, AnyTxId};
 
 /// Node that implements UIH1 (Optimal change heuristic).
 ///
@@ -192,12 +192,11 @@ mod tests {
 
     use tx_indexer_pipeline::{context::PipelineContext, engine::Engine, ops::source::AllLooseTxs};
     use tx_indexer_primitives::{
-        loose::storage::LooseIndexBuilder,
-        loose::{TxId, TxOutId},
+        UnifiedStorageBuilder,
+        loose::{LooseIndexBuilder, TxId, TxOutId},
         test_utils::{DummyTxData, DummyTxOutData},
         traits::abstract_types::AbstractTransaction,
-        unified::id::{AnyOutId, AnyTxId},
-        unified::storage::UnifiedStorageBuilder,
+        unified::{AnyOutId, AnyTxId},
     };
 
     use super::{UnnecessaryInputHeuristic1, UnnecessaryInputHeuristic2};
@@ -214,8 +213,7 @@ mod tests {
         let unified = UnifiedStorageBuilder::new()
             .with_loose(builder)
             .build()
-            .expect("build unified storage")
-            .storage;
+            .expect("build unified storage");
         Engine::new(ctx, Arc::new(unified))
     }
 

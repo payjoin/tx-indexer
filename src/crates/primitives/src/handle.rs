@@ -1,18 +1,20 @@
 use crate::{
+    AnyTxId,
     traits::{
         abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut},
         graph_index::IndexedGraph,
     },
-    unified::id::AnyTxId,
 };
 
 /// Handle for a transaction in a unified index.
 pub struct TxHandle<'a> {
     tx_id: AnyTxId,
     index: &'a dyn IndexedGraph,
+    // TODO: in the dense case we could cache the tx data
 }
 
 impl<'a> TxHandle<'a> {
+    // TODO: should only be able to create handles using `with()`
     pub fn new(tx_id: AnyTxId, index: &'a dyn IndexedGraph) -> Self {
         Self { tx_id, index }
     }

@@ -7,7 +7,7 @@
 use std::{collections::HashSet, hash::Hash};
 
 use tx_indexer_disjoint_set::SparseDisjointSet;
-use tx_indexer_primitives::unified::id::{AnyOutId, AnyTxId};
+use tx_indexer_primitives::unified::{AnyOutId, AnyTxId};
 
 use crate::{
     engine::EvalContext,

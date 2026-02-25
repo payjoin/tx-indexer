@@ -4,10 +4,8 @@ mod tests {
     use bitcoin::{Amount, hashes::Hash};
     use std::sync::{Arc, Mutex};
 
-    use crate::{
-        dense::TxOutId,
-        integration::{HarnessOut, run_harness},
-    };
+    use crate::dense::TxOutId;
+    use crate::integration::{HarnessOut, run_harness};
 
     #[test]
     fn integration_mine_empty_block() -> Result<()> {

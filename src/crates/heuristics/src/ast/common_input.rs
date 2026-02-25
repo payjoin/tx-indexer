@@ -5,7 +5,7 @@ use tx_indexer_pipeline::{
     node::{Node, NodeId},
     value::{TxOutClustering, TxSet},
 };
-use tx_indexer_primitives::unified::id::AnyOutId;
+use tx_indexer_primitives::unified::AnyOutId;
 
 /// Node that implements the Multi-Input Heuristic.
 ///

@@ -6,7 +6,7 @@ use tx_indexer_pipeline::{
 };
 
 use tx_indexer_disjoint_set::{DisJointSet, SparseDisjointSet};
-use tx_indexer_primitives::unified::id::AnyOutId;
+use tx_indexer_primitives::unified::AnyOutId;
 
 pub struct SameAddressClusteringNode {
     txs: Expr<TxSet>,
@@ -63,13 +63,13 @@ mod tests {
 
     use super::*;
     use tx_indexer_pipeline::{Engine, PipelineContext, ops::AllLooseTxs};
+    use tx_indexer_primitives::UnifiedStorageBuilder;
+    use tx_indexer_primitives::loose::LooseIndexBuilder;
     use tx_indexer_primitives::{
-        loose::storage::LooseIndexBuilder,
         loose::{TxId, TxOutId},
         test_utils::{DummyTxData, DummyTxOutData},
         traits::abstract_types::AbstractTransaction,
-        unified::id::AnyOutId,
-        unified::storage::UnifiedStorageBuilder,
+        unified::AnyOutId,
     };
 
     fn setup_test_fixture() -> Vec<Arc<dyn AbstractTransaction + Send + Sync>> {
@@ -135,8 +135,7 @@ mod tests {
         let unified = UnifiedStorageBuilder::new()
             .with_loose(builder)
             .build()
-            .expect("build unified storage")
-            .storage;
+            .expect("build unified storage");
         Engine::new(ctx, Arc::new(unified))
     }
 

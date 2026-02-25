@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use tx_indexer_primitives::unified::id::AnyTxId;
+use tx_indexer_primitives::unified::AnyTxId;
 
 use crate::context::PipelineContext;
 use crate::engine::SourceNodeEvalContext;

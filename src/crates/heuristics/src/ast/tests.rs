@@ -6,12 +6,12 @@ pub(crate) mod tests {
     use tx_indexer_disjoint_set::DisJointSet;
     use tx_indexer_pipeline::{context::PipelineContext, engine::Engine, ops::source::AllLooseTxs};
     use tx_indexer_primitives::{
-        loose::storage::LooseIndexBuilder,
+        UnifiedStorageBuilder,
+        loose::LooseIndexBuilder,
         loose::{TxId, TxOutId},
         test_utils::{DummyTxData, DummyTxOutData},
         traits::abstract_types::AbstractTransaction,
-        unified::id::{AnyOutId, AnyTxId},
-        unified::storage::UnifiedStorageBuilder,
+        unified::{AnyOutId, AnyTxId},
     };
 
     use crate::ast::{
@@ -90,8 +90,7 @@ pub(crate) mod tests {
         let unified = UnifiedStorageBuilder::new()
             .with_loose(builder)
             .build()
-            .expect("build unified storage")
-            .storage;
+            .expect("build unified storage");
         Engine::new(ctx, Arc::new(unified))
     }
 
@@ -336,8 +335,7 @@ pub(crate) mod tests {
         let unified = UnifiedStorageBuilder::new()
             .with_loose(builder)
             .build()
-            .expect("build unified storage")
-            .storage;
+            .expect("build unified storage");
         let mut engine = Engine::new(ctx.clone(), Arc::new(unified));
 
         let source = AllLooseTxs::new(&ctx);
@@ -398,8 +396,7 @@ pub(crate) mod tests {
         let unified = UnifiedStorageBuilder::new()
             .with_loose(builder)
             .build()
-            .expect("build unified storage")
-            .storage;
+            .expect("build unified storage");
         let mut engine = Engine::new(ctx.clone(), Arc::new(unified));
 
         let source = AllLooseTxs::new(&ctx);

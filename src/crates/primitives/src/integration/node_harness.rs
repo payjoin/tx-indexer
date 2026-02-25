@@ -11,7 +11,10 @@ use corepc_node::{Conf, Node};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::dense::{DenseStorage, IndexPaths, TxId, build_indices};
+use crate::dense::TxId;
+
+use crate::dense::build_indices;
+use crate::sled::db::SledDBFactory;
 
 /// Holds a running regtest node and its wallet RPC client. Dropping stops the node.
 pub struct NodeHarness {
@@ -111,7 +114,7 @@ where
     A: FnOnce(&mut NodeHarness) -> Result<HarnessOut>,
     E: FnOnce(
         &NodeHarness,
-        &DenseStorage,
+        &crate::dense::DenseStorage,
         &HarnessOut,
         &HashMap<bitcoin::Txid, TxId>,
     ) -> Result<()>,
@@ -141,13 +144,13 @@ where
 
     // block_count_after is chain height (0-based); we need to parse height+1 blocks to include the tip.
     let num_blocks = out.block_count_after + 1;
-    let paths = IndexPaths {
+    let paths = crate::dense::IndexPaths {
         txptr: temp_txptr_path(),
         block_tx: temp_block_tx_path(),
         in_prevout: temp_in_prevout_path(),
         out_spent: temp_out_spent_path(),
     };
-    let spk_db = Box::new(crate::traits::storage::InMemoryScriptPubkeyDb::new());
+    let spk_db = SledDBFactory::open(std::env::temp_dir())?.spk_db()?;
     let (storage, txids) = build_indices(harness.blocks_dir.clone(), 0..num_blocks, paths, spk_db)
         .map_err(|e| anyhow::anyhow!("parse_blocks: {:?}", e))?;
 

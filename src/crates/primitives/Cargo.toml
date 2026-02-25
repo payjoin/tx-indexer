@@ -4,15 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bitcoin = {workspace = true}
+sled = "0.34"
 bitcoin_slices = { version = "0.7.0", features = ["bitcoin"] }
+bitcoin = { workspace = true }
 
 [dev-dependencies]
+tempfile = "3"
 anyhow = "1.0"
 bitcoin-test-data = "0.2.0"
 corepc-node = { version = "0.10", features = ["download", "22_1"] }
 criterion = "0.5"
 
 [[bench]]
-name = "dense_parser"
+name = "parser"
 harness = false

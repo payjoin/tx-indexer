@@ -1,16 +1,18 @@
 use bitcoin_test_data::blocks::mainnet_702861;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use std::fs::{self, File};
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use tx_indexer_primitives::confirmed::{
-    BlockTxIndex, ConfirmedTxPtrIndex, InPrevoutIndex, OutSpentByIndex,
+use std::{
+    fs::{self, File},
+    io::Write,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
-use tx_indexer_primitives::dense::Parser;
-use tx_indexer_primitives::dense::storage::IndexPaths;
-use tx_indexer_primitives::traits::storage::{InMemoryScriptPubkeyDb, ScriptPubkeyDb};
+
+use tx_indexer_primitives::{
+    dense::IndexPaths,
+    indecies::{BlockTxIndex, ConfirmedTxPtrIndex, InPrevoutIndex, OutSpentByIndex},
+    parser::Parser,
+    sled::db::SledDBFactory,
+};
 
 fn temp_dir(prefix: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -55,8 +57,10 @@ fn bench_parse_mainnet_702861(c: &mut Criterion) {
                 let mut block_tx_index = BlockTxIndex::create(&paths.block_tx).unwrap();
                 let mut in_prevout_index = InPrevoutIndex::create(&paths.in_prevout).unwrap();
                 let mut out_spent_index = OutSpentByIndex::create(&paths.out_spent).unwrap();
-                let mut spk_db: Box<dyn ScriptPubkeyDb<Error = std::io::Error> + Send + Sync> =
-                    Box::new(InMemoryScriptPubkeyDb::new());
+                let mut spk_db = SledDBFactory::open(std::env::temp_dir())
+                    .unwrap()
+                    .spk_db()
+                    .unwrap();
 
                 parser
                     .parse_blocks(
