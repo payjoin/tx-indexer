@@ -9,4 +9,10 @@ bitcoin_slices = { version = "0.7.0", features = ["bitcoin"] }
 
 [dev-dependencies]
 anyhow = "1.0"
+bitcoin-test-data = "0.2.0"
 corepc-node = { version = "0.10", features = ["download", "22_1"] }
+criterion = "0.5"
+
+[[bench]]
+name = "dense_parser"
+harness = false
