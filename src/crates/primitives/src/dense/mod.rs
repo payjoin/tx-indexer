@@ -11,6 +11,7 @@ pub struct BlockFileId(pub u32);
 
 #[repr(transparent)]
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Ord, PartialOrd)]
+/// The i-th transaction in chain order.
 pub struct TxId(pub u32);
 
 impl TxId {
@@ -25,6 +26,7 @@ impl TxId {
 
 #[repr(transparent)]
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Ord, PartialOrd)]
+/// The i-th output in chain order.
 pub struct TxOutId(pub u64);
 
 impl TxOutId {
@@ -39,6 +41,7 @@ impl TxOutId {
 
 #[repr(transparent)]
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Ord, PartialOrd)]
+/// The i-th input in chain order.
 pub struct TxInId(pub u64);
 
 impl TxInId {

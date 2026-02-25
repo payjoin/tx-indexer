@@ -117,39 +117,45 @@ impl DenseStorage {
         }
     }
 
-    pub fn block_of_tx(&self, txid: TxId) -> u64 {
-        let target = txid.index();
+    /// Returns the smallest index `i` in `0..len` such that `value_at(i) > target`, or `None` if none.
+    fn upper_bound(len: u64, target: u64, value_at: impl Fn(u64) -> u64) -> Option<u64> {
         let mut lo = 0u64;
-        let mut hi = self.block_tx_index.len();
+        let mut hi = len;
         while lo < hi {
             let mid = lo + (hi - lo) / 2;
-            let mid_end = self
-                .block_tx_index
-                .get(mid)
+            if value_at(mid) > target {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        if lo >= len { None } else { Some(lo) }
+    }
+
+    pub fn block_of_tx(&self, txid: TxId) -> u64 {
+        let target = txid.index() as u64;
+        let len = self.block_tx_index.len();
+        let value_at = |i: u64| {
+            self.block_tx_index
+                .get(i)
                 .unwrap_or_else(|e| {
                     panic!(
                         "Corrupted data store: error reading block tx index: {:?}",
                         e
                     )
                 })
-                .unwrap_or_else(|| {
-                    panic!("Corrupted data store: block height out of range: {}", mid)
-                });
-            if mid_end > target {
-                hi = mid;
-            } else {
-                lo = mid + 1;
-            }
-        }
-        if lo >= self.block_tx_index.len() {
+                .unwrap_or_else(|| panic!("Corrupted data store: block height out of range: {}", i))
+                as u64
+        };
+        Self::upper_bound(len, target, value_at).unwrap_or_else(|| {
             panic!(
                 "Corrupted data store: txid out of range for block index: {}",
                 target
-            );
-        }
-        lo
+            )
+        })
     }
 
+    /// Return the range of TxInIds for the given transaction.
     pub fn tx_in_range(&self, txid: TxId) -> (u64, u64) {
         let end = self.tx_ptr(txid).tx_in_end();
         if txid.index() == 0 {
@@ -160,6 +166,7 @@ impl DenseStorage {
         }
     }
 
+    /// Return the range of TxOutIds for the given transaction.
     pub fn tx_out_range(&self, txid: TxId) -> (u64, u64) {
         let end = self.tx_ptr(txid).tx_out_end();
         if txid.index() == 0 {
@@ -170,64 +177,37 @@ impl DenseStorage {
         }
     }
 
-    fn upper_bound_tx_out(&self, out_id: u64) -> TxId {
-        let mut lo = 0u64;
-        let mut hi = self.txptr_index.len();
-        while lo < hi {
-            let mid = lo + (hi - lo) / 2;
-            let mid_id = TxId::new(mid as u32);
-            let mid_end = self.tx_ptr(mid_id).tx_out_end();
-            if mid_end > out_id {
-                hi = mid;
-            } else {
-                lo = mid + 1;
-            }
-        }
-        if lo >= self.txptr_index.len() {
-            panic!("Corrupted data store: output id out of range: {}", out_id);
-        }
+    /// Return the transaction id for the given TxOutId.
+    pub fn txid_for_out(&self, out_id: TxOutId) -> TxId {
+        let len = self.txptr_index.len();
+        let value_at = |i: u64| self.tx_ptr(TxId::new(i as u32)).tx_out_end();
+        let lo = Self::upper_bound(len, out_id.index(), value_at).unwrap_or_else(|| {
+            panic!("Corrupted data store: output id out of range: {:?}", out_id)
+        });
         TxId::new(lo as u32)
     }
 
-    fn upper_bound_tx_in(&self, in_id: u64) -> TxId {
-        let mut lo = 0u64;
-        let mut hi = self.txptr_index.len();
-        while lo < hi {
-            let mid = lo + (hi - lo) / 2;
-            let mid_id = TxId::new(mid as u32);
-            let mid_end = self.tx_ptr(mid_id).tx_in_end();
-            if mid_end > in_id {
-                hi = mid;
-            } else {
-                lo = mid + 1;
-            }
-        }
-        if lo >= self.txptr_index.len() {
-            panic!("Corrupted data store: input id out of range: {}", in_id);
-        }
+    /// Return the transaction id for the given TxInId.
+    pub fn txid_for_in(&self, in_id: TxInId) -> TxId {
+        let len = self.txptr_index.len();
+        let value_at = |i: u64| self.tx_ptr(TxId::new(i as u32)).tx_in_end();
+        let lo = Self::upper_bound(len, in_id.index(), value_at)
+            .unwrap_or_else(|| panic!("Corrupted data store: input id out of range: {:?}", in_id));
         TxId::new(lo as u32)
     }
 
     fn txid_and_vout_for_out(&self, out_id: TxOutId) -> (TxId, u32) {
-        let txid = self.upper_bound_tx_out(out_id.index());
+        let txid = self.txid_for_out(out_id);
         let (start, _end) = self.tx_out_range(txid);
         let vout = out_id.index() - start;
         (txid, vout as u32)
     }
 
-    pub fn txid_for_out(&self, out_id: TxOutId) -> TxId {
-        self.txid_and_vout_for_out(out_id).0
-    }
-
     fn txid_and_vin_for_in(&self, in_id: TxInId) -> (TxId, u32) {
-        let txid = self.upper_bound_tx_in(in_id.index());
+        let txid = self.txid_for_in(in_id);
         let (start, _end) = self.tx_in_range(txid);
         let vin = in_id.index() - start;
         (txid, vin as u32)
-    }
-
-    pub fn txid_for_in(&self, in_id: TxInId) -> TxId {
-        self.txid_and_vin_for_in(in_id).0
     }
 
     pub fn prevout_for_in(&self, in_id: TxInId) -> Option<TxOutId> {

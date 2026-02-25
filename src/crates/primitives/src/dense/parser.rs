@@ -156,6 +156,7 @@ impl Visitor for TxIdCollector<'_> {
         let out_id = if is_null_prevout(prevout) {
             OUTID_NONE
         } else {
+            // TODO: this serialization is stricly unnecessary
             let mut bytes = [0u8; 32];
             bytes.copy_from_slice(prevout.txid());
             let prev_txid = bitcoin::Txid::from_byte_array(bytes);
