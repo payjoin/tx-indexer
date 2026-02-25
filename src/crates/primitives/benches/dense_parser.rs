@@ -9,8 +9,8 @@ use tx_indexer_primitives::confirmed::{
     BlockTxIndex, ConfirmedTxPtrIndex, InPrevoutIndex, OutSpentByIndex,
 };
 use tx_indexer_primitives::dense::Parser;
-use tx_indexer_primitives::dense::spk_db::{InMemoryScriptPubkeyDb, ScriptPubkeyDb};
 use tx_indexer_primitives::dense::storage::IndexPaths;
+use tx_indexer_primitives::traits::storage::{InMemoryScriptPubkeyDb, ScriptPubkeyDb};
 
 fn temp_dir(prefix: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -55,7 +55,7 @@ fn bench_parse_mainnet_702861(c: &mut Criterion) {
                 let mut block_tx_index = BlockTxIndex::create(&paths.block_tx).unwrap();
                 let mut in_prevout_index = InPrevoutIndex::create(&paths.in_prevout).unwrap();
                 let mut out_spent_index = OutSpentByIndex::create(&paths.out_spent).unwrap();
-                let mut spk_db: Box<dyn ScriptPubkeyDb + Send + Sync> =
+                let mut spk_db: Box<dyn ScriptPubkeyDb<Error = std::io::Error> + Send + Sync> =
                     Box::new(InMemoryScriptPubkeyDb::new());
 
                 parser
