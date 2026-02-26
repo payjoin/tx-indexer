@@ -80,6 +80,7 @@ impl Expr<TxSet> {
         self.ctx
             .register(FilterWithMaskNode::new(self.clone(), mask))
     }
+    // TODO filter with any predicate
 }
 
 // Extension methods on Expr<TxOutSet>
@@ -91,6 +92,7 @@ impl Expr<TxOutSet> {
         self.ctx
             .register(FilterWithMaskNode::new(self.clone(), mask))
     }
+    // TODO filter with any predicate
 }
 
 /// Node that filters a set by excluding items where mask is true.

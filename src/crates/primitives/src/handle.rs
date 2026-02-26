@@ -13,10 +13,42 @@ pub struct TxHandle<'a> {
     // TODO: in the dense case we could cache the tx data
 }
 
-/// Handle for a transaction input in a unified index.
-pub struct TxInHandle<'a> {
-    pub(crate) in_id: AnyInId,
-    pub(crate) index: &'a dyn IndexedGraph,
+impl<'a> TxHandle<'a> {
+    pub fn id(&self) -> AnyTxId {
+        self.tx_id
+    }
+
+    pub fn output_at(&self, index: usize) -> TxOutHandle<'a> {
+        TxOutHandle {
+            out_id: self
+                .index
+                .tx_out_ids(&self.tx_id)
+                .get(index)
+                .copied()
+                .unwrap(),
+            index: self.index,
+        }
+    }
+
+    pub fn inputs(&self) -> impl Iterator<Item = TxInHandle<'a>> {
+        self.index
+            .tx_in_ids(&self.tx_id)
+            .into_iter()
+            .map(|in_id| TxInHandle {
+                in_id,
+                index: self.index,
+            })
+    }
+
+    pub fn outputs(&self) -> impl Iterator<Item = TxOutHandle<'a>> {
+        self.index
+            .tx_out_ids(&self.tx_id)
+            .into_iter()
+            .map(|out_id| TxOutHandle {
+                out_id,
+                index: self.index,
+            })
+    }
 }
 
 /// Handle for a transaction output in a unified index.
@@ -25,10 +57,21 @@ pub struct TxOutHandle<'a> {
     pub(crate) index: &'a dyn IndexedGraph,
 }
 
-impl<'a> TxHandle<'a> {
-    pub fn id(&self) -> AnyTxId {
-        self.tx_id
+impl<'a> TxOutHandle<'a> {
+    pub fn id(&self) -> AnyOutId {
+        self.out_id
     }
+
+    // TODO: seperate methods
+    fn output_data(&self) -> (bitcoin::Amount, crate::ScriptPubkeyHash) {
+        self.index.tx_out_data(&self.out_id)
+    }
+}
+
+/// Handle for a transaction input in a unified index.
+pub struct TxInHandle<'a> {
+    pub(crate) in_id: AnyInId,
+    pub(crate) index: &'a dyn IndexedGraph,
 }
 
 impl<'a> TxInHandle<'a> {
@@ -37,21 +80,7 @@ impl<'a> TxInHandle<'a> {
     }
 }
 
-impl<'a> TxOutHandle<'a> {
-    pub fn id(&self) -> AnyOutId {
-        self.out_id
-    }
-
-    fn output_data(&self) -> (bitcoin::Amount, crate::ScriptPubkeyHash) {
-        self.index.tx_out_data(&self.out_id)
-    }
-}
-
 impl<'a> AbstractTransaction for TxHandle<'a> {
-    fn id(&self) -> AnyTxId {
-        self.tx_id
-    }
-
     fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn + '_>> + '_> {
         let input_ids = self.index.tx_in_ids(&self.tx_id);
         let inputs: Vec<_> = input_ids
@@ -118,10 +147,6 @@ impl<'a> AbstractTxIn for TxInHandle<'a> {
 }
 
 impl<'a> AbstractTxOut for TxOutHandle<'a> {
-    fn id(&self) -> AnyOutId {
-        self.out_id
-    }
-
     fn value(&self) -> bitcoin::Amount {
         let (value, _spk_hash) = self.output_data();
         value

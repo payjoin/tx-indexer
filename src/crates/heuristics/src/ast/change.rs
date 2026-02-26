@@ -7,7 +7,10 @@ use tx_indexer_pipeline::{
     node::{Node, NodeId},
     value::{TxMask, TxOutClustering, TxOutMask, TxOutSet, TxSet},
 };
-use tx_indexer_primitives::unified::{AnyOutId, AnyTxId};
+use tx_indexer_primitives::{
+    AbstractTransaction, AbstractTxIn,
+    unified::{AnyOutId, AnyTxId},
+};
 
 /// Node that identifies change outputs in transactions.
 ///
@@ -37,18 +40,14 @@ impl Node for ChangeIdentificationNode {
 
         for output_id in txouts.iter() {
             let tx_id = ctx.unified_storage().txid_for_out(*output_id);
-            let tx = ctx.unified_storage().tx(tx_id);
+            let tx = tx_id.with(ctx.unified_storage());
             let output_count = tx.output_len();
             if output_count == 0 {
                 continue;
             }
 
-            let last_output = tx
-                .outputs()
-                .last()
-                .expect("Tx should have at least one output")
-                .id();
-            result.insert(*output_id, *output_id == last_output);
+            let last_output = tx.output_at(output_count - 1);
+            result.insert(*output_id, *output_id == last_output.id());
         }
 
         result
@@ -239,7 +238,7 @@ impl Node for ChangeClusteringNode {
         let clustering = SparseDisjointSet::new();
 
         for tx_id in &tx_ids {
-            let tx = ctx.unified_storage().tx(*tx_id);
+            let tx = tx_id.with(ctx.unified_storage());
 
             let first_input: Option<AnyOutId> =
                 tx.inputs().next().and_then(|input| input.prev_txout_id());

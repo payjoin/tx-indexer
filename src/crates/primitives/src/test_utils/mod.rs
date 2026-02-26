@@ -91,10 +91,6 @@ impl DummyTxOutData {
 }
 
 impl AbstractTxOut for DummyTxOutData {
-    fn id(&self) -> AnyOutId {
-        AnyOutId::from(TxOutId::new(self.containing_txid, self.vout))
-    }
-
     fn value(&self) -> Amount {
         Amount::from_sat(self.value)
     }
@@ -105,10 +101,6 @@ impl AbstractTxOut for DummyTxOutData {
 }
 
 impl AbstractTransaction for DummyTxData {
-    fn id(&self) -> AnyTxId {
-        AnyTxId::from(self.id)
-    }
-
     fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn + '_>> + '_> {
         // Collect into a vector to avoid lifetime issues
         let inputs: Vec<Box<dyn AbstractTxIn>> = self

@@ -39,10 +39,6 @@ impl<T: AbstractTransaction + ?Sized> EnumerateOutputValueInArbitraryOrder for A
 }
 
 impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Arc<T> {
-    fn id(&self) -> AnyTxId {
-        (**self).id()
-    }
-
     fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn + '_>> + '_> {
         (**self).inputs()
     }
@@ -91,10 +87,6 @@ impl<T: AbstractTransaction + ?Sized> OutputCount for Box<T> {
 }
 
 impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Box<T> {
-    fn id(&self) -> AnyTxId {
-        (**self).id()
-    }
-
     fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn + '_>> + '_> {
         (**self).inputs()
     }
@@ -128,7 +120,6 @@ pub trait AbstractTxIn {
 
 /// Trait for transaction outputs
 pub trait AbstractTxOut {
-    fn id(&self) -> AnyOutId;
     /// Returns the value of the output
     fn value(&self) -> Amount;
     /// Returns the script pubkey hash (20-byte hash) if available
@@ -138,8 +129,6 @@ pub trait AbstractTxOut {
 
 /// Trait for transaction looking things. Generic over the ids as they can be either loose or dense.
 pub trait AbstractTransaction {
-    /// Returns the transaction ID
-    fn id(&self) -> AnyTxId;
     /// Returns an iterator over transaction inputs
     fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn + '_>> + '_>;
     /// Returns an iterator over transaction outputs

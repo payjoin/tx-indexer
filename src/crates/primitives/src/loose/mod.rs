@@ -7,8 +7,6 @@ use crate::{
     AnyInId, AnyOutId, AnyTxId, ScriptPubkeyHash, traits::abstract_types::AbstractTransaction,
 };
 
-use bitcoin::consensus::Encodable;
-
 use std::{
     collections::HashMap,
     hash::{DefaultHasher, Hasher},
@@ -109,7 +107,7 @@ impl LooseIndexBuilder {
 
     pub fn build(self) -> InMemoryIndex {
         let mut index = InMemoryIndex::new();
-        for tx in self.txs {
+        for tx in self.txs.into_iter() {
             index.add_tx(tx);
         }
         index
@@ -155,15 +153,13 @@ impl InMemoryIndex {
         &'a mut self,
         tx: Arc<dyn AbstractTransaction + Send + Sync>,
     ) -> TxHandle<'a> {
-        let any_tx_id = tx.id();
-        let tx_id = any_tx_id
-            .loose_txid()
-            .expect("loose storage only supports loose txids");
+        let loose_txid = TxId::new(self.tx_order.len() as u32 + 1);
+        let tx_id = AnyTxId::from(loose_txid);
 
         // Process inputs to build the index before storing
         // Collect inputs into a vector to avoid lifetime issues
         for (vin, txin) in tx.inputs().enumerate() {
-            let vin_id = tx_id.txin_id(vin as u32);
+            let vin_id = loose_txid.txin_id(vin as u32);
             let prev_vout = txin.prev_vout();
             let prev_txid = txin.prev_txid();
             if let (Some(prev_vout), Some(prev_txid)) = (prev_vout, prev_txid) {
@@ -183,23 +179,23 @@ impl InMemoryIndex {
             let spk_hash = output.script_pubkey_hash();
             self.spk_to_txout_ids
                 .entry(spk_hash)
-                .or_insert_with(|| TxOutId::new(tx_id, vout_idx as u32));
+                .or_insert_with(|| TxOutId::new(loose_txid, vout_idx as u32));
         }
 
-        let result = self.txs.insert(tx_id.into(), tx);
+        let result = self.txs.insert(loose_txid, tx);
         if result.is_some() {
             panic!("Transaction with id {:?} already exists!", tx_id);
         }
-        self.tx_order.push(tx_id);
+        self.tx_order.push(loose_txid);
 
-        any_tx_id.with(self)
+        tx_id.with(self)
     }
 
     // TODO: once we need stable id, we may need to manage the random key ourselves. Once we need to persist things solve this TODO
-    pub fn compute_txid(txid: bitcoin::Txid) -> TxId {
+    pub fn compute_txid(txid: impl Into<[u8; 4]>) -> TxId {
         let mut hasher = DefaultHasher::new();
         let mut buf = Vec::new();
-        txid.consensus_encode(&mut buf).unwrap();
+        buf.extend_from_slice(&txid.into());
         hasher.write(buf.as_slice());
         let hash = hasher.finish();
         TxId(hash as u32)

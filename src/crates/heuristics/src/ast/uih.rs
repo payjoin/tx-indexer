@@ -13,7 +13,10 @@ use tx_indexer_pipeline::{
     node::{Node, NodeId},
     value::{TxMask, TxOutSet, TxSet},
 };
-use tx_indexer_primitives::unified::{AnyOutId, AnyTxId};
+use tx_indexer_primitives::{
+    AbstractTxIn, AbstractTxOut,
+    unified::{AnyOutId, AnyTxId},
+};
 
 /// Node that implements UIH1 (Optimal change heuristic).
 ///
@@ -42,7 +45,7 @@ impl Node for UnnecessaryInputHeuristic1Node {
         let mut result = HashSet::new();
 
         for tx_id in &tx_ids {
-            let tx = ctx.unified_storage().tx(*tx_id);
+            let tx = tx_id.with(ctx.unified_storage());
 
             let outputs: Vec<_> = tx.outputs().map(|o| (o.id(), o.value())).collect();
             if outputs.is_empty() {
@@ -52,12 +55,11 @@ impl Node for UnnecessaryInputHeuristic1Node {
             let input_values: Vec<Amount> = tx
                 .inputs()
                 .filter_map(|input| {
-                    let prev_id = input.prev_txout_id()?;
-                    let prev_txid = ctx.unified_storage().txid_for_out(prev_id);
-                    let prev_tx = ctx.unified_storage().tx(prev_txid);
+                    let prev_out_id = input.prev_txout_id()?;
+                    let prev_tx = input.prev_txid()?.with(ctx.unified_storage());
                     prev_tx
                         .outputs()
-                        .find(|o| o.id() == prev_id)
+                        .find(|o| o.id() == prev_out_id)
                         .map(|o| o.value())
                 })
                 .collect();
@@ -132,18 +134,17 @@ impl Node for UnnecessaryInputHeuristic2Node {
         let mut result = std::collections::HashMap::new();
 
         for tx_id in &tx_ids {
-            let tx = ctx.unified_storage().tx(*tx_id);
+            let tx = tx_id.with(ctx.unified_storage());
 
             // TODO: internal method for collecting input values
             let input_values: Vec<Amount> = tx
                 .inputs()
                 .filter_map(|input| {
-                    let prev_id = input.prev_txout_id()?;
-                    let prev_txid = ctx.unified_storage().txid_for_out(prev_id);
-                    let prev_tx = ctx.unified_storage().tx(prev_txid);
+                    let prev_out_id = input.prev_txout_id()?;
+                    let prev_tx = input.prev_txid()?.with(ctx.unified_storage());
                     prev_tx
                         .outputs()
-                        .find(|o| o.id() == prev_id)
+                        .find(|o| o.id() == prev_out_id)
                         .map(|o| o.value())
                 })
                 .collect();
@@ -498,8 +499,9 @@ mod tests {
         let uih2 = UnnecessaryInputHeuristic2::new(source.txs());
         let result = engine.eval(&uih2);
 
+        // Loose index assigns ids by insertion order (1, 2, …); single-input tx is 2nd → TxId(2)
         assert_eq!(
-            result.get(&AnyTxId::from(TxId(3))),
+            result.get(&AnyTxId::from(TxId(2))),
             Some(&false),
             "Single-input tx should not be flagged UIH2"
         );
