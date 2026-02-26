@@ -52,7 +52,7 @@ impl Node for UnnecessaryInputHeuristic1Node {
             let input_values: Vec<Amount> = tx
                 .inputs()
                 .filter_map(|input| {
-                    let prev_id = input.prev_txout_id();
+                    let prev_id = input.prev_txout_id()?;
                     let prev_txid = ctx.unified_storage().txid_for_out(prev_id);
                     let prev_tx = ctx.unified_storage().tx(prev_txid);
                     prev_tx
@@ -138,7 +138,7 @@ impl Node for UnnecessaryInputHeuristic2Node {
             let input_values: Vec<Amount> = tx
                 .inputs()
                 .filter_map(|input| {
-                    let prev_id = input.prev_txout_id();
+                    let prev_id = input.prev_txout_id()?;
                     let prev_txid = ctx.unified_storage().txid_for_out(prev_id);
                     let prev_tx = ctx.unified_storage().tx(prev_txid);
                     prev_tx

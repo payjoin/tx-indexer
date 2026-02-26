@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 sled = "0.34"
-bitcoin_slices = { version = "0.7.0", features = ["bitcoin"] }
+bitcoin_slices = { version = "0.10.0", features = ["bitcoin"] }
 bitcoin = { workspace = true }
 
 [dev-dependencies]

@@ -168,7 +168,8 @@ impl Node for IsUnilateralNode {
 
         for tx_id in &tx_ids {
             let tx = ctx.unified_storage().tx(*tx_id);
-            let inputs: Vec<AnyOutId> = tx.inputs().map(|input| input.prev_txout_id()).collect();
+            let inputs: Vec<AnyOutId> =
+                tx.inputs().filter_map(|input| input.prev_txout_id()).collect();
 
             let is_unilateral = if inputs.is_empty() {
                 false // Coinbase - no inputs to cluster
@@ -239,7 +240,7 @@ impl Node for ChangeClusteringNode {
             let tx = ctx.unified_storage().tx(*tx_id);
 
             let first_input: Option<AnyOutId> =
-                tx.inputs().next().map(|input| input.prev_txout_id());
+                tx.inputs().next().and_then(|input| input.prev_txout_id());
 
             if let Some(root_input) = first_input {
                 for output in tx.outputs() {

@@ -28,7 +28,7 @@ pub trait EnumerateOutputValueInArbitraryOrder: AbstractTransaction {
 // Blanket implementation for Arc<dyn AbstractTransaction>
 impl<T: AbstractTransaction + ?Sized> EnumerateSpentTxOuts for Arc<T> {
     fn spent_coins(&self) -> impl Iterator<Item = AnyOutId> {
-        self.inputs().map(|input| input.prev_txout_id())
+        self.inputs().filter_map(|input| input.prev_txout_id())
     }
 }
 
@@ -43,11 +43,11 @@ impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Arc<T> {
         (**self).id()
     }
 
-    fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn>> + '_> {
+    fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn + '_>> + '_> {
         (**self).inputs()
     }
 
-    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut>> + '_> {
+    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut + '_>> + '_> {
         (**self).outputs()
     }
 
@@ -55,7 +55,7 @@ impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Arc<T> {
         (**self).output_len()
     }
 
-    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>> {
+    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut + '_>> {
         (**self).output_at(index)
     }
 
@@ -74,7 +74,7 @@ impl<T: AbstractTransaction + ?Sized> OutputCount for Arc<T> {
 
 impl<T: AbstractTransaction + ?Sized> EnumerateSpentTxOuts for Box<T> {
     fn spent_coins(&self) -> impl Iterator<Item = AnyOutId> {
-        self.inputs().map(|input| input.prev_txout_id())
+        self.inputs().filter_map(|input| input.prev_txout_id())
     }
 }
 
@@ -95,11 +95,11 @@ impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Box<T> {
         (**self).id()
     }
 
-    fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn>> + '_> {
+    fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn + '_>> + '_> {
         (**self).inputs()
     }
 
-    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut>> + '_> {
+    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut + '_>> + '_> {
         (**self).outputs()
     }
 
@@ -107,7 +107,7 @@ impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Box<T> {
         (**self).output_len()
     }
 
-    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>> {
+    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut + '_>> {
         (**self).output_at(index)
     }
 
@@ -119,11 +119,11 @@ impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Box<T> {
 /// Trait for transaction inputs
 pub trait AbstractTxIn {
     /// Returns the transaction ID of the previous output
-    fn prev_txid(&self) -> AnyTxId;
+    fn prev_txid(&self) -> Option<AnyTxId>;
     /// Returns the output index of the previous output
-    fn prev_vout(&self) -> u32;
+    fn prev_vout(&self) -> Option<u32>;
     /// Returns the previous output ID
-    fn prev_txout_id(&self) -> AnyOutId;
+    fn prev_txout_id(&self) -> Option<AnyOutId>;
 }
 
 /// Trait for transaction outputs
@@ -141,13 +141,13 @@ pub trait AbstractTransaction {
     /// Returns the transaction ID
     fn id(&self) -> AnyTxId;
     /// Returns an iterator over transaction inputs
-    fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn>> + '_>;
+    fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn + '_>> + '_>;
     /// Returns an iterator over transaction outputs
-    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut>> + '_>;
+    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut + '_>> + '_>;
     /// Returns the number of outputs
     fn output_len(&self) -> usize;
     /// Returns the output at the given index, if it exists
-    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>>;
+    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut + '_>>;
 
     fn locktime(&self) -> u32;
 }

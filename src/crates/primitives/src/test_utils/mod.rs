@@ -48,16 +48,16 @@ struct DummyTxInWrapper {
 }
 
 impl AbstractTxIn for DummyTxInWrapper {
-    fn prev_txid(&self) -> AnyTxId {
-        AnyTxId::from(self.prev_txid)
+    fn prev_txid(&self) -> Option<AnyTxId> {
+        Some(AnyTxId::from(self.prev_txid))
     }
 
-    fn prev_vout(&self) -> u32 {
-        self.prev_vout
+    fn prev_vout(&self) -> Option<u32> {
+        Some(self.prev_vout)
     }
 
-    fn prev_txout_id(&self) -> AnyOutId {
-        AnyOutId::from(TxOutId::new(self.prev_txid, self.prev_vout))
+    fn prev_txout_id(&self) -> Option<AnyOutId> {
+        Some(AnyOutId::from(TxOutId::new(self.prev_txid, self.prev_vout)))
     }
 }
 
@@ -109,7 +109,7 @@ impl AbstractTransaction for DummyTxData {
         AnyTxId::from(self.id)
     }
 
-    fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn>> + '_> {
+    fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn + '_>> + '_> {
         // Collect into a vector to avoid lifetime issues
         let inputs: Vec<Box<dyn AbstractTxIn>> = self
             .spent_coins
@@ -124,7 +124,7 @@ impl AbstractTransaction for DummyTxData {
         Box::new(inputs.into_iter())
     }
 
-    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut>> + '_> {
+    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut + '_>> + '_> {
         // Collect into a vector to avoid lifetime issues
         let outputs: Vec<Box<dyn AbstractTxOut>> = self
             .outputs
@@ -138,7 +138,7 @@ impl AbstractTransaction for DummyTxData {
         self.outputs.len()
     }
 
-    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut>> {
+    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut + '_>> {
         self.outputs
             .get(index)
             .map(|output| Box::new(output.clone()) as Box<dyn AbstractTxOut>)

@@ -1,6 +1,7 @@
 use crate::handle::TxHandle;
 use crate::traits::graph_index::{
-    IndexedGraph, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex,
+    IndexedGraph, OutpointIndex, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex, TxIoIndex,
+    TxOutDataIndex,
 };
 use crate::{
     AnyInId, AnyOutId, AnyTxId, ScriptPubkeyHash, traits::abstract_types::AbstractTransaction,
@@ -158,7 +159,6 @@ impl InMemoryIndex {
         let tx_id = any_tx_id
             .loose_txid()
             .expect("loose storage only supports loose txids");
-        // TODO: only loose txids for now
 
         // Process inputs to build the index before storing
         // Collect inputs into a vector to avoid lifetime issues
@@ -166,12 +166,14 @@ impl InMemoryIndex {
             let vin_id = tx_id.txin_id(vin as u32);
             let prev_vout = txin.prev_vout();
             let prev_txid = txin.prev_txid();
-            let prev_outid = TxOutId::new(
-                prev_txid.loose_txid().expect("prev_txid should be loose"),
-                prev_vout,
-            );
-            self.spending_txins.insert(prev_outid, vin_id);
-            self.prev_txouts.insert(vin_id, prev_outid);
+            if let (Some(prev_vout), Some(prev_txid)) = (prev_vout, prev_txid) {
+                let prev_outid = TxOutId::new(
+                    prev_txid.loose_txid().expect("prev_txid should be loose"),
+                    prev_vout,
+                );
+                self.spending_txins.insert(prev_outid, vin_id);
+                self.prev_txouts.insert(vin_id, prev_outid);
+            }
         }
 
         // Process outputs to build SPK index
@@ -190,7 +192,7 @@ impl InMemoryIndex {
         }
         self.tx_order.push(tx_id);
 
-        TxHandle::new(any_tx_id, self)
+        any_tx_id.with(self)
     }
 
     // TODO: once we need stable id, we may need to manage the random key ourselves. Once we need to persist things solve this TODO
@@ -205,15 +207,11 @@ impl InMemoryIndex {
 }
 
 impl PrevOutIndex for InMemoryIndex {
-    fn prev_txout(&self, id: &AnyInId) -> AnyOutId {
+    fn prev_txout(&self, id: &AnyInId) -> Option<AnyOutId> {
         let loose_id = id
             .loose_id()
             .expect("loose storage only supports loose txin ids");
-        let out_id = *self
-            .prev_txouts
-            .get(&loose_id)
-            .expect("Previous output should always be present if index is built correctly");
-        AnyOutId::from(out_id)
+        self.prev_txouts.get(&loose_id).copied().map(AnyOutId::from)
     }
 }
 impl TxInIndex for InMemoryIndex {
@@ -243,5 +241,67 @@ impl TxIndex for InMemoryIndex {
             .loose_txid()
             .expect("loose storage only supports loose txids");
         self.txs.get(&loose_txid).cloned()
+    }
+}
+
+impl TxIoIndex for InMemoryIndex {
+    fn tx_in_ids(&self, txid: &AnyTxId) -> Vec<AnyInId> {
+        let loose_txid = txid
+            .loose_txid()
+            .expect("loose storage only supports loose txids");
+        let tx = self
+            .txs
+            .get(&loose_txid)
+            .expect("loose txid not found in storage");
+        let input_len = tx.inputs().count();
+        (0..input_len)
+            .map(|vin| AnyInId::from(TxInId::new(loose_txid, vin as u32)))
+            .collect()
+    }
+
+    fn tx_out_ids(&self, txid: &AnyTxId) -> Vec<AnyOutId> {
+        let loose_txid = txid
+            .loose_txid()
+            .expect("loose storage only supports loose txids");
+        let tx = self
+            .txs
+            .get(&loose_txid)
+            .expect("loose txid not found in storage");
+        let output_len = tx.output_len();
+        (0..output_len)
+            .map(|vout| AnyOutId::from(TxOutId::new(loose_txid, vout as u32)))
+            .collect()
+    }
+
+    fn locktime(&self, txid: &AnyTxId) -> u32 {
+        let tx = self
+            .tx(txid)
+            .expect("loose txid not found in storage");
+        tx.locktime()
+    }
+}
+
+impl OutpointIndex for InMemoryIndex {
+    fn outpoint_for_out(&self, out_id: &AnyOutId) -> (AnyTxId, u32) {
+        let loose_out = out_id
+            .loose_id()
+            .expect("loose storage only supports loose outids");
+        (AnyTxId::from(loose_out.txid()), loose_out.vout())
+    }
+}
+
+impl TxOutDataIndex for InMemoryIndex {
+    fn tx_out_data(&self, out_id: &AnyOutId) -> (bitcoin::Amount, ScriptPubkeyHash) {
+        let loose_out = out_id
+            .loose_id()
+            .expect("loose storage only supports loose outids");
+        let tx = self
+            .txs
+            .get(&loose_out.txid())
+            .expect("loose txid not found in storage");
+        let output = tx
+            .output_at(loose_out.vout() as usize)
+            .expect("txout should be present if index is built correctly");
+        (output.value(), output.script_pubkey_hash())
     }
 }

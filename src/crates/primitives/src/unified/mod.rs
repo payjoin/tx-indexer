@@ -1,6 +1,11 @@
 use crate::dense::DenseStorage;
+use crate::handle::{TxHandle, TxInHandle, TxOutHandle};
 use crate::loose::InMemoryIndex;
 use crate::parser::BlockFileError;
+use crate::traits::graph_index::{
+    IndexedGraph, OutpointIndex, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex, TxIoIndex,
+    TxOutDataIndex,
+};
 use crate::{ScriptPubkeyHash, dense, loose, traits::abstract_types::AbstractTransaction};
 use crate::{dense::build_indices, loose::LooseIndexBuilder, sled::spk_db::SledScriptPubkeyDb};
 use std::{ops::Range, path::PathBuf};
@@ -10,6 +15,10 @@ use std::{ops::Range, path::PathBuf};
 pub struct AnyTxId(i32);
 
 impl AnyTxId {
+    pub fn with(self, index: &dyn IndexedGraph) -> TxHandle {
+        TxHandle { tx_id: self, index }
+    }
+
     pub fn is_confirmed(self) -> bool {
         self.0 >= 0
     }
@@ -33,10 +42,6 @@ impl AnyTxId {
         let neg = self.0.checked_neg()?;
         Some(loose::TxId::new(neg as u32))
     }
-
-    pub fn raw(self) -> i32 {
-        self.0
-    }
 }
 
 impl From<dense::TxId> for AnyTxId {
@@ -59,6 +64,13 @@ impl From<loose::TxId> for AnyTxId {
 pub struct AnyOutId(i64);
 
 impl AnyOutId {
+    pub fn with(self, index: &dyn IndexedGraph) -> TxOutHandle {
+        TxOutHandle {
+            out_id: self,
+            index,
+        }
+    }
+
     pub fn is_confirmed(self) -> bool {
         self.0 >= 0
     }
@@ -115,6 +127,10 @@ impl From<loose::TxOutId> for AnyOutId {
 pub struct AnyInId(i64);
 
 impl AnyInId {
+    pub fn with(self, index: &dyn IndexedGraph) -> TxInHandle {
+        TxInHandle { in_id: self, index }
+    }
+
     pub fn is_confirmed(self) -> bool {
         self.0 >= 0
     }
@@ -347,6 +363,7 @@ impl UnifiedStorage {
                 .cloned()
                 .expect("loose txid not found in storage");
         }
+        // TODO: support confirmed tx access
         panic!("confirmed tx access not supported yet");
     }
 
@@ -366,6 +383,166 @@ impl UnifiedStorage {
         }
         None
     }
+}
+
+impl PrevOutIndex for UnifiedStorage {
+    fn prev_txout(&self, id: &AnyInId) -> Option<AnyOutId> {
+        if let Some(loose_inid) = id.loose_id() {
+            let loose = self
+                .loose
+                .as_ref()
+                .expect("loose storage missing for loose txin id");
+            let out_id = loose.prev_txouts.get(&loose_inid).copied();
+            return out_id.map(AnyOutId::from);
+        }
+        let dense_inid = id
+            .confirmed_id()
+            .expect("confirmed inid must map to dense inid");
+        let dense = self
+            .dense
+            .as_ref()
+            .expect("dense storage missing for confirmed txin id");
+        dense
+            .prevout_for_in(dense_inid)
+            .map(AnyOutId::from)
+    }
+}
+
+impl TxInIndex for UnifiedStorage {
+    fn spending_txin(&self, tx: &AnyOutId) -> Option<AnyInId> {
+        self.spender_for_out(*tx)
+    }
+}
+
+impl ScriptPubkeyIndex for UnifiedStorage {
+    fn script_pubkey_to_txout_id(&self, script_pubkey: &ScriptPubkeyHash) -> Option<AnyOutId> {
+        UnifiedStorage::script_pubkey_to_txout_id(self, script_pubkey)
+    }
+}
+
+impl TxIndex for UnifiedStorage {
+    fn tx(&self, txid: &AnyTxId) -> Option<std::sync::Arc<dyn AbstractTransaction + Send + Sync>> {
+        let loose_txid = txid.loose_txid()?;
+        self.loose.as_ref()?.txs.get(&loose_txid).cloned()
+    }
+}
+
+impl TxIoIndex for UnifiedStorage {
+    fn tx_in_ids(&self, txid: &AnyTxId) -> Vec<AnyInId> {
+        if let Some(loose_txid) = txid.loose_txid() {
+            let loose = self
+                .loose
+                .as_ref()
+                .expect("loose storage missing for loose txid");
+            let tx = loose
+                .txs
+                .get(&loose_txid)
+                .expect("loose txid not found in storage");
+            let input_len = tx.inputs().count();
+            return (0..input_len)
+                .map(|vin| AnyInId::from(loose::TxInId::new(loose_txid, vin as u32)))
+                .collect();
+        }
+
+        let dense_txid = txid
+            .confirmed_txid()
+            .expect("confirmed txid must map to dense txid");
+        let dense = self
+            .dense
+            .as_ref()
+            .expect("dense storage missing for confirmed txid");
+        dense
+            .get_txin_ids(dense_txid)
+            .into_iter()
+            .map(AnyInId::from)
+            .collect()
+    }
+
+    fn tx_out_ids(&self, txid: &AnyTxId) -> Vec<AnyOutId> {
+        UnifiedStorage::tx_out_ids(self, *txid)
+    }
+
+    fn locktime(&self, txid: &AnyTxId) -> u32 {
+        if let Some(loose_txid) = txid.loose_txid() {
+            let loose = self
+                .loose
+                .as_ref()
+                .expect("loose storage missing for loose txid");
+            return loose
+                .txs
+                .get(&loose_txid)
+                .expect("loose txid not found in storage")
+                .locktime();
+        }
+
+        let dense_txid = txid
+            .confirmed_txid()
+            .expect("confirmed txid must map to dense txid");
+        let dense = self
+            .dense
+            .as_ref()
+            .expect("dense storage missing for confirmed txid");
+        dense.get_tx(dense_txid).lock_time.to_consensus_u32()
+    }
+}
+
+impl OutpointIndex for UnifiedStorage {
+    fn outpoint_for_out(&self, out_id: &AnyOutId) -> (AnyTxId, u32) {
+        if let Some(loose_outid) = out_id.loose_id() {
+            return (AnyTxId::from(loose_outid.txid()), loose_outid.vout());
+        }
+        let dense_outid = out_id
+            .confirmed_id()
+            .expect("confirmed outid must map to dense outid");
+        let dense = self
+            .dense
+            .as_ref()
+            .expect("dense storage missing for confirmed outid");
+        let dense_txid = dense.txid_for_out(dense_outid);
+        let (start, _end) = dense.tx_out_range(dense_txid);
+        let vout = dense_outid.index() - start;
+        let vout = u32::try_from(vout).expect("vout should fit in u32");
+        (AnyTxId::from(dense_txid), vout)
+    }
+}
+
+impl TxOutDataIndex for UnifiedStorage {
+    fn tx_out_data(&self, out_id: &AnyOutId) -> (bitcoin::Amount, ScriptPubkeyHash) {
+        if let Some(loose_outid) = out_id.loose_id() {
+            let loose = self
+                .loose
+                .as_ref()
+                .expect("loose storage missing for loose outid");
+            let tx = loose
+                .txs
+                .get(&loose_outid.txid())
+                .expect("loose txid not found in storage");
+            let output = tx
+                .output_at(loose_outid.vout() as usize)
+                .expect("txout should be present if index is built correctly");
+            return (output.value(), output.script_pubkey_hash());
+        }
+
+        let dense_outid = out_id
+            .confirmed_id()
+            .expect("confirmed outid must map to dense outid");
+        let dense = self
+            .dense
+            .as_ref()
+            .expect("dense storage missing for confirmed outid");
+        let txout = dense.get_txout(dense_outid);
+        let spk_hash = script_pubkey_hash(&txout.script_pubkey);
+        (txout.value, spk_hash)
+    }
+}
+
+impl IndexedGraph for UnifiedStorage {}
+
+fn script_pubkey_hash(script_pubkey: &bitcoin::ScriptBuf) -> ScriptPubkeyHash {
+    use bitcoin::hashes::hash160::Hash as Hash160;
+    use bitcoin::hashes::Hash as _;
+
+    Hash160::hash(script_pubkey.as_bytes()).to_byte_array()
 }
 
 #[cfg(test)]
