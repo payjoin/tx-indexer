@@ -8,7 +8,7 @@ pub mod test_utils;
 pub mod traits;
 pub mod unified;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 pub mod integration;
 
 #[cfg(test)]

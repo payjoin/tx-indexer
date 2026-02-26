@@ -6,7 +6,7 @@ use tx_indexer_pipeline::{
 };
 
 use tx_indexer_disjoint_set::{DisJointSet, SparseDisjointSet};
-use tx_indexer_primitives::unified::AnyOutId;
+use tx_indexer_primitives::{AbstractTransaction, unified::AnyOutId};
 
 pub struct SameAddressClusteringNode {
     txs: Expr<TxSet>,
@@ -30,7 +30,7 @@ impl Node for SameAddressClusteringNode {
         let clustering = SparseDisjointSet::new();
 
         for tx_id in txs.iter() {
-            let tx = ctx.unified_storage().tx(*tx_id);
+            let tx = tx_id.with(ctx.unified_storage());
             for output in tx.outputs() {
                 let txout_id = output.id();
                 if let Some(first_txout) = ctx
@@ -62,12 +62,20 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use tx_indexer_pipeline::{Engine, PipelineContext, ops::AllLooseTxs};
+    use bitcoin_test_data::blocks::mainnet_702861;
+    use std::fs;
+    use tx_indexer_pipeline::{
+        Engine, PipelineContext,
+        ops::{AllDenseTxs, AllLooseTxs},
+    };
     use tx_indexer_primitives::UnifiedStorageBuilder;
+    use tx_indexer_primitives::dense::IndexPaths;
+    use tx_indexer_primitives::integration::NodeHarness;
     use tx_indexer_primitives::loose::LooseIndexBuilder;
+    use tx_indexer_primitives::sled::db::SledDBFactory;
     use tx_indexer_primitives::{
         loose::{TxId, TxOutId},
-        test_utils::{DummyTxData, DummyTxOutData},
+        test_utils::{DummyTxData, DummyTxOutData, temp_dir, write_single_block_file},
         traits::abstract_types::AbstractTransaction,
         unified::AnyOutId,
     };
@@ -162,5 +170,54 @@ mod tests {
             result.find(AnyOutId::from(TxOutId::new(TxId(3), 0))),
             result.find(AnyOutId::from(TxOutId::new(TxId(4), 0)))
         );
+    }
+
+    #[test]
+    fn test_dense_same_address_mainnet_block() -> anyhow::Result<()> {
+        let harness = NodeHarness::new(None)?;
+        let block_bytes = mainnet_702861();
+        let blocks_dir = harness.blocks_dir.join("mainnet_702861");
+        fs::create_dir_all(&blocks_dir)?;
+        write_single_block_file(&blocks_dir, block_bytes)?;
+
+        let index_dir = temp_dir("tx_indexer_dense_mainnet_idx");
+        let paths = IndexPaths {
+            txptr: index_dir.join("txptr.idx"),
+            block_tx: index_dir.join("block_tx.idx"),
+            in_prevout: index_dir.join("in_prevout.idx"),
+            out_spent: index_dir.join("out_spent.idx"),
+        };
+        let spk_db = SledDBFactory::open(temp_dir("tx_indexer_dense_mainnet_spk"))?.spk_db()?;
+        let unified = UnifiedStorageBuilder::new()
+            .with_dense(tx_indexer_primitives::unified::DenseBuildSpec {
+                blocks_dir: blocks_dir.clone(),
+                range: 0..1,
+                paths,
+                spk_db,
+            })
+            .build()?;
+
+        let ctx = Arc::new(PipelineContext::new());
+        let mut engine = Engine::new(ctx.clone(), Arc::new(unified));
+
+        let source = AllDenseTxs::new(&ctx);
+        let clustering = SameAddressClustering::new(source.txs());
+
+        engine.run_to_fixpoint();
+        let result = engine.eval(&clustering);
+
+        let mut cluster_sizes: Vec<usize> = result
+            .iter_parent_ids()
+            .map(|root| result.iter_set(root).count())
+            .collect();
+        cluster_sizes.sort_unstable_by(|a, b| b.cmp(a));
+
+        println!(
+            "same-address clustering: clusters={}, largest={:?}",
+            cluster_sizes.len(),
+            cluster_sizes.get(0)
+        );
+
+        Ok(())
     }
 }

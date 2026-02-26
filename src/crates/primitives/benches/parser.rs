@@ -1,10 +1,8 @@
 use bitcoin_test_data::blocks::mainnet_702861;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use std::{
-    fs::{self, File},
-    io::Write,
-    path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    fs::{self},
+    path::PathBuf,
 };
 
 use tx_indexer_primitives::{
@@ -12,27 +10,8 @@ use tx_indexer_primitives::{
     indecies::{BlockTxIndex, ConfirmedTxPtrIndex, InPrevoutIndex, OutSpentByIndex},
     parser::Parser,
     sled::db::SledDBFactory,
+    test_utils::{temp_dir, write_single_block_file},
 };
-
-fn temp_dir(prefix: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("time went backwards")
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("{}_{}", prefix, nanos));
-    fs::create_dir_all(&dir).expect("failed to create temp dir");
-    dir
-}
-
-fn write_single_block_file(dir: &Path, block: &[u8]) -> std::io::Result<()> {
-    let path = dir.join("blk00000.dat");
-    let mut file = File::create(path)?;
-    file.write_all(&[0xF9, 0xBE, 0xB4, 0xD9])?;
-    let size = u32::try_from(block.len()).expect("block too large for u32");
-    file.write_all(&size.to_le_bytes())?;
-    file.write_all(block)?;
-    Ok(())
-}
 
 fn bench_parse_mainnet_702861(c: &mut Criterion) {
     let block_bytes = mainnet_702861();

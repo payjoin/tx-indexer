@@ -7,6 +7,11 @@ edition = "2024"
 sled = "0.34"
 bitcoin_slices = { version = "0.10.0", features = ["bitcoin"] }
 bitcoin = { workspace = true }
+anyhow = { version = "1.0", optional = true }
+corepc-node = { version = "0.10", features = ["download", "22_1"], optional = true }
+
+[features]
+test-utils = ["dep:anyhow", "dep:corepc-node"]
 
 [dev-dependencies]
 tempfile = "3"

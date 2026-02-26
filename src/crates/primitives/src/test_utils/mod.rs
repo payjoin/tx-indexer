@@ -161,6 +161,31 @@ impl EnumerateOutputValueInArbitraryOrder for DummyTxData {
     }
 }
 
+pub fn temp_dir(prefix: &str) -> std::path::PathBuf {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time went backwards")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("{}_{}", prefix, nanos));
+    std::fs::create_dir_all(&dir).expect("failed to create temp dir");
+    dir
+}
+
+pub fn write_single_block_file(dir: &std::path::Path, block: &[u8]) -> std::io::Result<()> {
+    use std::fs::File;
+    use std::io::Write;
+
+    let path = dir.join("blk00000.dat");
+    let mut file = File::create(path)?;
+    file.write_all(&[0xF9, 0xBE, 0xB4, 0xD9])?;
+    let size = u32::try_from(block.len()).expect("block too large for u32");
+    file.write_all(&size.to_le_bytes())?;
+    file.write_all(block)?;
+    Ok(())
+}
+
 impl EnumerateSpentTxOuts for DummyTxData {
     fn spent_coins(&self) -> impl Iterator<Item = AnyOutId> {
         self.spent_coins.iter().copied().map(AnyOutId::from)

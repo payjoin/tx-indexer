@@ -1072,7 +1072,9 @@ version = "0.1.0"
 name = "tx-indexer-heuristics"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bitcoin",
+ "bitcoin-test-data",
  "rand",
  "tx-indexer-disjoint-set",
  "tx-indexer-pipeline",

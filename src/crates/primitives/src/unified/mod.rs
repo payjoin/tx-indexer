@@ -249,18 +249,13 @@ impl UnifiedStorage {
     }
 
     pub fn loose_txids_len(&self) -> usize {
-        let loose = self
-            .loose
-            .as_ref()
-            .expect("loose storage missing when requesting loose txids");
-        loose.tx_order.len()
+        self.loose.as_ref().map_or(0, |loose| loose.tx_order.len())
     }
 
     pub fn dense_txids_len(&self) -> usize {
-        let Some(dense) = self.dense.as_ref() else {
-            return 0;
-        };
-        usize::try_from(dense.tx_count()).expect("dense tx count should fit in usize")
+        self.dense.as_ref().map_or(0, |dense| {
+            usize::try_from(dense.tx_count()).expect("dense tx count should fit in usize")
+        })
     }
 
     pub fn loose_txids_from(&self, start: usize) -> Vec<AnyTxId> {
