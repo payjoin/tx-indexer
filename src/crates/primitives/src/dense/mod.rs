@@ -119,6 +119,10 @@ impl DenseStorage {
         self.blocks_dir.join(file_name)
     }
 
+    pub fn tx_count(&self) -> u64 {
+        self.txptr_index.len()
+    }
+
     fn tx_ptr(&self, txid: TxId) -> TxPtr {
         match self.txptr_index.get(txid) {
             Ok(Some(ptr)) => ptr,

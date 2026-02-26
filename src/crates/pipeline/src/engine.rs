@@ -20,6 +20,7 @@ use crate::value::ExprValue;
 pub struct SourceNodeEvalContext<'a> {
     pub(crate) unified_storage: &'a UnifiedStorage,
     pub(crate) processed_loose_len: usize,
+    pub(crate) processed_dense_len: usize,
     #[allow(unused)]
     pub(crate) node_id: NodeId,
 }
@@ -28,17 +29,23 @@ impl<'a> SourceNodeEvalContext<'a> {
     pub fn new(
         unified_storage: &'a UnifiedStorage,
         processed_loose_len: usize,
+        processed_dense_len: usize,
         node_id: NodeId,
     ) -> Self {
         Self {
             unified_storage,
             processed_loose_len,
+            processed_dense_len,
             node_id,
         }
     }
 
     pub fn processed_loose_len(&self) -> usize {
         self.processed_loose_len
+    }
+
+    pub fn processed_dense_len(&self) -> usize {
+        self.processed_dense_len
     }
 }
 
@@ -112,10 +119,15 @@ pub struct Engine {
     ctx: Arc<PipelineContext>,
     storage: NodeStorage,
     unified_storage: Arc<UnifiedStorage>,
-    source_cursors: HashMap<NodeId, usize>,
+    source_cursors: HashMap<NodeId, SourceCursor>,
     /// Track which iteration each node was last evaluated in (for cycle detection).
     eval_iteration: HashMap<NodeId, usize>,
     iteration: usize,
+}
+
+struct SourceCursor {
+    loose: usize,
+    dense: usize,
 }
 
 impl Engine {
@@ -220,12 +232,19 @@ impl Engine {
             None => return, // TODO: panic? This points to a bug
         };
 
-        let total = self.unified_storage.loose_txids_len();
-        let cursor = self.source_cursors.entry(id).or_insert(0);
-        let processed = *cursor;
-        *cursor = total;
+        let total_loose = self.unified_storage.loose_txids_len();
+        let total_dense = self.unified_storage.dense_txids_len();
+        let cursor = self
+            .source_cursors
+            .entry(id)
+            .or_insert(SourceCursor { loose: 0, dense: 0 });
+        let processed_loose = cursor.loose;
+        let processed_dense = cursor.dense;
+        cursor.loose = total_loose;
+        cursor.dense = total_dense;
 
-        let mut eval_ctx = SourceNodeEvalContext::new(&self.unified_storage, processed, id);
+        let mut eval_ctx =
+            SourceNodeEvalContext::new(&self.unified_storage, processed_loose, processed_dense, id);
         let result = node.evaluate_any(&mut eval_ctx);
         self.storage.append(id, result);
     }

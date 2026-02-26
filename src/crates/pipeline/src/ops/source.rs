@@ -41,6 +41,33 @@ impl SourceNode for AllLooseTxsNode {
     }
 }
 
+/// Node that returns all newly observed dense transaction IDs.
+pub struct AllDenseTxsNode {
+    _marker: Arc<()>,
+}
+
+impl AllDenseTxsNode {
+    pub fn new(marker: Arc<()>) -> Self {
+        Self { _marker: marker }
+    }
+}
+
+impl SourceNode for AllDenseTxsNode {
+    type OutputValue = TxSet;
+
+    fn evaluate(&self, ctx: &mut SourceNodeEvalContext<'_>) -> HashSet<AnyTxId> {
+        let start = ctx.processed_dense_len();
+        ctx.unified_storage
+            .dense_txids_from(start)
+            .into_iter()
+            .collect()
+    }
+
+    fn name(&self) -> &'static str {
+        "AllDenseTxs"
+    }
+}
+
 pub struct SourceTxsNode {
     source: Expr<TxSet>,
 }
@@ -76,6 +103,24 @@ impl AllLooseTxs {
     /// Create source expressions for all known transaction IDs.
     pub fn new(ctx: &Arc<PipelineContext>) -> Self {
         let source = ctx.register_source(AllLooseTxsNode::new(Arc::new(())));
+        let txs = ctx.register(SourceTxsNode::new(source.clone()));
+        Self { txs }
+    }
+
+    pub fn txs(&self) -> Expr<TxSet> {
+        self.txs.clone()
+    }
+}
+
+/// Factory for creating dense source expressions.
+pub struct AllDenseTxs {
+    txs: Expr<TxSet>,
+}
+
+impl AllDenseTxs {
+    /// Create source expressions for all known confirmed transaction IDs.
+    pub fn new(ctx: &Arc<PipelineContext>) -> Self {
+        let source = ctx.register_source(AllDenseTxsNode::new(Arc::new(())));
         let txs = ctx.register(SourceTxsNode::new(source.clone()));
         Self { txs }
     }

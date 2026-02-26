@@ -274,9 +274,7 @@ impl TxIoIndex for InMemoryIndex {
     }
 
     fn locktime(&self, txid: &AnyTxId) -> u32 {
-        let tx = self
-            .tx(txid)
-            .expect("loose txid not found in storage");
+        let tx = self.tx(txid).expect("loose txid not found in storage");
         tx.locktime()
     }
 }

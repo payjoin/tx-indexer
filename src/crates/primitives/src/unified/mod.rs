@@ -256,6 +256,13 @@ impl UnifiedStorage {
         loose.tx_order.len()
     }
 
+    pub fn dense_txids_len(&self) -> usize {
+        let Some(dense) = self.dense.as_ref() else {
+            return 0;
+        };
+        usize::try_from(dense.tx_count()).expect("dense tx count should fit in usize")
+    }
+
     pub fn loose_txids_from(&self, start: usize) -> Vec<AnyTxId> {
         let loose = self
             .loose
@@ -267,6 +274,20 @@ impl UnifiedStorage {
         loose.tx_order[start..]
             .iter()
             .copied()
+            .map(AnyTxId::from)
+            .collect()
+    }
+
+    pub fn dense_txids_from(&self, start: usize) -> Vec<AnyTxId> {
+        let Some(dense) = self.dense.as_ref() else {
+            return Vec::new();
+        };
+        let total = usize::try_from(dense.tx_count()).expect("dense tx count should fit in usize");
+        if start >= total {
+            return Vec::new();
+        }
+        (start..total)
+            .map(|idx| dense::TxId::new(u32::try_from(idx).expect("dense txid should fit in u32")))
             .map(AnyTxId::from)
             .collect()
     }
@@ -402,9 +423,7 @@ impl PrevOutIndex for UnifiedStorage {
             .dense
             .as_ref()
             .expect("dense storage missing for confirmed txin id");
-        dense
-            .prevout_for_in(dense_inid)
-            .map(AnyOutId::from)
+        dense.prevout_for_in(dense_inid).map(AnyOutId::from)
     }
 }
 
@@ -539,8 +558,8 @@ impl TxOutDataIndex for UnifiedStorage {
 impl IndexedGraph for UnifiedStorage {}
 
 fn script_pubkey_hash(script_pubkey: &bitcoin::ScriptBuf) -> ScriptPubkeyHash {
-    use bitcoin::hashes::hash160::Hash as Hash160;
     use bitcoin::hashes::Hash as _;
+    use bitcoin::hashes::hash160::Hash as Hash160;
 
     Hash160::hash(script_pubkey.as_bytes()).to_byte_array()
 }
