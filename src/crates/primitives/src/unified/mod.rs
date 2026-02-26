@@ -214,12 +214,11 @@ impl UnifiedStorageBuilder {
 
     // TODO: specific error for unified storage
     pub fn build(self) -> Result<UnifiedStorage, BlockFileError> {
-        let (dense, _) = if let Some(spec) = self.dense {
-            let (storage, txids) =
-                build_indices(spec.blocks_dir, spec.range, spec.paths, spec.spk_db)?;
-            (Some(storage), Some(txids))
+        let dense = if let Some(spec) = self.dense {
+            let storage = build_indices(spec.blocks_dir, spec.range, spec.paths, spec.spk_db)?;
+            Some(storage)
         } else {
-            (None, None)
+            None
         };
 
         let loose = self.loose.map(|builder| builder.build());

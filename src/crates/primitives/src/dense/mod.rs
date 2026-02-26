@@ -86,7 +86,7 @@ pub fn build_indices(
     range: std::ops::Range<u64>,
     paths: IndexPaths,
     mut spk_db: SledScriptPubkeyDb,
-) -> Result<(DenseStorage, HashMap<bitcoin::Txid, TxId>), BlockFileError> {
+) -> Result<DenseStorage, BlockFileError> {
     let mut parser = Parser::new(blocks_dir);
     let mut txptr_index = ConfirmedTxPtrIndex::create(&paths.txptr).map_err(BlockFileError::Io)?;
     let mut block_tx_index = BlockTxIndex::create(&paths.block_tx).map_err(BlockFileError::Io)?;
@@ -94,7 +94,7 @@ pub fn build_indices(
         InPrevoutIndex::create(&paths.in_prevout).map_err(BlockFileError::Io)?;
     let mut out_spent_index =
         OutSpentByIndex::create(&paths.out_spent).map_err(BlockFileError::Io)?;
-    let txids = parser.parse_blocks(
+    parser.parse_blocks(
         range,
         &mut txptr_index,
         &mut block_tx_index,
@@ -110,7 +110,7 @@ pub fn build_indices(
         out_spent_index,
         spk_db,
     };
-    Ok((storage, txids))
+    Ok(storage)
 }
 
 impl DenseStorage {

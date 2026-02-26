@@ -6,4 +6,4 @@
 
 mod node_harness;
 
-pub use node_harness::{HarnessOut, NodeHarness, run_harness};
+pub use node_harness::{NodeHarness, run_harness};

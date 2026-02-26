@@ -6,7 +6,6 @@ use std::{
 use bitcoin_slices::bitcoin_hashes::Hash;
 use bitcoin_slices::{Visit, Visitor, bsl};
 
-use bitcoin::hashes::Hash as _;
 use bitcoin::hashes::hash160::Hash as Hash160;
 use core::ops::ControlFlow;
 
@@ -62,12 +61,11 @@ impl Parser {
         in_prevout_index: &mut InPrevoutIndex,
         out_spent_index: &mut OutSpentByIndex,
         spk_db: &mut SledScriptPubkeyDb,
-    ) -> Result<HashMap<bitcoin::Txid, TxId>, BlockFileError> {
+    ) -> Result<(), BlockFileError> {
         let file_id = BlockFileId(0);
         let path = self.block_file_path(file_id);
         let bytes = std::fs::read(&path).map_err(BlockFileError::Io)?;
 
-        let mut txids = HashMap::new();
         let mut offset = 0usize;
         let mut blocks_parsed = 0u64;
         let (mut tx_in_total, mut tx_out_total) = tx_io_totals(txptr_index);
@@ -75,6 +73,7 @@ impl Parser {
             .last()
             .map_err(BlockFileError::Io)?
             .unwrap_or(0) as u64;
+        let mut txids = HashMap::new();
 
         while blocks_parsed < range.end && offset + BLOCK_START_LEN <= bytes.len() {
             let block_size =
@@ -100,7 +99,6 @@ impl Parser {
                     block_file: file_id,
                     block_start_in_file,
                     block_slice,
-                    txids: &mut txids,
                     txptr_index,
                     error: None,
                     tx_in_total: &mut tx_in_total,
@@ -111,6 +109,7 @@ impl Parser {
                     in_prevout_index,
                     out_spent_index,
                     spk_db,
+                    txids: &mut txids,
                 };
                 bsl::Block::visit(block_slice, &mut collector)
                     .map_err(|e| BlockFileError::Parse(e))?;
@@ -130,7 +129,7 @@ impl Parser {
             blocks_parsed += 1;
         }
 
-        Ok(txids)
+        Ok(())
     }
 }
 
@@ -139,7 +138,7 @@ struct TxIdCollector<'a> {
     block_file: BlockFileId,
     block_start_in_file: u64,
     block_slice: &'a [u8],
-    txids: &'a mut HashMap<bitcoin::Txid, TxId>,
+    txids: &'a mut HashMap<[u8; 32], TxId>,
     txptr_index: &'a mut ConfirmedTxPtrIndex,
     error: Option<BlockFileError>,
     tx_in_total: &'a mut u64,
@@ -159,11 +158,9 @@ impl Visitor for TxIdCollector<'_> {
         let out_id = if is_null_prevout(prevout) {
             OUTID_NONE
         } else {
-            // TODO: this serialization is stricly unnecessary
             let mut bytes = [0u8; 32];
             bytes.copy_from_slice(prevout.txid());
-            let prev_txid = bitcoin::Txid::from_byte_array(bytes);
-            if let Some(prev_dense) = self.txids.get(&prev_txid).copied() {
+            if let Some(prev_dense) = self.txids.get(&bytes).copied() {
                 let (start, end) = tx_out_range_for(prev_dense, self.txptr_index);
                 let vout = prevout.vout() as u64;
                 let out_id = start + vout;
@@ -228,10 +225,7 @@ impl Visitor for TxIdCollector<'_> {
         );
         match self.txptr_index.append(ptr) {
             Ok(txid) => {
-                self.txids.insert(
-                    bitcoin::Txid::from_slice(&tx.txid().to_byte_array()).unwrap(),
-                    txid,
-                );
+                self.txids.insert(tx.txid().to_byte_array(), txid);
             }
             Err(err) => {
                 self.error = Some(BlockFileError::Io(err));

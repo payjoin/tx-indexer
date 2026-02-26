@@ -88,6 +88,12 @@ impl NodeHarness {
         Ok(block)
     }
 
+    pub fn get_block_by_height(&self, height: u64) -> Result<Block> {
+        let hash = self.client().get_block_hash(height)?.block_hash().unwrap();
+        let block = self.get_block(hash)?;
+        Ok(block)
+    }
+
     /// Fetch raw transaction by txid (returns the transaction).
     pub fn get_raw_transaction(&self, txid: Txid) -> Result<Transaction> {
         let raw = self.client().get_raw_transaction(txid)?;
@@ -100,31 +106,34 @@ impl NodeHarness {
     }
 }
 
-/// Outcome of the test action: expected txids and block count after the action.
-/// The harness uses this to know how many blocks to parse and what to pass to the expected closure.
-#[derive(Clone, Debug)]
-pub struct HarnessOut {
-    pub expected_txids: Vec<Txid>,
-    pub block_count_after: u64,
-}
-
 /// Run the full harness: create node, run action, sync, build parser, run expected.
 pub fn run_harness<A, E>(action: A, expected: E) -> Result<()>
 where
-    A: FnOnce(&mut NodeHarness) -> Result<HarnessOut>,
+    A: FnOnce(&mut NodeHarness) -> Result<()>,
     E: FnOnce(
         &NodeHarness,
         &crate::dense::DenseStorage,
-        &HarnessOut,
         &HashMap<bitcoin::Txid, TxId>,
     ) -> Result<()>,
 {
     let mut harness = NodeHarness::new(None)?;
     let address = harness.client().new_address()?;
     harness.generate_blocks(101, &address)?;
+    let block_height_before = harness.get_block_count()?;
 
-    let out = action(&mut harness)?;
+    action(&mut harness)?;
 
+    let block_height_after = harness.get_block_count()?;
+    let mut expected_txids = HashMap::new();
+    // get_block_count() returns tip height (0-based). New blocks are at (block_height_before + 1)..=block_height_after.
+    let mut running_index = block_height_before + 1;
+    for i in (block_height_before + 1)..=block_height_after {
+        let block = harness.get_block_by_height(i)?;
+        for tx in block.txdata {
+            expected_txids.insert(tx.compute_txid(), TxId::new(running_index as u32));
+            running_index += 1;
+        }
+    }
     // Give bitcoind time to flush block files to disk.
     std::thread::sleep(Duration::from_secs(2));
 
@@ -142,19 +151,26 @@ where
         ));
     }
 
-    // block_count_after is chain height (0-based); we need to parse height+1 blocks to include the tip.
-    let num_blocks = out.block_count_after + 1;
+    // Tip height is 0-based; number of blocks = tip + 1.
+    let block_count = block_height_after + 1;
     let paths = crate::dense::IndexPaths {
         txptr: temp_txptr_path(),
         block_tx: temp_block_tx_path(),
         in_prevout: temp_in_prevout_path(),
         out_spent: temp_out_spent_path(),
     };
-    let spk_db = SledDBFactory::open(std::env::temp_dir())?.spk_db()?;
-    let (storage, txids) = build_indices(harness.blocks_dir.clone(), 0..num_blocks, paths, spk_db)
+    let spk_db_path = std::env::temp_dir().join(format!(
+        "primitives_spk_{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos()
+    ));
+    let spk_db = SledDBFactory::open(spk_db_path)?.spk_db()?;
+    let storage = build_indices(harness.blocks_dir.clone(), 0..block_count, paths, spk_db)
         .map_err(|e| anyhow::anyhow!("parse_blocks: {:?}", e))?;
 
-    expected(&harness, &storage, &out, &txids)
+    expected(&harness, &storage, &expected_txids)
 }
 
 fn temp_txptr_path() -> PathBuf {
