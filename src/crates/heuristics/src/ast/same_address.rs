@@ -88,38 +88,34 @@ mod tests {
 
         // Coinbase 1
         let coinbase1 = DummyTxData {
-            id: TxId(1),
-            outputs: vec![DummyTxOutData::new(10_000, unique_spk1, 0, TxId(1))],
+            outputs: vec![DummyTxOutData::new(10_000, unique_spk1, 0)],
             spent_coins: vec![],
             n_locktime: 0,
         };
 
         // Coinbase 2
         let coinbase2 = DummyTxData {
-            id: TxId(2),
-            outputs: vec![DummyTxOutData::new(10_000, unique_spk2, 0, TxId(2))],
+            outputs: vec![DummyTxOutData::new(10_000, unique_spk2, 0)],
             spent_coins: vec![],
             n_locktime: 0,
         };
 
         // Spend coinbase 1, make payment + change (change spk is shared)
         let spend1 = DummyTxData {
-            id: TxId(3),
             spent_coins: vec![TxOutId::new(TxId(1), 0)],
             outputs: vec![
-                DummyTxOutData::new(4_000, unique_spk1, 0, TxId(3)), // payment
-                DummyTxOutData::new(5_000, shared_spk, 1, TxId(3)),  // change (shared with spend2)
+                DummyTxOutData::new(4_000, unique_spk1, 0), // payment
+                DummyTxOutData::new(5_000, shared_spk, 1),  // change (shared with spend2)
             ],
             n_locktime: 0,
         };
 
         // Spend coinbase 2, make payment + change (change spk is shared)
         let spend2 = DummyTxData {
-            id: TxId(4),
             spent_coins: vec![TxOutId::new(TxId(2), 0)],
             outputs: vec![
-                DummyTxOutData::new(4_000, unique_spk2, 0, TxId(4)), // payment
-                DummyTxOutData::new(5_000, shared_spk, 1, TxId(4)),  // change (shared with spend1)
+                DummyTxOutData::new(4_000, unique_spk2, 0), // payment
+                DummyTxOutData::new(5_000, shared_spk, 1),  // change (shared with spend1)
             ],
             n_locktime: 0,
         };

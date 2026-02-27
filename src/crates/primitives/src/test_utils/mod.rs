@@ -12,7 +12,6 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DummyTxData {
-    pub id: TxId,
     pub outputs: Vec<DummyTxOutData>,
     /// The outputs that are spent by this transaction
     pub spent_coins: Vec<TxOutId>,
@@ -20,14 +19,8 @@ pub struct DummyTxData {
 }
 
 impl DummyTxData {
-    pub fn new(
-        id: TxId,
-        outputs: Vec<DummyTxOutData>,
-        spent_coins: Vec<TxOutId>,
-        n_locktime: u32,
-    ) -> Self {
+    pub fn new(outputs: Vec<DummyTxOutData>, spent_coins: Vec<TxOutId>, n_locktime: u32) -> Self {
         Self {
-            id,
             outputs,
             spent_coins,
             n_locktime,
@@ -66,26 +59,23 @@ pub struct DummyTxOutData {
     value: u64,
     spk_hash: ScriptPubkeyHash,
     vout: u32,
-    containing_txid: TxId,
 }
 
 impl DummyTxOutData {
-    pub fn new(value: u64, spk_hash: ScriptPubkeyHash, vout: u32, containing_txid: TxId) -> Self {
+    pub fn new(value: u64, spk_hash: ScriptPubkeyHash, vout: u32) -> Self {
         Self {
             value,
             spk_hash,
             vout,
-            containing_txid,
         }
     }
 
     /// Create a new DummyTxOutData with a given amount and a dummy spk hash
-    pub fn new_with_amount(amount: u64, vout: u32, containing_txid: TxId) -> Self {
+    pub fn new_with_amount(amount: u64, vout: u32) -> Self {
         Self {
             value: amount,
             spk_hash: [0u8; 20],
             vout,
-            containing_txid,
         }
     }
 }

@@ -47,10 +47,7 @@ impl NLockTimeChangeIdentification {
 
 #[cfg(test)]
 mod tests {
-    use tx_indexer_primitives::{
-        loose::TxId,
-        test_utils::{DummyTxData, DummyTxOut, DummyTxOutData},
-    };
+    use tx_indexer_primitives::test_utils::{DummyTxData, DummyTxOut, DummyTxOutData};
 
     use super::*;
 
@@ -59,8 +56,7 @@ mod tests {
         let txout = DummyTxOut {
             vout: 0,
             containing_tx: DummyTxData {
-                id: TxId(1),
-                outputs: vec![DummyTxOutData::new_with_amount(100, 0, TxId(1))],
+                outputs: vec![DummyTxOutData::new_with_amount(100, 0)],
                 spent_coins: vec![],
                 n_locktime: 0,
             },
@@ -76,15 +72,13 @@ mod tests {
         let tx_out = DummyTxOut {
             vout: 0,
             containing_tx: DummyTxData {
-                id: TxId(1),
-                outputs: vec![DummyTxOutData::new_with_amount(100, 0, TxId(1))],
+                outputs: vec![DummyTxOutData::new_with_amount(100, 0)],
                 spent_coins: vec![],
                 n_locktime: 0,
             },
         };
         let spending_tx = DummyTxData {
-            id: TxId(2),
-            outputs: vec![DummyTxOutData::new_with_amount(100, 0, TxId(2))],
+            outputs: vec![DummyTxOutData::new_with_amount(100, 0)],
             spent_coins: vec![],
             n_locktime: 0,
         };
@@ -97,15 +91,13 @@ mod tests {
         let tx_out = DummyTxOut {
             vout: 0,
             containing_tx: DummyTxData {
-                id: TxId(1),
-                outputs: vec![DummyTxOutData::new_with_amount(100, 0, TxId(1))],
+                outputs: vec![DummyTxOutData::new_with_amount(100, 0)],
                 spent_coins: vec![],
                 n_locktime: 1,
             },
         };
         let spending_tx = DummyTxData {
-            id: TxId(2),
-            outputs: vec![DummyTxOutData::new_with_amount(100, 0, TxId(2))],
+            outputs: vec![DummyTxOutData::new_with_amount(100, 0)],
             spent_coins: vec![],
             n_locktime: 1,
         };

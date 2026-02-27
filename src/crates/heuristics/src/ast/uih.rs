@@ -229,22 +229,19 @@ mod tests {
     fn setup_uih1_qualifying_fixture() -> Vec<Arc<dyn AbstractTransaction + Send + Sync>> {
         vec![
             Arc::new(DummyTxData {
-                id: TxId(1),
-                outputs: vec![DummyTxOutData::new_with_amount(100, 0, TxId(1))],
+                outputs: vec![DummyTxOutData::new_with_amount(100, 0)],
                 spent_coins: vec![],
                 n_locktime: 0,
             }),
             Arc::new(DummyTxData {
-                id: TxId(2),
-                outputs: vec![DummyTxOutData::new_with_amount(200, 0, TxId(2))],
+                outputs: vec![DummyTxOutData::new_with_amount(200, 0)],
                 spent_coins: vec![],
                 n_locktime: 0,
             }),
             Arc::new(DummyTxData {
-                id: TxId(3),
                 outputs: vec![
-                    DummyTxOutData::new_with_amount(50, 0, TxId(3)),
-                    DummyTxOutData::new_with_amount(250, 1, TxId(3)),
+                    DummyTxOutData::new_with_amount(50, 0),
+                    DummyTxOutData::new_with_amount(250, 1),
                 ],
                 spent_coins: vec![TxOutId::new(TxId(1), 0), TxOutId::new(TxId(2), 0)],
                 n_locktime: 0,
@@ -255,22 +252,19 @@ mod tests {
     fn setup_uih1_no_candidate_fixture() -> Vec<Arc<dyn AbstractTransaction + Send + Sync>> {
         vec![
             Arc::new(DummyTxData {
-                id: TxId(1),
-                outputs: vec![DummyTxOutData::new_with_amount(50, 0, TxId(1))],
+                outputs: vec![DummyTxOutData::new_with_amount(50, 0)],
                 spent_coins: vec![],
                 n_locktime: 0,
             }),
             Arc::new(DummyTxData {
-                id: TxId(2),
-                outputs: vec![DummyTxOutData::new_with_amount(100, 0, TxId(2))],
+                outputs: vec![DummyTxOutData::new_with_amount(100, 0)],
                 spent_coins: vec![],
                 n_locktime: 0,
             }),
             Arc::new(DummyTxData {
-                id: TxId(3),
                 outputs: vec![
-                    DummyTxOutData::new_with_amount(80, 0, TxId(3)),
-                    DummyTxOutData::new_with_amount(70, 1, TxId(3)),
+                    DummyTxOutData::new_with_amount(80, 0),
+                    DummyTxOutData::new_with_amount(70, 1),
                 ],
                 spent_coins: vec![TxOutId::new(TxId(1), 0), TxOutId::new(TxId(2), 0)],
                 n_locktime: 0,
@@ -281,22 +275,19 @@ mod tests {
     fn setup_uih1_tie_fixture() -> Vec<Arc<dyn AbstractTransaction + Send + Sync>> {
         vec![
             Arc::new(DummyTxData {
-                id: TxId(1),
-                outputs: vec![DummyTxOutData::new_with_amount(100, 0, TxId(1))],
+                outputs: vec![DummyTxOutData::new_with_amount(100, 0)],
                 spent_coins: vec![],
                 n_locktime: 0,
             }),
             Arc::new(DummyTxData {
-                id: TxId(2),
-                outputs: vec![DummyTxOutData::new_with_amount(200, 0, TxId(2))],
+                outputs: vec![DummyTxOutData::new_with_amount(200, 0)],
                 spent_coins: vec![],
                 n_locktime: 0,
             }),
             Arc::new(DummyTxData {
-                id: TxId(3),
                 outputs: vec![
-                    DummyTxOutData::new_with_amount(50, 0, TxId(3)),
-                    DummyTxOutData::new_with_amount(50, 1, TxId(3)),
+                    DummyTxOutData::new_with_amount(50, 0),
+                    DummyTxOutData::new_with_amount(50, 1),
                 ],
                 spent_coins: vec![TxOutId::new(TxId(1), 0), TxOutId::new(TxId(2), 0)],
                 n_locktime: 0,
@@ -307,22 +298,19 @@ mod tests {
     fn setup_uih2_no_unnecessary_fixture() -> Vec<Arc<dyn AbstractTransaction + Send + Sync>> {
         vec![
             Arc::new(DummyTxData {
-                id: TxId(1),
-                outputs: vec![DummyTxOutData::new_with_amount(100, 0, TxId(1))],
+                outputs: vec![DummyTxOutData::new_with_amount(100, 0)],
                 spent_coins: vec![],
                 n_locktime: 0,
             }),
             Arc::new(DummyTxData {
-                id: TxId(2),
-                outputs: vec![DummyTxOutData::new_with_amount(200, 0, TxId(2))],
+                outputs: vec![DummyTxOutData::new_with_amount(200, 0)],
                 spent_coins: vec![],
                 n_locktime: 0,
             }),
             Arc::new(DummyTxData {
-                id: TxId(3),
                 outputs: vec![
-                    DummyTxOutData::new_with_amount(250, 0, TxId(3)),
-                    DummyTxOutData::new_with_amount(40, 1, TxId(3)),
+                    DummyTxOutData::new_with_amount(250, 0),
+                    DummyTxOutData::new_with_amount(40, 1),
                 ],
                 spent_coins: vec![TxOutId::new(TxId(1), 0), TxOutId::new(TxId(2), 0)],
                 n_locktime: 0,
@@ -333,22 +321,19 @@ mod tests {
     fn setup_uih2_boundary_fixture() -> Vec<Arc<dyn AbstractTransaction + Send + Sync>> {
         vec![
             Arc::new(DummyTxData {
-                id: TxId(1),
-                outputs: vec![DummyTxOutData::new_with_amount(100, 0, TxId(1))],
+                outputs: vec![DummyTxOutData::new_with_amount(100, 0)],
                 spent_coins: vec![],
                 n_locktime: 0,
             }),
             Arc::new(DummyTxData {
-                id: TxId(2),
-                outputs: vec![DummyTxOutData::new_with_amount(200, 0, TxId(2))],
+                outputs: vec![DummyTxOutData::new_with_amount(200, 0)],
                 spent_coins: vec![],
                 n_locktime: 0,
             }),
             Arc::new(DummyTxData {
-                id: TxId(3),
                 outputs: vec![
-                    DummyTxOutData::new_with_amount(200, 0, TxId(3)),
-                    DummyTxOutData::new_with_amount(0, 1, TxId(3)),
+                    DummyTxOutData::new_with_amount(200, 0),
+                    DummyTxOutData::new_with_amount(0, 1),
                 ],
                 spent_coins: vec![TxOutId::new(TxId(1), 0), TxOutId::new(TxId(2), 0)],
                 n_locktime: 0,
@@ -359,43 +344,37 @@ mod tests {
     fn setup_uih_mixed_fixture() -> Vec<Arc<dyn AbstractTransaction + Send + Sync>> {
         vec![
             Arc::new(DummyTxData {
-                id: TxId(1),
-                outputs: vec![DummyTxOutData::new_with_amount(100, 0, TxId(1))],
+                outputs: vec![DummyTxOutData::new_with_amount(100, 0)],
                 spent_coins: vec![],
                 n_locktime: 0,
             }),
             Arc::new(DummyTxData {
-                id: TxId(2),
-                outputs: vec![DummyTxOutData::new_with_amount(200, 0, TxId(2))],
+                outputs: vec![DummyTxOutData::new_with_amount(200, 0)],
                 spent_coins: vec![],
                 n_locktime: 0,
             }),
             Arc::new(DummyTxData {
-                id: TxId(3),
-                outputs: vec![DummyTxOutData::new_with_amount(50, 0, TxId(3))],
+                outputs: vec![DummyTxOutData::new_with_amount(50, 0)],
                 spent_coins: vec![],
                 n_locktime: 0,
             }),
             Arc::new(DummyTxData {
-                id: TxId(4),
-                outputs: vec![DummyTxOutData::new_with_amount(260, 0, TxId(4))],
+                outputs: vec![DummyTxOutData::new_with_amount(260, 0)],
                 spent_coins: vec![],
                 n_locktime: 0,
             }),
             Arc::new(DummyTxData {
-                id: TxId(5),
                 outputs: vec![
-                    DummyTxOutData::new_with_amount(200, 0, TxId(5)),
-                    DummyTxOutData::new_with_amount(30, 1, TxId(5)),
+                    DummyTxOutData::new_with_amount(200, 0),
+                    DummyTxOutData::new_with_amount(30, 1),
                 ],
                 spent_coins: vec![TxOutId::new(TxId(1), 0), TxOutId::new(TxId(2), 0)],
                 n_locktime: 0,
             }),
             Arc::new(DummyTxData {
-                id: TxId(6),
                 outputs: vec![
-                    DummyTxOutData::new_with_amount(270, 0, TxId(6)),
-                    DummyTxOutData::new_with_amount(10, 1, TxId(6)),
+                    DummyTxOutData::new_with_amount(270, 0),
+                    DummyTxOutData::new_with_amount(10, 1),
                 ],
                 spent_coins: vec![TxOutId::new(TxId(3), 0), TxOutId::new(TxId(4), 0)],
                 n_locktime: 0,
