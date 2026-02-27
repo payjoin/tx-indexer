@@ -36,7 +36,7 @@ impl Node for MultiInputHeuristicNode {
         let mut clustering = SparseDisjointSet::new();
 
         for tx_id in &tx_ids {
-            let tx = ctx.unified_storage().tx(*tx_id);
+            let tx = tx_id.with(ctx.unified_storage());
             let set = crate::common_input::MultiInputHeuristic::merge_prevouts(&tx);
             clustering = clustering.join(&set);
         }

@@ -1,8 +1,11 @@
 use crate::{
     AnyInId, AnyOutId, AnyTxId,
     traits::{
-        abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut},
-        graph_index::IndexedGraph,
+        abstract_types::{
+            AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
+            EnumerateSpentTxOuts,
+        },
+        graph_index::{IndexedGraph, TxInOwnerIndex},
     },
 };
 
@@ -62,6 +65,32 @@ impl<'a> TxOutHandle<'a> {
         self.out_id
     }
 
+    pub fn txid(&self) -> AnyTxId {
+        self.index.outpoint_for_out(&self.out_id).0
+    }
+
+    pub fn vout(&self) -> u32 {
+        self.index.outpoint_for_out(&self.out_id).1
+    }
+
+    pub fn containing_tx(&self) -> TxHandle<'a> {
+        TxHandle {
+            tx_id: self.txid(),
+            index: self.index,
+        }
+    }
+
+    pub fn spender_txin_id(&self) -> Option<AnyInId> {
+        self.index.spending_txin(&self.out_id)
+    }
+
+    pub fn spender_txin(&self) -> Option<TxInHandle<'a>> {
+        self.spender_txin_id().map(|in_id| TxInHandle {
+            in_id,
+            index: self.index,
+        })
+    }
+
     // TODO: seperate methods
     fn output_data(&self) -> (bitcoin::Amount, crate::ScriptPubkeyHash) {
         self.index.tx_out_data(&self.out_id)
@@ -77,6 +106,29 @@ pub struct TxInHandle<'a> {
 impl<'a> TxInHandle<'a> {
     pub fn id(&self) -> AnyInId {
         self.in_id
+    }
+
+    pub fn txid(&self) -> AnyTxId {
+        self.index.txid_for_in(&self.in_id)
+    }
+
+    pub fn containing_tx(&self) -> TxHandle<'a> {
+        TxHandle {
+            tx_id: self.txid(),
+            index: self.index,
+        }
+    }
+}
+
+impl<'a> EnumerateSpentTxOuts for TxHandle<'a> {
+    fn spent_coins(&self) -> impl Iterator<Item = AnyOutId> {
+        self.inputs().filter_map(|input| input.prev_txout_id())
+    }
+}
+
+impl<'a> EnumerateOutputValueInArbitraryOrder for TxHandle<'a> {
+    fn output_values(&self) -> impl Iterator<Item = bitcoin::Amount> {
+        self.outputs().map(|output| output.value())
     }
 }
 

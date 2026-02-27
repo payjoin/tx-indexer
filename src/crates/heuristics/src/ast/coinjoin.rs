@@ -36,7 +36,7 @@ impl Node for IsCoinJoinNode {
         tx_ids
             .iter()
             .map(|tx_id| {
-                let tx = ctx.unified_storage().tx(*tx_id);
+                let tx = tx_id.with(ctx.unified_storage());
                 (*tx_id, NaiveCoinjoinDetection::is_coinjoin(&tx))
             })
             .collect()

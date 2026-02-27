@@ -1,7 +1,7 @@
 use crate::handle::TxHandle;
 use crate::traits::graph_index::{
-    IndexedGraph, OutpointIndex, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex, TxIoIndex,
-    TxOutDataIndex,
+    IndexedGraph, OutpointIndex, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxInOwnerIndex,
+    TxIndex, TxIoIndex, TxOutDataIndex,
 };
 use crate::{
     AnyInId, AnyOutId, AnyTxId, ScriptPubkeyHash, traits::abstract_types::AbstractTransaction,
@@ -219,6 +219,15 @@ impl TxInIndex for InMemoryIndex {
             .get(&loose_out)
             .cloned()
             .map(AnyInId::from)
+    }
+}
+
+impl TxInOwnerIndex for InMemoryIndex {
+    fn txid_for_in(&self, in_id: &AnyInId) -> AnyTxId {
+        let loose_in = in_id
+            .loose_id()
+            .expect("loose storage only supports loose txin ids");
+        AnyTxId::from(loose_in.txid())
     }
 }
 

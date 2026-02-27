@@ -55,12 +55,9 @@ impl Node for UnnecessaryInputHeuristic1Node {
             let input_values: Vec<Amount> = tx
                 .inputs()
                 .filter_map(|input| {
-                    let prev_out_id = input.prev_txout_id()?;
-                    let prev_tx = input.prev_txid()?.with(ctx.unified_storage());
-                    prev_tx
-                        .outputs()
-                        .find(|o| o.id() == prev_out_id)
-                        .map(|o| o.value())
+                    input
+                        .prev_txout_id()
+                        .map(|out_id| out_id.with(ctx.unified_storage()).value())
                 })
                 .collect();
             if input_values.is_empty() {
@@ -140,12 +137,9 @@ impl Node for UnnecessaryInputHeuristic2Node {
             let input_values: Vec<Amount> = tx
                 .inputs()
                 .filter_map(|input| {
-                    let prev_out_id = input.prev_txout_id()?;
-                    let prev_tx = input.prev_txid()?.with(ctx.unified_storage());
-                    prev_tx
-                        .outputs()
-                        .find(|o| o.id() == prev_out_id)
-                        .map(|o| o.value())
+                    input
+                        .prev_txout_id()
+                        .map(|out_id| out_id.with(ctx.unified_storage()).value())
                 })
                 .collect();
 

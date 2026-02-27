@@ -13,6 +13,10 @@ pub trait TxInIndex {
     fn spending_txin(&self, tx: &AnyOutId) -> Option<AnyInId>;
 }
 
+pub trait TxInOwnerIndex {
+    fn txid_for_in(&self, in_id: &AnyInId) -> AnyTxId;
+}
+
 pub trait ScriptPubkeyIndex {
     /// Returns the first transaction output ID that uses the given script pubkey.
     fn script_pubkey_to_txout_id(&self, script_pubkey: &ScriptPubkeyHash) -> Option<AnyOutId>;
@@ -41,6 +45,7 @@ pub trait IndexedGraph:
     + Sync
     + PrevOutIndex
     + TxInIndex
+    + TxInOwnerIndex
     + ScriptPubkeyIndex
     + TxIndex
     + TxIoIndex

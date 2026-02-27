@@ -39,15 +39,13 @@ impl Node for ChangeIdentificationNode {
         let mut result = HashMap::new();
 
         for output_id in txouts.iter() {
-            let tx_id = ctx.unified_storage().txid_for_out(*output_id);
-            let tx = tx_id.with(ctx.unified_storage());
+            let output = output_id.with(ctx.unified_storage());
+            let tx = output.containing_tx();
             let output_count = tx.output_len();
             if output_count == 0 {
                 continue;
             }
-
-            let last_output = tx.output_at(output_count - 1);
-            result.insert(*output_id, *output_id == last_output.id());
+            result.insert(*output_id, output.vout() as usize == output_count - 1);
         }
 
         result
@@ -109,13 +107,12 @@ impl Node for FingerPrintChangeIdentificationNode {
         let mut result = HashMap::new();
 
         for output_id in txouts.iter() {
-            let tx_id = ctx.unified_storage().txid_for_out(*output_id);
-            let containing_tx = ctx.unified_storage().tx(tx_id);
+            let output = output_id.with(ctx.unified_storage());
+            let containing_tx = output.containing_tx();
 
-            let is_change = match ctx.unified_storage().spender_for_out(*output_id) {
+            let is_change = match output.spender_txin() {
                 Some(spending_txin) => {
-                    let spending_txid = ctx.unified_storage().txid_for_in(spending_txin);
-                    let spending_tx = ctx.unified_storage().tx(spending_txid);
+                    let spending_tx = spending_txin.containing_tx();
                     if containing_tx.locktime() == 0 && spending_tx.locktime() == 0 {
                         false
                     } else {
@@ -166,7 +163,7 @@ impl Node for IsUnilateralNode {
         let mut result = HashMap::new();
 
         for tx_id in &tx_ids {
-            let tx = ctx.unified_storage().tx(*tx_id);
+            let tx = tx_id.with(ctx.unified_storage());
             let inputs: Vec<AnyOutId> = tx
                 .inputs()
                 .filter_map(|input| input.prev_txout_id())

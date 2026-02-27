@@ -3,8 +3,8 @@ use crate::handle::{TxHandle, TxInHandle, TxOutHandle};
 use crate::loose::InMemoryIndex;
 use crate::parser::BlockFileError;
 use crate::traits::graph_index::{
-    IndexedGraph, OutpointIndex, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxIndex, TxIoIndex,
-    TxOutDataIndex,
+    IndexedGraph, OutpointIndex, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxInOwnerIndex,
+    TxIndex, TxIoIndex, TxOutDataIndex,
 };
 use crate::{ScriptPubkeyHash, dense, loose, traits::abstract_types::AbstractTransaction};
 use crate::{dense::build_indices, loose::LooseIndexBuilder, sled::spk_db::SledScriptPubkeyDb};
@@ -424,6 +424,12 @@ impl PrevOutIndex for UnifiedStorage {
 impl TxInIndex for UnifiedStorage {
     fn spending_txin(&self, tx: &AnyOutId) -> Option<AnyInId> {
         self.spender_for_out(*tx)
+    }
+}
+
+impl TxInOwnerIndex for UnifiedStorage {
+    fn txid_for_in(&self, in_id: &AnyInId) -> AnyTxId {
+        UnifiedStorage::txid_for_in(self, *in_id)
     }
 }
 
