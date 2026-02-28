@@ -8,8 +8,12 @@ use tx_indexer_pipeline::{
     value::{TxMask, TxOutClustering, TxOutMask, TxOutSet, TxSet},
 };
 use tx_indexer_primitives::{
-    AbstractTransaction, AbstractTxIn,
+    AbstractTxIn,
     unified::{AnyOutId, AnyTxId},
+};
+
+use crate::change_identification::{
+    NLockTimeChangeIdentification, NaiveChangeIdentificationHueristic, TxOutChangeAnnotation,
 };
 
 /// Node that identifies change outputs in transactions.
@@ -40,12 +44,11 @@ impl Node for ChangeIdentificationNode {
 
         for output_id in txouts.iter() {
             let output = output_id.with(ctx.unified_storage());
-            let tx = output.containing_tx();
-            let output_count = tx.output_len();
-            if output_count == 0 {
-                continue;
-            }
-            result.insert(*output_id, output.vout() as usize == output_count - 1);
+            let is_change = matches!(
+                NaiveChangeIdentificationHueristic::is_change(output),
+                TxOutChangeAnnotation::Change
+            );
+            result.insert(*output_id, is_change);
         }
 
         result
@@ -108,16 +111,13 @@ impl Node for FingerPrintChangeIdentificationNode {
 
         for output_id in txouts.iter() {
             let output = output_id.with(ctx.unified_storage());
-            let containing_tx = output.containing_tx();
-
             let is_change = match output.spender_txin() {
                 Some(spending_txin) => {
                     let spending_tx = spending_txin.containing_tx();
-                    if containing_tx.locktime() == 0 && spending_tx.locktime() == 0 {
-                        false
-                    } else {
-                        containing_tx.locktime() > 0 && spending_tx.locktime() > 0
-                    }
+                    matches!(
+                        NLockTimeChangeIdentification::is_change(output, spending_tx),
+                        TxOutChangeAnnotation::Change
+                    )
                 }
                 None => false, // Unspent output: not change by fingerprint
             };

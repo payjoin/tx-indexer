@@ -1,11 +1,12 @@
 use crate::{
     AnyInId, AnyOutId, AnyTxId,
     traits::{
+        abstract_fingerprints::HasNLockTime,
         abstract_types::{
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateInputValueInArbitraryOrder,
-            EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts,
+            EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts, OutputCount, TxConstituent,
         },
-        graph_index::IndexedGraph,
+        graph_index::{IndexedGraph, ScriptPubkeyIndex, TxInOwnerIndex},
     },
 };
 
@@ -227,5 +228,29 @@ impl<'a> EnumerateInputValueInArbitraryOrder for TxHandle<'a> {
                 .prev_txout_id()
                 .map(|out_id| out_id.with(self.index).value())
         })
+    }
+}
+
+impl<'a> OutputCount for TxHandle<'a> {
+    fn output_count(&self) -> usize {
+        self.output_len()
+    }
+}
+
+impl<'a> HasNLockTime for TxHandle<'a> {
+    fn n_locktime(&self) -> u32 {
+        self.locktime()
+    }
+}
+
+impl<'a> TxConstituent for TxOutHandle<'a> {
+    type Handle = TxHandle<'a>;
+
+    fn containing_tx(&self) -> Self::Handle {
+        TxOutHandle::containing_tx(self)
+    }
+
+    fn vout(&self) -> usize {
+        self.vout() as usize
     }
 }
