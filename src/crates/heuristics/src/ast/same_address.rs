@@ -6,7 +6,7 @@ use tx_indexer_pipeline::{
 };
 
 use tx_indexer_disjoint_set::{DisJointSet, SparseDisjointSet};
-use tx_indexer_primitives::{AbstractTxOut, unified::AnyOutId};
+use tx_indexer_primitives::unified::AnyOutId;
 
 pub struct SameAddressClusteringNode {
     txs: Expr<TxSet>,

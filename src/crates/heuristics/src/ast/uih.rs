@@ -6,7 +6,6 @@
 
 use std::collections::HashSet;
 
-use bitcoin::Amount;
 use tx_indexer_pipeline::{
     engine::EvalContext,
     expr::Expr,
@@ -14,9 +13,11 @@ use tx_indexer_pipeline::{
     value::{TxMask, TxOutSet, TxSet},
 };
 use tx_indexer_primitives::{
-    AbstractTxIn, AbstractTxOut,
+    AbstractTxOut,
     unified::{AnyOutId, AnyTxId},
 };
+
+use crate::uih::UnnecessaryInputHeuristic;
 
 /// Node that implements UIH1 (Optimal change heuristic).
 ///
@@ -52,30 +53,7 @@ impl Node for UnnecessaryInputHeuristic1Node {
                 continue;
             }
 
-            let input_values: Vec<Amount> = tx
-                .inputs()
-                .filter_map(|input| {
-                    input
-                        .prev_txout_id()
-                        .map(|out_id| out_id.with(ctx.unified_storage()).value())
-                })
-                .collect();
-            if input_values.is_empty() {
-                continue;
-            }
-
-            let min_in = input_values
-                .iter()
-                .min()
-                .copied()
-                .expect("non-empty inputs");
-            let min_out = outputs
-                .iter()
-                .map(|(_, v)| *v)
-                .min()
-                .expect("non-empty outputs");
-
-            if min_out < min_in {
+            if let Some(min_out) = UnnecessaryInputHeuristic::uih1_min_output_value(&tx) {
                 for (out_id, v) in &outputs {
                     if *v == min_out {
                         result.insert(*out_id);
@@ -133,32 +111,7 @@ impl Node for UnnecessaryInputHeuristic2Node {
         for tx_id in &tx_ids {
             let tx = tx_id.with(ctx.unified_storage());
 
-            // TODO: internal method for collecting input values
-            let input_values: Vec<Amount> = tx
-                .inputs()
-                .filter_map(|input| {
-                    input
-                        .prev_txout_id()
-                        .map(|out_id| out_id.with(ctx.unified_storage()).value())
-                })
-                .collect();
-
-            // TODO: internal method for collecting output values
-            let output_values: Vec<Amount> = tx.outputs().map(|o| o.value()).collect();
-
-            let is_uih2 = if input_values.len() < 2 || output_values.is_empty() {
-                false
-            } else {
-                let sum_in = input_values.iter().fold(Amount::from_sat(0), |a, b| a + *b);
-                let min_in = input_values.iter().min().copied().expect("len >= 2");
-                let sum_out = output_values
-                    .iter()
-                    .fold(Amount::from_sat(0), |a, b| a + *b);
-                let min_out = output_values.iter().min().copied().expect("non-empty");
-                (sum_in - min_in) >= (sum_out - min_out)
-            };
-
-            result.insert(*tx_id, is_uih2);
+            result.insert(*tx_id, UnnecessaryInputHeuristic::is_uih2(&tx));
         }
 
         result

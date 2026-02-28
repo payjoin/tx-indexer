@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use bitcoin::Amount;
 
 use crate::{AnyOutId, AnyTxId, ScriptPubkeyHash};
@@ -25,87 +23,8 @@ pub trait EnumerateOutputValueInArbitraryOrder: AbstractTransaction {
     fn output_values(&self) -> impl Iterator<Item = Amount>;
 }
 
-// Blanket implementation for Arc<dyn AbstractTransaction>
-impl<T: AbstractTransaction + ?Sized> EnumerateSpentTxOuts for Arc<T> {
-    fn spent_coins(&self) -> impl Iterator<Item = AnyOutId> {
-        self.inputs().filter_map(|input| input.prev_txout_id())
-    }
-}
-
-impl<T: AbstractTransaction + ?Sized> EnumerateOutputValueInArbitraryOrder for Arc<T> {
-    fn output_values(&self) -> impl Iterator<Item = Amount> {
-        self.outputs().map(|output| output.value())
-    }
-}
-
-impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Arc<T> {
-    fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn + '_>> + '_> {
-        (**self).inputs()
-    }
-
-    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut + '_>> + '_> {
-        (**self).outputs()
-    }
-
-    fn output_len(&self) -> usize {
-        (**self).output_len()
-    }
-
-    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut + '_>> {
-        (**self).output_at(index)
-    }
-
-    fn locktime(&self) -> u32 {
-        (**self).locktime()
-    }
-}
-
-impl<T: AbstractTransaction + ?Sized> OutputCount for Arc<T> {
-    fn output_count(&self) -> usize {
-        self.output_len()
-    }
-}
-
-// --- Implementations for Box<dyn AbstractTransaction> ---
-
-impl<T: AbstractTransaction + ?Sized> EnumerateSpentTxOuts for Box<T> {
-    fn spent_coins(&self) -> impl Iterator<Item = AnyOutId> {
-        self.inputs().filter_map(|input| input.prev_txout_id())
-    }
-}
-
-impl<T: AbstractTransaction + ?Sized> EnumerateOutputValueInArbitraryOrder for Box<T> {
-    fn output_values(&self) -> impl Iterator<Item = Amount> {
-        self.outputs().map(|output| output.value())
-    }
-}
-
-impl<T: AbstractTransaction + ?Sized> OutputCount for Box<T> {
-    fn output_count(&self) -> usize {
-        self.output_len()
-    }
-}
-
-impl<T: AbstractTransaction + ?Sized> AbstractTransaction for Box<T> {
-    fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn + '_>> + '_> {
-        (**self).inputs()
-    }
-
-    fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut + '_>> + '_> {
-        (**self).outputs()
-    }
-
-    fn output_len(&self) -> usize {
-        (**self).output_len()
-    }
-
-    fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut + '_>> {
-        (**self).output_at(index)
-    }
-
-    fn locktime(&self) -> u32 {
-        (**self).locktime()
-    }
+pub trait EnumerateInputValueInArbitraryOrder: AbstractTransaction {
+    fn input_values(&self) -> impl Iterator<Item = Amount>;
 }
 
 /// Trait for transaction inputs

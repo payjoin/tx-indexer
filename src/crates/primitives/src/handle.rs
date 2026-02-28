@@ -2,10 +2,10 @@ use crate::{
     AnyInId, AnyOutId, AnyTxId,
     traits::{
         abstract_types::{
-            AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
-            EnumerateSpentTxOuts,
+            AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateInputValueInArbitraryOrder,
+            EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts,
         },
-        graph_index::{IndexedGraph, ScriptPubkeyIndex, TxInOwnerIndex},
+        graph_index::IndexedGraph,
     },
 };
 
@@ -217,5 +217,15 @@ impl<'a> AbstractTxOut for TxOutHandle<'a> {
     fn script_pubkey_hash(&self) -> crate::ScriptPubkeyHash {
         let (_value, spk_hash) = self.output_data();
         spk_hash
+    }
+}
+
+impl<'a> EnumerateInputValueInArbitraryOrder for TxHandle<'a> {
+    fn input_values(&self) -> impl Iterator<Item = bitcoin::Amount> {
+        self.inputs().filter_map(|input| {
+            input
+                .prev_txout_id()
+                .map(|out_id| out_id.with(self.index).value())
+        })
     }
 }
