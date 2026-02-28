@@ -29,15 +29,11 @@ impl Node for SameAddressClusteringNode {
         let txs = ctx.get(&self.txs);
         let clustering = SparseDisjointSet::new();
 
-        for tx_id in txs.iter() {
-            let tx = tx_id.with(ctx.unified_storage());
+        for tx in txs.iter().map(|txid| txid.with(ctx.unified_storage())) {
             for output in tx.outputs() {
                 let txout_id = output.id();
-                if let Some(first_txout) = ctx
-                    .unified_storage()
-                    .script_pubkey_to_txout_id(&output.script_pubkey_hash())
-                {
-                    clustering.union(txout_id, first_txout);
+                if let Some(first_txout) = output.first_with_same_spk() {
+                    clustering.union(txout_id, first_txout.id());
                 }
             }
         }

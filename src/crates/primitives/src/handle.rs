@@ -5,7 +5,7 @@ use crate::{
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
             EnumerateSpentTxOuts,
         },
-        graph_index::{IndexedGraph, TxInOwnerIndex},
+        graph_index::{IndexedGraph, ScriptPubkeyIndex, TxInOwnerIndex},
     },
 };
 
@@ -89,6 +89,16 @@ impl<'a> TxOutHandle<'a> {
             in_id,
             index: self.index,
         })
+    }
+
+    pub fn first_with_same_spk(&self) -> Option<TxOutHandle<'a>> {
+        let spk_hash = self.script_pubkey_hash();
+        self.index
+            .script_pubkey_to_txout_id(&spk_hash)
+            .map(|out_id| TxOutHandle {
+                out_id,
+                index: self.index,
+            })
     }
 
     // TODO: seperate methods
