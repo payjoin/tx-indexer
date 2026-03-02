@@ -986,6 +986,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "set-partitions"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61454a213ca8388d4d013daf1430421ed1a5592d0eeedba6b260855dfb509096"
+dependencies = [
+ "arrayvec",
+ "num-traits",
+]
+
+[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1078,6 +1088,15 @@ dependencies = [
  "rand",
  "tx-indexer-disjoint-set",
  "tx-indexer-pipeline",
+ "tx-indexer-primitives",
+]
+
+[[package]]
+name = "tx-indexer-partitions"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "set-partitions",
  "tx-indexer-primitives",
 ]
 

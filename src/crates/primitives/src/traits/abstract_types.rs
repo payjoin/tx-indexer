@@ -34,6 +34,7 @@ pub trait AbstractTxIn {
     /// Returns the output index of the previous output
     fn prev_vout(&self) -> Option<u32>;
     /// Returns the previous output ID
+    // TODO: this should be on the handler
     fn prev_txout_id(&self) -> Option<AnyOutId>;
 }
 

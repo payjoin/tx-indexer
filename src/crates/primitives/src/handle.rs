@@ -6,7 +6,7 @@ use crate::{
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateInputValueInArbitraryOrder,
             EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts, OutputCount, TxConstituent,
         },
-        graph_index::{IndexedGraph, ScriptPubkeyIndex, TxInOwnerIndex},
+        graph_index::IndexedGraph,
     },
 };
 
