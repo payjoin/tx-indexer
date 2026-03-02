@@ -12,6 +12,7 @@ members = [
     "src/crates/disjoint-set",
     "src/crates/fingerprints",
     "src/crates/block-index",
+    "src/crates/partitions",
 ]
 
 [workspace.dependencies]

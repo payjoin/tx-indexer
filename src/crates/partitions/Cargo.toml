@@ -1,0 +1,11 @@
+[package]
+name = "tx-indexer-partitions"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tx-indexer-primitives = { path = "../primitives" }
+set-partitions = "1.0.1"
+
+[dev-dependencies]
+bitcoin = { workspace = true }
