@@ -3,6 +3,7 @@ pub mod abstract_types;
 pub mod graph_index;
 
 pub use abstract_fingerprints::HasNLockTime;
+pub use abstract_types::{HasScriptPubkey, HasSequence, HasVersion, HasWitnessData};
 
 use crate::ScriptPubkeyHash;
 use crate::dense::TxOutId;

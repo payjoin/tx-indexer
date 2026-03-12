@@ -14,7 +14,10 @@ pub mod integration;
 #[cfg(test)]
 mod tests;
 
-pub use traits::abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut};
+pub use traits::abstract_types::{
+    AbstractTransaction, AbstractTxIn, AbstractTxOut, HasScriptPubkey, HasSequence, HasVersion,
+    HasWitnessData,
+};
 pub use unified::{AnyInId, AnyOutId, AnyTxId, UnifiedStorage, UnifiedStorageBuilder};
 
 pub type ScriptPubkeyHash = [u8; 20];

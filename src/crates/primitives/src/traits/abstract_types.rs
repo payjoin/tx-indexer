@@ -59,3 +59,54 @@ pub trait AbstractTransaction {
 
     fn locktime(&self) -> u32;
 }
+
+/// Sequence number of a transaction input (needed for RBF detection)
+pub trait HasSequence {
+    fn sequence(&self) -> u32;
+}
+
+/// Witness and scriptSig data for a transaction input
+pub trait HasWitnessData {
+    fn witness_items(&self) -> Vec<Vec<u8>>;
+    fn script_sig_bytes(&self) -> Vec<u8>;
+}
+
+/// Full scriptPubKey bytes for a transaction output
+pub trait HasScriptPubkey {
+    fn script_pubkey_bytes(&self) -> Vec<u8>;
+}
+
+/// Transaction version
+pub trait HasVersion {
+    fn version(&self) -> i32;
+}
+
+// --- bitcoin type impls ---
+
+impl HasSequence for bitcoin::TxIn {
+    fn sequence(&self) -> u32 {
+        self.sequence.0
+    }
+}
+
+impl HasWitnessData for bitcoin::TxIn {
+    fn witness_items(&self) -> Vec<Vec<u8>> {
+        self.witness.iter().map(|item| item.to_vec()).collect()
+    }
+
+    fn script_sig_bytes(&self) -> Vec<u8> {
+        self.script_sig.to_bytes()
+    }
+}
+
+impl HasScriptPubkey for bitcoin::TxOut {
+    fn script_pubkey_bytes(&self) -> Vec<u8> {
+        self.script_pubkey.to_bytes()
+    }
+}
+
+impl HasVersion for bitcoin::Transaction {
+    fn version(&self) -> i32 {
+        self.version.0
+    }
+}
