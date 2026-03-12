@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 
-use tx_indexer_primitives::{HasScriptPubkey, HasSequence};
+use bitcoin::Amount;
+use tx_indexer_primitives::{HasPrevOutput, HasScriptPubkey, HasSequence, HasValue};
 
 use crate::classify::classify_script_pubkey;
-use crate::types::OutputType;
+use crate::types::{InputSortingType, OutputStructureType, OutputType};
 
 /// Returns true if any input signals RBF.
 pub fn tx_signals_rbf(inputs: &[impl HasSequence]) -> bool {
@@ -32,4 +33,107 @@ pub fn mixed_input_types(prevouts: &[impl HasScriptPubkey]) -> bool {
         .map(|p| classify_script_pubkey(&p.script_pubkey_bytes()))
         .collect();
     types.len() > 1
+}
+
+/// Returns the input sorting types detected in the transaction.
+///
+/// `inputs` provides outpoint data for BIP69 checking.
+/// `prevout_values` provides the value of each prevout (in input order) for
+/// ascending/descending checking.
+pub fn input_order<I, P>(inputs: &[I], prevout_values: &[P]) -> Vec<InputSortingType>
+where
+    I: HasPrevOutput,
+    P: HasValue,
+{
+    if inputs.len() == 1 {
+        return vec![InputSortingType::Single];
+    }
+
+    let mut sorting_types = Vec::new();
+    let amounts: Vec<Amount> = prevout_values.iter().map(|p| p.value()).collect();
+
+    // Only check ascending/descending when amounts are not all equal — equal amounts
+    // trivially satisfy both orderings and reveal nothing about sorting intent.
+    let all_equal = amounts.windows(2).all(|w| w[0] == w[1]);
+    if !amounts.is_empty() && !all_equal {
+        let mut sorted_amounts = amounts.clone();
+        sorted_amounts.sort();
+        if amounts == sorted_amounts {
+            sorting_types.push(InputSortingType::Ascending);
+        }
+
+        sorted_amounts.reverse();
+        if amounts == sorted_amounts {
+            sorting_types.push(InputSortingType::Descending);
+        }
+    }
+
+    // Check BIP69 sorting.
+    // BIP69 sorts by txid as a little-endian uint256 (MSB = wire byte[31] = display byte[0]),
+    // which is equivalent to lexicographic comparison of the reversed wire bytes.
+    let outpoints: Vec<([u8; 32], u32)> = inputs
+        .iter()
+        .map(|i| (i.prev_outpoint_txid_bytes(), i.prev_outpoint_vout()))
+        .collect();
+
+    let mut sorted_outpoints = outpoints.clone();
+    sorted_outpoints.sort_by(|a, b| {
+        a.0.iter()
+            .rev()
+            .cmp(b.0.iter().rev())
+            .then_with(|| a.1.cmp(&b.1))
+    });
+
+    if outpoints == sorted_outpoints {
+        sorting_types.push(InputSortingType::Bip69);
+    }
+
+    if sorting_types.is_empty() {
+        sorting_types.push(InputSortingType::Unknown);
+    }
+
+    sorting_types
+}
+
+/// Returns the output structure types detected in the transaction.
+pub fn output_structure<O>(outputs: &[O]) -> Vec<OutputStructureType>
+where
+    O: HasValue + HasScriptPubkey,
+{
+    if outputs.len() == 1 {
+        return vec![OutputStructureType::Single];
+    }
+
+    let mut structure = Vec::new();
+
+    if outputs.len() == 2 {
+        structure.push(OutputStructureType::Double);
+    } else {
+        structure.push(OutputStructureType::Multi);
+    }
+
+    // Check BIP69 output sorting: sort by (value, scriptPubKey bytes)
+    let pairs: Vec<(Amount, Vec<u8>)> = outputs
+        .iter()
+        .map(|o| (o.value(), o.script_pubkey_bytes()))
+        .collect();
+
+    let amounts: Vec<Amount> = pairs.iter().map(|(v, _)| *v).collect();
+    let unique_amounts: HashSet<Amount> = amounts.iter().copied().collect();
+
+    let is_bip69 = if unique_amounts.len() != amounts.len() {
+        // Duplicate amounts — check both value and scriptPubKey are sorted
+        let mut sorted_pairs = pairs.clone();
+        sorted_pairs.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+        pairs == sorted_pairs
+    } else {
+        // Unique amounts — just check amounts are sorted
+        amounts.windows(2).all(|w| w[0] <= w[1])
+    };
+
+    if is_bip69 {
+        structure.push(OutputStructureType::Bip69);
+    }
+
+    structure
 }

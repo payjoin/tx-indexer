@@ -6,9 +6,9 @@ use crate::fingerprints::input::{low_r_grinding, signals_rbf};
 use crate::fingerprints::input_with_prevout::{has_uncompressed_pubkey, input_type};
 use crate::fingerprints::output::output_type;
 use crate::fingerprints::transaction::{
-    address_reuse, anti_fee_snipe, mixed_input_types, tx_signals_rbf,
+    address_reuse, anti_fee_snipe, input_order, mixed_input_types, output_structure, tx_signals_rbf,
 };
-use crate::types::OutputType;
+use crate::types::{InputSortingType, OutputStructureType, OutputType};
 
 fn get_tx_from_hex(hex_str: &str) -> Transaction {
     let bytes = hex::decode(hex_str).unwrap();
@@ -242,6 +242,247 @@ fn test_mixed_input_types() {
     assert!(mixed_input_types(&[prevout1, prevout3]));
 }
 
+// --- input_order tests ---
+
+fn make_txin_with_outpoint(txid_hex: &str, vout: u32) -> TxIn {
+    TxIn {
+        previous_output: OutPoint::new(txid_hex.parse().unwrap(), vout),
+        script_sig: ScriptBuf::new(),
+        sequence: bitcoin::Sequence::MAX,
+        witness: bitcoin::Witness::new(),
+    }
+}
+
+fn make_txout_with_value(sats: u64) -> TxOut {
+    TxOut {
+        value: Amount::from_sat(sats),
+        script_pubkey: ScriptBuf::new(),
+    }
+}
+
+#[test]
+fn test_input_order_single() {
+    let inputs = [dummy_txin()];
+    let prevouts = [make_txout_with_value(1000)];
+    assert_eq!(
+        input_order(&inputs, &prevouts),
+        vec![InputSortingType::Single]
+    );
+}
+
+#[test]
+fn test_input_order_ascending_values() {
+    // Two inputs with ascending prevout values
+    let inputs = [
+        make_txin_with_outpoint(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            0,
+        ),
+        make_txin_with_outpoint(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            0,
+        ),
+    ];
+    let prevouts = [make_txout_with_value(100), make_txout_with_value(200)];
+    let result = input_order(&inputs, &prevouts);
+    assert!(result.contains(&InputSortingType::Ascending));
+}
+
+#[test]
+fn test_input_order_descending_values() {
+    let inputs = [
+        make_txin_with_outpoint(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            0,
+        ),
+        make_txin_with_outpoint(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            0,
+        ),
+    ];
+    let prevouts = [make_txout_with_value(200), make_txout_with_value(100)];
+    let result = input_order(&inputs, &prevouts);
+    assert!(result.contains(&InputSortingType::Descending));
+}
+
+#[test]
+fn test_input_order_equal_values_skips_asc_desc() {
+    // Equal values should not report ascending or descending
+    let inputs = [
+        make_txin_with_outpoint(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            0,
+        ),
+        make_txin_with_outpoint(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            0,
+        ),
+    ];
+    let prevouts = [make_txout_with_value(100), make_txout_with_value(100)];
+    let result = input_order(&inputs, &prevouts);
+    assert!(!result.contains(&InputSortingType::Ascending));
+    assert!(!result.contains(&InputSortingType::Descending));
+    // But BIP69 should still be checked — these txids are already in display order
+    assert!(result.contains(&InputSortingType::Bip69));
+}
+
+#[test]
+fn test_input_order_bip69() {
+    // BIP69: sort by txid display order (reversed wire bytes), then vout.
+    // Wire bytes for "aa..aa" are [0xaa; 32]. Reversed = [0xaa; 32].
+    // Wire bytes for "bb..bb" are [0xbb; 32]. Reversed = [0xbb; 32].
+    // aa < bb in display order, so aa should come first for BIP69.
+    let inputs = [
+        make_txin_with_outpoint(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            0,
+        ),
+        make_txin_with_outpoint(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            0,
+        ),
+    ];
+    let prevouts = [make_txout_with_value(500), make_txout_with_value(100)];
+    let result = input_order(&inputs, &prevouts);
+    assert!(result.contains(&InputSortingType::Bip69));
+}
+
+#[test]
+fn test_input_order_not_bip69() {
+    // Reverse order of txids — not BIP69
+    let inputs = [
+        make_txin_with_outpoint(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            0,
+        ),
+        make_txin_with_outpoint(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            0,
+        ),
+    ];
+    let prevouts = [make_txout_with_value(100), make_txout_with_value(500)];
+    let result = input_order(&inputs, &prevouts);
+    assert!(!result.contains(&InputSortingType::Bip69));
+    // Values are ascending though
+    assert!(result.contains(&InputSortingType::Ascending));
+}
+
+#[test]
+fn test_input_order_unknown() {
+    // Not ascending, not descending, not BIP69
+    let inputs = [
+        make_txin_with_outpoint(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            0,
+        ),
+        make_txin_with_outpoint(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            0,
+        ),
+        make_txin_with_outpoint(
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            0,
+        ),
+    ];
+    let prevouts = [
+        make_txout_with_value(200),
+        make_txout_with_value(100),
+        make_txout_with_value(300),
+    ];
+    let result = input_order(&inputs, &prevouts);
+    assert_eq!(result, vec![InputSortingType::Unknown]);
+}
+
+// --- output_structure tests ---
+
+#[test]
+fn test_output_structure_single() {
+    let outputs = [make_txout_with_value(1000)];
+    assert_eq!(
+        output_structure(&outputs),
+        vec![OutputStructureType::Single]
+    );
+}
+
+#[test]
+fn test_output_structure_double() {
+    let outputs = [make_txout_with_value(100), make_txout_with_value(200)];
+    let result = output_structure(&outputs);
+    assert!(result.contains(&OutputStructureType::Double));
+    // Values are ascending → BIP69
+    assert!(result.contains(&OutputStructureType::Bip69));
+}
+
+#[test]
+fn test_output_structure_multi() {
+    let outputs = [
+        make_txout_with_value(100),
+        make_txout_with_value(200),
+        make_txout_with_value(300),
+    ];
+    let result = output_structure(&outputs);
+    assert!(result.contains(&OutputStructureType::Multi));
+    assert!(result.contains(&OutputStructureType::Bip69));
+}
+
+#[test]
+fn test_output_structure_not_bip69() {
+    let outputs = [make_txout_with_value(300), make_txout_with_value(100)];
+    let result = output_structure(&outputs);
+    assert!(result.contains(&OutputStructureType::Double));
+    assert!(!result.contains(&OutputStructureType::Bip69));
+}
+
+#[test]
+fn test_output_structure_bip69_with_duplicate_amounts() {
+    // Duplicate amounts — BIP69 requires sorting by (value, scriptPubKey)
+    let addr1 = bitcoin::Address::from_str("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")
+        .unwrap()
+        .require_network(bitcoin::Network::Bitcoin)
+        .unwrap();
+    let addr2 = bitcoin::Address::from_str("1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2")
+        .unwrap()
+        .require_network(bitcoin::Network::Bitcoin)
+        .unwrap();
+
+    let spk1 = addr1.script_pubkey();
+    let spk2 = addr2.script_pubkey();
+
+    // Ensure we know which scriptPubKey sorts first
+    let (first_spk, second_spk) = if spk1.to_bytes() < spk2.to_bytes() {
+        (spk1.clone(), spk2.clone())
+    } else {
+        (spk2.clone(), spk1.clone())
+    };
+
+    let outputs_sorted = [
+        TxOut {
+            value: Amount::from_sat(1000),
+            script_pubkey: first_spk.clone(),
+        },
+        TxOut {
+            value: Amount::from_sat(1000),
+            script_pubkey: second_spk.clone(),
+        },
+    ];
+    let result = output_structure(&outputs_sorted);
+    assert!(result.contains(&OutputStructureType::Bip69));
+
+    // Reverse order — not BIP69
+    let outputs_unsorted = [
+        TxOut {
+            value: Amount::from_sat(1000),
+            script_pubkey: second_spk,
+        },
+        TxOut {
+            value: Amount::from_sat(1000),
+            script_pubkey: first_spk,
+        },
+    ];
+    let result = output_structure(&outputs_unsorted);
+    assert!(!result.contains(&OutputStructureType::Bip69));
+}
+
 // --- integration test with real tx ---
 
 #[test]
@@ -266,4 +507,9 @@ fn test_electrum_tx_fingerprints() {
     // Output types
     assert_eq!(output_type(&tx.output[0]), OutputType::P2wpkh);
     assert_eq!(output_type(&tx.output[1]), OutputType::P2pkh);
+
+    // Output structure: 2 outputs (Double), values 9718 < 16147 so BIP69
+    let structure = output_structure(&tx.output);
+    assert!(structure.contains(&OutputStructureType::Double));
+    assert!(structure.contains(&OutputStructureType::Bip69));
 }

@@ -15,8 +15,8 @@ pub mod integration;
 mod tests;
 
 pub use traits::abstract_types::{
-    AbstractTransaction, AbstractTxIn, AbstractTxOut, HasScriptPubkey, HasSequence, HasVersion,
-    HasWitnessData,
+    AbstractTransaction, AbstractTxIn, AbstractTxOut, HasPrevOutput, HasScriptPubkey, HasSequence,
+    HasValue, HasVersion, HasWitnessData,
 };
 pub use unified::{AnyInId, AnyOutId, AnyTxId, UnifiedStorage, UnifiedStorageBuilder};
 

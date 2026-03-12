@@ -81,6 +81,18 @@ pub trait HasVersion {
     fn version(&self) -> i32;
 }
 
+/// Value (amount) of a transaction output
+pub trait HasValue {
+    fn value(&self) -> Amount;
+}
+
+/// Previous outpoint of a transaction input (for BIP69 sorting)
+pub trait HasPrevOutput {
+    /// Txid bytes in internal (wire) order
+    fn prev_outpoint_txid_bytes(&self) -> [u8; 32];
+    fn prev_outpoint_vout(&self) -> u32;
+}
+
 // --- bitcoin type impls ---
 
 impl HasSequence for bitcoin::TxIn {
@@ -108,5 +120,24 @@ impl HasScriptPubkey for bitcoin::TxOut {
 impl HasVersion for bitcoin::Transaction {
     fn version(&self) -> i32 {
         self.version.0
+    }
+}
+
+impl HasValue for bitcoin::TxOut {
+    fn value(&self) -> Amount {
+        self.value
+    }
+}
+
+impl HasPrevOutput for bitcoin::TxIn {
+    fn prev_outpoint_txid_bytes(&self) -> [u8; 32] {
+        let txid_ref: &[u8] = self.previous_output.txid.as_ref();
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(txid_ref);
+        bytes
+    }
+
+    fn prev_outpoint_vout(&self) -> u32 {
+        self.previous_output.vout
     }
 }
