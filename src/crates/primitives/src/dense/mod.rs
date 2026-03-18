@@ -4,6 +4,8 @@ use std::{
     path::PathBuf,
 };
 
+use bitcoin_block_index::BlockIndex;
+
 use crate::{
     ScriptPubkeyHash,
     indecies::{
@@ -14,6 +16,28 @@ use crate::{
     sled::spk_db::SledScriptPubkeyDb,
     traits::ScriptPubkeyDb,
 };
+
+#[derive(Clone, Debug)]
+pub struct BitcoindDataDirectory(PathBuf);
+
+impl BitcoindDataDirectory {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self(path.into())
+    }
+
+    pub fn block_file_path(&self, block_file: BlockFileId) -> PathBuf {
+        let file_name = format!("blk{:05}.dat", block_file.0);
+        self.blocks_dir().join(file_name)
+    }
+
+    pub fn blocks_dir(&self) -> PathBuf {
+        self.0.join("blocks")
+    }
+
+    pub fn blockindex_path(&self) -> PathBuf {
+        self.blocks_dir().join("index")
+    }
+}
 
 #[repr(transparent)]
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Ord, PartialOrd)]
@@ -71,6 +95,7 @@ pub struct IndexPaths {
     pub out_spent: PathBuf,
 }
 
+/// Indecies for a dense storage.
 pub struct DenseStorage {
     blocks_dir: PathBuf,
     txptr_index: ConfirmedTxPtrIndex,
@@ -80,13 +105,50 @@ pub struct DenseStorage {
     spk_db: SledScriptPubkeyDb,
 }
 
+pub fn build_indecies_from_tip(
+    data_dir: &BitcoindDataDirectory,
+    depth: u32,
+    paths: IndexPaths,
+    mut spk_db: SledScriptPubkeyDb,
+) -> Result<DenseStorage, BlockFileError> {
+    let mut parser = Parser::new(data_dir.clone());
+    let mut txptr_index = ConfirmedTxPtrIndex::create(&paths.txptr).map_err(BlockFileError::Io)?;
+    let mut block_tx_index = BlockTxIndex::create(&paths.block_tx).map_err(BlockFileError::Io)?;
+    let mut in_prevout_index =
+        InPrevoutIndex::create(&paths.in_prevout).map_err(BlockFileError::Io)?;
+    let mut out_spent_index =
+        OutSpentByIndex::create(&paths.out_spent).map_err(BlockFileError::Io)?;
+
+    let mut block_index =
+        BlockIndex::open(&data_dir.blockindex_path()).map_err(BlockFileError::BlockIndex)?;
+
+    parser.parse_from_tip(
+        &mut block_index,
+        depth,
+        &mut txptr_index,
+        &mut block_tx_index,
+        &mut in_prevout_index,
+        &mut out_spent_index,
+        &mut spk_db,
+    )?;
+    let storage = DenseStorage {
+        blocks_dir: data_dir.blocks_dir(),
+        txptr_index,
+        block_tx_index,
+        in_prevout_index,
+        out_spent_index,
+        spk_db,
+    };
+    Ok(storage)
+}
+
 pub fn build_indices(
-    blocks_dir: impl Into<PathBuf>,
+    data_dir: &BitcoindDataDirectory,
     range: std::ops::Range<u64>,
     paths: IndexPaths,
     mut spk_db: SledScriptPubkeyDb,
 ) -> Result<DenseStorage, BlockFileError> {
-    let mut parser = Parser::new(blocks_dir);
+    let mut parser = Parser::new(data_dir.clone());
     let mut txptr_index = ConfirmedTxPtrIndex::create(&paths.txptr).map_err(BlockFileError::Io)?;
     let mut block_tx_index = BlockTxIndex::create(&paths.block_tx).map_err(BlockFileError::Io)?;
     let mut in_prevout_index =
@@ -102,7 +164,7 @@ pub fn build_indices(
         &mut spk_db,
     )?;
     let storage = DenseStorage {
-        blocks_dir: parser.blocks_dir().to_path_buf(),
+        blocks_dir: data_dir.blocks_dir(),
         txptr_index,
         block_tx_index,
         in_prevout_index,

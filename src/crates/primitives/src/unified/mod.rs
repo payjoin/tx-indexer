@@ -1,13 +1,14 @@
-use crate::dense::DenseStorage;
+use crate::dense::{BitcoindDataDirectory, DenseStorage, build_indecies_from_tip};
 use crate::handle::{TxHandle, TxInHandle, TxOutHandle};
 use crate::loose::InMemoryIndex;
 use crate::parser::BlockFileError;
+use crate::sled::db::SledDBFactory;
 use crate::traits::graph_index::{
     IndexedGraph, OutpointIndex, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxInOwnerIndex,
     TxIndex, TxIoIndex, TxOutDataIndex,
 };
 use crate::{ScriptPubkeyHash, dense, loose, traits::abstract_types::AbstractTransaction};
-use crate::{dense::build_indices, loose::LooseIndexBuilder, sled::spk_db::SledScriptPubkeyDb};
+use crate::{dense::build_indices, loose::LooseIndexBuilder};
 use std::{ops::Range, path::PathBuf};
 
 #[repr(transparent)]
@@ -182,16 +183,9 @@ impl From<loose::TxInId> for AnyInId {
     }
 }
 
-pub struct DenseBuildSpec {
-    pub blocks_dir: PathBuf,
-    pub range: Range<u64>,
-    pub paths: dense::IndexPaths,
-    pub spk_db: SledScriptPubkeyDb,
-}
-
 pub struct UnifiedStorageBuilder {
-    dense: Option<DenseBuildSpec>,
-    loose: Option<LooseIndexBuilder>,
+    dense: Option<DenseStorage>,
+    loose: Option<InMemoryIndex>,
 }
 
 impl UnifiedStorageBuilder {
@@ -202,28 +196,61 @@ impl UnifiedStorageBuilder {
         }
     }
 
-    pub fn with_dense(mut self, spec: DenseBuildSpec) -> Self {
-        self.dense = Some(spec);
-        self
+    pub fn with_dense(
+        mut self,
+        data_dir: impl Into<PathBuf>,
+        range: Range<u64>,
+        index_path: PathBuf,
+    ) -> Result<Self, BlockFileError> {
+        let data_dir = BitcoindDataDirectory::new(data_dir);
+        let paths = dense::IndexPaths {
+            txptr: index_path.join("txptr.bin"),
+            block_tx: index_path.join("block_tx.bin"),
+            in_prevout: index_path.join("in_prevout.bin"),
+            out_spent: index_path.join("out_spent.bin"),
+        };
+        let spk_db = SledDBFactory::open(index_path.join("spk_db"))
+            .expect("failed to open sled DB")
+            .spk_db()
+            .expect("failed to open spk_db tree");
+        let storage = build_indices(&data_dir, range, paths, spk_db)?;
+        self.dense = Some(storage);
+        Ok(self)
     }
 
-    pub fn with_loose(mut self, builder: LooseIndexBuilder) -> Self {
-        self.loose = Some(builder);
-        self
+    pub fn with_dense_from_tip(
+        mut self,
+        data_dir: impl Into<PathBuf>,
+        depth: u32,
+        index_path: PathBuf,
+    ) -> Result<Self, BlockFileError> {
+        let data_dir = BitcoindDataDirectory::new(data_dir);
+        let paths = dense::IndexPaths {
+            txptr: index_path.join("txptr.bin"),
+            block_tx: index_path.join("block_tx.bin"),
+            in_prevout: index_path.join("in_prevout.bin"),
+            out_spent: index_path.join("out_spent.bin"),
+        };
+        let spk_db = SledDBFactory::open(index_path.join("spk_db"))
+            .expect("failed to open sled DB")
+            .spk_db()
+            .expect("failed to open spk_db tree");
+        let storage = build_indecies_from_tip(&data_dir, depth, paths, spk_db)?;
+        self.dense = Some(storage);
+        Ok(self)
+    }
+
+    pub fn with_loose(mut self, builder: LooseIndexBuilder) -> Result<Self, BlockFileError> {
+        self.loose = Some(builder.build());
+        Ok(self)
     }
 
     // TODO: specific error for unified storage
     pub fn build(self) -> Result<UnifiedStorage, BlockFileError> {
-        let dense = if let Some(spec) = self.dense {
-            let storage = build_indices(spec.blocks_dir, spec.range, spec.paths, spec.spk_db)?;
-            Some(storage)
-        } else {
-            None
-        };
-
-        let loose = self.loose.map(|builder| builder.build());
-
-        Ok(UnifiedStorage { dense, loose })
+        Ok(UnifiedStorage {
+            dense: self.dense,
+            loose: self.loose,
+        })
     }
 }
 
