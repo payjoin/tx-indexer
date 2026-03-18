@@ -1,0 +1,8 @@
+[package]
+name = "bitcoin-block-index"
+version = "0.1.0"
+edition = "2024"
+description = "Read-only access to Bitcoin Core's LevelDB block index"
+
+[dependencies]
+rusty-leveldb = "4.0"

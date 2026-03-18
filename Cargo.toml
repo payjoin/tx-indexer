@@ -11,6 +11,7 @@ members = [
     "src/crates/pipeline",
     "src/crates/disjoint-set",
     "src/crates/fingerprints",
+    "src/crates/block-index",
 ]
 
 [workspace.dependencies]
