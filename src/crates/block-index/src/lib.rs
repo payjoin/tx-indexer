@@ -79,9 +79,7 @@ impl BlockIndex {
         let raw = self.db.get(b"l").ok_or(Error::KeyNotFound("l"))?;
         let deobfuscated = self.deobfuscate(&raw);
         // Serialized as a 4-byte little-endian int.
-        let bytes: [u8; 4] = deobfuscated
-            .try_into()
-            .map_err(|_| Error::UnexpectedEof)?;
+        let bytes: [u8; 4] = deobfuscated.try_into().map_err(|_| Error::UnexpectedEof)?;
         Ok(u32::from_le_bytes(bytes))
     }
 
@@ -223,8 +221,8 @@ mod tests {
     fn parse_block_file_info_roundtrip() {
         // Encode 7 varints: all single-byte (value < 128).
         let data = vec![
-            10,  // n_blocks = 10
-            200, 1, // size (varint for a larger number)
+            10, // n_blocks = 10
+            200, 1,   // size (varint for a larger number)
             50,  // undo_size = 50
             0,   // height_first = 0
             100, // height_last = 100

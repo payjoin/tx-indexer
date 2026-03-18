@@ -10,7 +10,9 @@ pub fn read_varint(reader: &mut impl Read) -> Result<u64, Error> {
     let mut n: u64 = 0;
     loop {
         let mut buf = [0u8; 1];
-        reader.read_exact(&mut buf).map_err(|_| Error::UnexpectedEof)?;
+        reader
+            .read_exact(&mut buf)
+            .map_err(|_| Error::UnexpectedEof)?;
         let byte = buf[0];
         n = (n << 7) | (byte & 0x7F) as u64;
         if byte & 0x80 != 0 {

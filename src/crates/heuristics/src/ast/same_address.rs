@@ -182,7 +182,7 @@ mod tests {
         let spk_db = SledDBFactory::open(temp_dir("tx_indexer_dense_mainnet_spk"))?.spk_db()?;
         let unified = UnifiedStorageBuilder::new()
             .with_dense(tx_indexer_primitives::unified::DenseBuildSpec {
-                blocks_dir: blocks_dir.clone(),
+                data_dir: blocks_dir.clone(),
                 range: 0..1,
                 paths,
                 spk_db,
