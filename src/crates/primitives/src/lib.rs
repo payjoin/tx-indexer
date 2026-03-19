@@ -18,6 +18,6 @@ pub use traits::abstract_types::{
     AbstractTransaction, AbstractTxIn, AbstractTxOut, HasPrevOutput, HasScriptPubkey, HasSequence,
     HasValue, HasVersion, HasWitnessData,
 };
-pub use unified::{AnyInId, AnyOutId, AnyTxId, UnifiedStorage, UnifiedStorageBuilder};
+pub use unified::{AnyInId, AnyOutId, AnyTxId, UnifiedStorage};
 
 pub type ScriptPubkeyHash = [u8; 20];

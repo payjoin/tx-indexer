@@ -13,7 +13,7 @@ use crate::{
         TxPtr,
     },
     parser::{BlockFileError, Parser},
-    sled::spk_db::SledScriptPubkeyDb,
+    sled::{db::SledDBFactory, spk_db::SledScriptPubkeyDb},
     traits::ScriptPubkeyDb,
 };
 
@@ -175,6 +175,46 @@ pub fn build_indices(
 }
 
 impl DenseStorage {
+    /// Build dense storage by indexing a range of blocks from the first block file.
+    pub fn from_range(
+        data_dir: impl Into<PathBuf>,
+        range: std::ops::Range<u64>,
+        index_path: PathBuf,
+    ) -> Result<Self, BlockFileError> {
+        let data_dir = BitcoindDataDirectory::new(data_dir);
+        let paths = IndexPaths {
+            txptr: index_path.join("txptr.bin"),
+            block_tx: index_path.join("block_tx.bin"),
+            in_prevout: index_path.join("in_prevout.bin"),
+            out_spent: index_path.join("out_spent.bin"),
+        };
+        let spk_db = SledDBFactory::open(index_path.join("spk_db"))
+            .expect("failed to open sled DB")
+            .spk_db()
+            .expect("failed to open spk_db tree");
+        build_indices(&data_dir, range, paths, spk_db)
+    }
+
+    /// Build dense storage by indexing `depth` blocks backward from the chain tip.
+    pub fn from_tip(
+        data_dir: impl Into<PathBuf>,
+        depth: u32,
+        index_path: PathBuf,
+    ) -> Result<Self, BlockFileError> {
+        let data_dir = BitcoindDataDirectory::new(data_dir);
+        let paths = IndexPaths {
+            txptr: index_path.join("txptr.bin"),
+            block_tx: index_path.join("block_tx.bin"),
+            in_prevout: index_path.join("in_prevout.bin"),
+            out_spent: index_path.join("out_spent.bin"),
+        };
+        let spk_db = SledDBFactory::open(index_path.join("spk_db"))
+            .expect("failed to open sled DB")
+            .spk_db()
+            .expect("failed to open spk_db tree");
+        build_indecies_from_tip(&data_dir, depth, paths, spk_db)
+    }
+
     fn block_file_path(&self, block_file: BlockFileId) -> PathBuf {
         let file_name = format!("blk{:05}.dat", block_file.0);
         self.blocks_dir.join(file_name)
