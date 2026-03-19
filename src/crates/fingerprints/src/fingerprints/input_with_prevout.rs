@@ -16,8 +16,8 @@ pub fn input_type(prevout: &impl HasScriptPubkey) -> OutputType {
 /// - P2PK: the uncompressed pubkey is embedded directly in the prevout scriptPubKey.
 /// - P2PKH: the uncompressed pubkey is pushed in the spending script_sig.
 pub fn has_uncompressed_pubkey(
-    input: &impl HasWitnessData,
-    prevout: &impl HasScriptPubkey,
+    input: &(impl HasWitnessData + ?Sized),
+    prevout: &(impl HasScriptPubkey + ?Sized),
 ) -> bool {
     let spk_bytes = prevout.script_pubkey_bytes();
     let script = Script::from_bytes(&spk_bytes);
@@ -51,8 +51,8 @@ pub fn has_uncompressed_pubkey(
 /// where the second starts with 0x50 (an annex). A 65-byte signature means an
 /// explicit sighash type was encoded instead of the compact default form.
 pub fn taproot_keyspend_non_default_sighash(
-    input: &impl HasWitnessData,
-    prevout: &impl HasScriptPubkey,
+    input: &(impl HasWitnessData + ?Sized),
+    prevout: &(impl HasScriptPubkey + ?Sized),
 ) -> bool {
     let spk_bytes = prevout.script_pubkey_bytes();
     let script = Script::from_bytes(&spk_bytes);
@@ -70,4 +70,13 @@ pub fn taproot_keyspend_non_default_sighash(
     };
 
     sig.len() == 65
+}
+
+pub trait HasInputWithPrevoutFingerprints: HasWitnessData + HasScriptPubkey {
+    fn has_uncompressed_pubkey(&self, prevout: &impl HasScriptPubkey) -> bool {
+        has_uncompressed_pubkey(self, prevout)
+    }
+    fn taproot_keyspend_non_default_sighash(&self, prevout: &impl HasScriptPubkey) -> bool {
+        taproot_keyspend_non_default_sighash(self, prevout)
+    }
 }

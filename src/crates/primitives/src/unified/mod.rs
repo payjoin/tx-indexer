@@ -320,6 +320,20 @@ impl UnifiedStorage {
         dense.spender_for_out(dense_outid).map(AnyInId::from)
     }
 
+    /// Load the full `bitcoin::Transaction` for a dense (confirmed) txid.
+    pub fn get_bitcoin_tx(&self, txid: AnyTxId) -> Option<bitcoin::Transaction> {
+        let dense_txid = txid.confirmed_txid()?;
+        let dense = self.dense.as_ref()?;
+        Some(dense.get_tx(dense_txid))
+    }
+
+    /// Load a full `bitcoin::TxOut` for a dense (confirmed) output id.
+    pub fn get_bitcoin_txout(&self, out_id: AnyOutId) -> Option<bitcoin::TxOut> {
+        let dense_outid = out_id.confirmed_id()?;
+        let dense = self.dense.as_ref()?;
+        Some(dense.get_txout(dense_outid))
+    }
+
     pub fn tx(&self, txid: AnyTxId) -> std::sync::Arc<dyn AbstractTransaction> {
         if let Some(loose_txid) = txid.loose_txid() {
             let loose = self

@@ -1,29 +1,50 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u32)]
 pub enum OutputType {
-    P2pkh,
-    P2sh,
-    P2wpkh,
-    P2wsh,
-    P2tr,
-    OpReturn,
-    NonStandard,
+    P2pkh = 0,
+    P2sh = 1,
+    P2wpkh = 2,
+    P2wsh = 3,
+    P2tr = 4,
+    OpReturn = 5,
+    NonStandard = 6,
     // TODO: pay2anchor
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InputSortingType {
-    Single,
-    Ascending,
-    Descending,
-    Bip69,
-    Historical,
-    Unknown,
+impl OutputType {
+    pub fn as_u32(self) -> u32 {
+        self as u32
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum InputSortingType {
+    Single = 0,
+    Ascending = 1,
+    Descending = 2,
+    Bip69 = 3,
+    Historical = 4,
+    Unknown = 5,
+}
+
+impl InputSortingType {
+    pub fn as_u32(self) -> u32 {
+        self as u32
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
 pub enum OutputStructureType {
-    Single,
-    Double,
-    Multi,
-    Bip69,
+    Single = 0,
+    Double = 1,
+    Multi = 2,
+    Bip69 = 3,
+}
+
+impl OutputStructureType {
+    pub fn as_u32(self) -> u32 {
+        self as u32
+    }
 }
