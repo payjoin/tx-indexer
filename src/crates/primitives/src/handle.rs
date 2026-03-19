@@ -1,5 +1,5 @@
 use crate::{
-    AnyInId, AnyOutId, AnyTxId, HasWitnessData,
+    AnyInId, AnyOutId, AnyTxId, HasScriptPubkey, HasWitnessData,
     traits::{
         abstract_fingerprints::HasNLockTime,
         abstract_types::{
@@ -145,6 +145,15 @@ impl<'a> HasWitnessData for TxInHandle<'a> {
 
     fn script_sig_bytes(&self) -> Vec<u8> {
         self.index.script_sig_bytes(&self.in_id)
+    }
+}
+
+impl<'a> HasScriptPubkey for TxInHandle<'a> {
+    fn script_pubkey_bytes(&self) -> Vec<u8> {
+        self.prev_txout_id()
+            .map(|out_id| out_id.with(self.index).script_pubkey_hash())
+            .unwrap_or_default()
+            .to_vec()
     }
 }
 
