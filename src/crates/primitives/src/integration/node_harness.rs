@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::dense::TxId;
 
-use crate::dense::build_indices;
+use crate::dense::{BitcoindDataDirectory, build_indices};
 use crate::sled::db::SledDBFactory;
 
 /// Holds a running regtest node and its wallet RPC client. Dropping stops the node.
@@ -167,7 +167,13 @@ where
             .as_nanos()
     ));
     let spk_db = SledDBFactory::open(spk_db_path)?.spk_db()?;
-    let storage = build_indices(harness.blocks_dir.clone(), 0..block_count, paths, spk_db)
+    // blocks_dir is <datadir>/blocks/; BitcoindDataDirectory expects <datadir>/
+    let data_dir = BitcoindDataDirectory::new(
+        blocks_dir
+            .parent()
+            .expect("blocks_dir should have a parent"),
+    );
+    let storage = build_indices(&data_dir, 0..block_count, paths, spk_db)
         .map_err(|e| anyhow::anyhow!("parse_blocks: {:?}", e))?;
 
     expected(&harness, &storage, &expected_txids)

@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use tx_indexer_heuristics::ast::SignalsRbf;
 use tx_indexer_pipeline::{context::PipelineContext, engine::Engine, ops::AllDenseTxs};
-use tx_indexer_primitives::{UnifiedStorageBuilder, test_utils::temp_dir};
+use tx_indexer_primitives::{UnifiedStorage, dense::DenseStorage, test_utils::temp_dir};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -51,11 +51,9 @@ fn main() {
     // 1. Build indices into a temp directory
     let tmp = temp_dir("tx-indexer-example");
     let start = Instant::now();
-    let unified = UnifiedStorageBuilder::new()
-        .with_dense_from_tip(data_dir, depth, tmp.clone())
-        .expect("valid paths")
-        .build()
-        .expect("failed to build indices");
+    let unified: UnifiedStorage = DenseStorage::from_tip(data_dir, depth, tmp.clone())
+        .expect("failed to build indices")
+        .into();
     let index_elapsed = start.elapsed();
 
     let tx_count = unified.dense_txids_len();
