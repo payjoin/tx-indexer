@@ -6,7 +6,8 @@ use crate::fingerprints::input::{low_r_grinding, signals_rbf};
 use crate::fingerprints::input_with_prevout::{has_uncompressed_pubkey, input_type};
 use crate::fingerprints::output::output_type;
 use crate::fingerprints::transaction::{
-    address_reuse, anti_fee_snipe, input_order, mixed_input_types, output_structure, tx_signals_rbf,
+    address_reuse, anti_fee_snipe, input_order, mixed_input_types, output_structure, round_fee,
+    tx_signals_rbf, tx_version,
 };
 use crate::types::{InputSortingType, OutputStructureType, OutputType};
 
@@ -481,6 +482,51 @@ fn test_output_structure_bip69_with_duplicate_amounts() {
     ];
     let result = output_structure(&outputs_unsorted);
     assert!(!result.contains(&OutputStructureType::Bip69));
+}
+
+// --- tx_version tests ---
+
+#[test]
+fn test_tx_version() {
+    let tx_v1 = get_tx_from_hex(
+        "02000000000102fbc729acd99cee2d45267529dc5b350ea435fe213969fcb54fb3700f88c8184c0100000000fdffffff8d028c4c4836fb6cacb5c12bac2deb8388283360a9947fef734740cd77debbd00200000000fdffffff021826000000000000160014ef70029f96d2dec0d33b2e60838b5ae0db78b78d30a23d0000000000160014fa06516cb2ffdfd3497185660ce286b1aeebef5e0247304402202c0cc3d4d4d787dbbcfe039f12bb06b7bc3da6d52fa804d657b4d5f9c3c3260a0220171e6703016d8b1061bc82d83581045fae332093d76743118a255b5a6fc69e76012103416a98f79cd8f047cbf1c9f9e5c9848620043360cf606b35e6dd324b3896d78002483045022100fcc4e7d3805d54725ca6e539a1e04b576761e938e81e4c6f79db8c38aeecac91022030ae46783c7a5950f69302a2db443fa58ea2bba868f9ca61027d01578ad003d101210308e9e1ed1d187ce8ed6299989fdff6dfe566d116ac2bae0a3fc6a2c28610cd74e44e2700",
+    );
+    // This tx is version 2
+    assert_eq!(tx_version(&tx_v1), 2);
+}
+
+// --- round_fee tests ---
+
+#[test]
+fn test_round_fee_exact_thousand() {
+    // Fee = 10000 - 9000 = 1000 sats (round)
+    let prevouts = [make_txout_with_value(10000)];
+    let outputs = [make_txout_with_value(9000)];
+    assert_eq!(round_fee(&prevouts, &outputs), Some(true));
+}
+
+#[test]
+fn test_round_fee_not_round() {
+    // Fee = 10000 - 9743 = 257 sats (not round)
+    let prevouts = [make_txout_with_value(10000)];
+    let outputs = [make_txout_with_value(9743)];
+    assert_eq!(round_fee(&prevouts, &outputs), Some(false));
+}
+
+#[test]
+fn test_round_fee_zero() {
+    // Fee = 0 sats (not considered round — no fee is not a manual fee)
+    let prevouts = [make_txout_with_value(10000)];
+    let outputs = [make_txout_with_value(10000)];
+    assert_eq!(round_fee(&prevouts, &outputs), Some(false));
+}
+
+#[test]
+fn test_round_fee_overflow() {
+    // Output > input — invalid, returns None
+    let prevouts = [make_txout_with_value(1000)];
+    let outputs = [make_txout_with_value(2000)];
+    assert_eq!(round_fee(&prevouts, &outputs), None);
 }
 
 // --- integration test with real tx ---
