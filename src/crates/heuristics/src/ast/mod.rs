@@ -6,7 +6,7 @@
 mod change;
 mod coinjoin;
 mod common_input;
-mod rbf;
+mod fingerprints;
 mod same_address;
 mod uih;
 
@@ -19,7 +19,7 @@ pub use change::{
 };
 pub use coinjoin::{IsCoinJoin, IsCoinJoinNode};
 pub use common_input::{MultiInputHeuristic, MultiInputHeuristicNode};
-pub use rbf::{CollectFingerprints, CollectFingerprintsNode, SignalsRbf, SignalsRbfNode};
+pub use fingerprints::{CollectFingerprints, CollectFingerprintsNode, SignalsRbf, SignalsRbfNode};
 pub use same_address::SameAddressClusteringNode;
 pub use uih::{
     UnnecessaryInputHeuristic1, UnnecessaryInputHeuristic1Node, UnnecessaryInputHeuristic2,

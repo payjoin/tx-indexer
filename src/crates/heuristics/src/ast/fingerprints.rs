@@ -167,14 +167,20 @@ impl Node for CollectFingerprintsNode {
                     f.extend(order_types);
 
                     // has_uncompressed_pubkey
-                    f.push(inputs.iter().zip(prevouts.iter()).any(|(inp, prevout)| {
-                        has_uncompressed_pubkey(inp, prevout)
-                    }) as u32);
+                    f.push(
+                        inputs
+                            .iter()
+                            .zip(prevouts.iter())
+                            .any(|(inp, prevout)| has_uncompressed_pubkey(inp, prevout))
+                            as u32,
+                    );
 
                     // taproot_keyspend_non_default_sighash
-                    f.push(inputs.iter().zip(prevouts.iter()).any(|(inp, prevout)| {
-                        taproot_keyspend_non_default_sighash(inp, prevout)
-                    }) as u32);
+                    f.push(
+                        inputs.iter().zip(prevouts.iter()).any(|(inp, prevout)| {
+                            taproot_keyspend_non_default_sighash(inp, prevout)
+                        }) as u32,
+                    );
 
                     // fee is a round number of satoshis (manual fee entry)
                     if let Some(is_round) = round_fee(&prevouts, &btx.output) {
