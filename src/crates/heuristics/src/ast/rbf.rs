@@ -6,7 +6,7 @@ use tx_indexer_fingerprints::{
     input_with_prevout::{has_uncompressed_pubkey, taproot_keyspend_non_default_sighash},
     transaction::{
         address_reuse, anti_fee_snipe, bip68_with_absolute_locktime, input_order,
-        mixed_input_types, nlocktime_optin_without_use, output_structure,
+        mixed_input_types, nlocktime_optin_without_use, output_structure, round_fee, tx_version,
     },
     types::{InputSortingType, OutputStructureType},
 };
@@ -98,24 +98,26 @@ impl Node for CollectFingerprintsNode {
             let tx = tx_id.with(storage);
             let mut f = vec![];
 
-            // [0] signals_rbf
+            // signals_rbf
             f.push(tx.inputs().any(|input| input.signals_rbf()) as u32);
-            // [1] low_r_grinding
+            // low_r_grinding
             f.push(tx.inputs().any(|input| input.low_r_grinding()) as u32);
 
             let inputs: Vec<_> = tx.inputs().collect();
             let locktime = tx.locktime();
 
-            // [2] anti_fee_snipe
+            // anti_fee_snipe
             f.push(anti_fee_snipe(locktime) as u32);
-            // [3] nlocktime_optin_without_use
+            // nlocktime_optin_without_use
             f.push(nlocktime_optin_without_use(&inputs, locktime) as u32);
-            // [4] bip68_with_absolute_locktime
+            // bip68_with_absolute_locktime
             f.push(bip68_with_absolute_locktime(&inputs, locktime) as u32);
 
             // For dense (confirmed) txs, add fingerprints that need raw bitcoin types
             if let Some(btx) = storage.get_bitcoin_tx(*tx_id) {
-                // output_types — sorted deduped discriminants
+                // version
+                f.push(tx_version(&btx) as u32);
+                // output_types
                 let output_types = sorted_deduped(
                     btx.output
                         .iter()
@@ -123,7 +125,7 @@ impl Node for CollectFingerprintsNode {
                 );
                 f.extend(output_types);
 
-                // output_structure — sorted deduped discriminants
+                // output_structure
                 let structure_types = sorted_deduped(
                     output_structure(&btx.output)
                         .into_iter()
@@ -142,7 +144,7 @@ impl Node for CollectFingerprintsNode {
 
                 // Only add prevout-based fingerprints when all prevouts resolved
                 if prevouts.len() == inputs.len() {
-                    // input_type — sorted deduped output types of prevout scripts
+                    // input_type
                     let input_types = sorted_deduped(
                         prevouts
                             .iter()
@@ -150,13 +152,13 @@ impl Node for CollectFingerprintsNode {
                     );
                     f.extend(input_types);
 
-                    // mixed_input_types
+                    // mixed_input_types (prevout script types)
                     f.push(mixed_input_types(&prevouts) as u32);
 
-                    // address_reuse
+                    // intra tx address_reuse
                     f.push(address_reuse(&btx.output, &prevouts) as u32);
 
-                    // input_order — sorted deduped discriminants
+                    // input_order
                     let order_types = sorted_deduped(
                         input_order(&btx.input, &prevouts)
                             .into_iter()
@@ -164,15 +166,20 @@ impl Node for CollectFingerprintsNode {
                     );
                     f.extend(order_types);
 
-                    // has_uncompressed_pubkey — any input with uncompressed pubkey
+                    // has_uncompressed_pubkey
                     f.push(inputs.iter().zip(prevouts.iter()).any(|(inp, prevout)| {
                         has_uncompressed_pubkey(inp, prevout)
                     }) as u32);
 
-                    // taproot_keyspend_non_default_sighash — any input with explicit sighash in taproot keyspend
+                    // taproot_keyspend_non_default_sighash
                     f.push(inputs.iter().zip(prevouts.iter()).any(|(inp, prevout)| {
                         taproot_keyspend_non_default_sighash(inp, prevout)
                     }) as u32);
+
+                    // fee is a round number of satoshis (manual fee entry)
+                    if let Some(is_round) = round_fee(&prevouts, &btx.output) {
+                        f.push(is_round as u32);
+                    }
                 }
             }
 
