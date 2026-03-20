@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::Arc, time::Instant};
 
-use tx_indexer_heuristics::ast::SignalsRbf;
+use tx_indexer_heuristics::ast::{CollectFingerprints, SignalsRbf};
 use tx_indexer_pipeline::{context::PipelineContext, engine::Engine, ops::AllDenseTxs};
 use tx_indexer_primitives::{UnifiedStorage, dense::DenseStorage, test_utils::temp_dir};
 
@@ -69,16 +69,18 @@ fn main() {
 
     let source = AllDenseTxs::new(&ctx);
     let all_txs = source.txs();
-    let rbf_mask = SignalsRbf::new(all_txs);
+    let rbf_mask = SignalsRbf::new(all_txs.clone());
+    let fingerprints = CollectFingerprints::new(all_txs);
 
     // 3. Evaluate
     let eval_start = Instant::now();
-    let result = engine.eval(&rbf_mask);
+    let rbf_result = engine.eval(&rbf_mask);
+    let fp_result = engine.eval(&fingerprints);
     let eval_elapsed = eval_start.elapsed();
 
     // 4. Print results
-    let rbf_count = result.values().filter(|&&v| v).count();
-    let total = result.len();
+    let rbf_count = rbf_result.values().filter(|&&v| v).count();
+    let total = rbf_result.len();
 
     println!();
     println!("--- RBF signaling analysis ({eval_elapsed:.2?}) ---");
@@ -90,6 +92,26 @@ fn main() {
             rbf_count as f64 / total as f64 * 100.0
         }
     );
+
+    // 5. Print fingerprint summary
+    println!();
+    println!("--- Fingerprint collection ---");
+    println!("Transactions fingerprinted: {}", fp_result.len());
+    if !fp_result.is_empty() {
+        let lengths: Vec<usize> = fp_result.iter().map(|f| f.len()).collect();
+        let min_len = lengths.iter().min().unwrap();
+        let max_len = lengths.iter().max().unwrap();
+        let avg_len = lengths.iter().sum::<usize>() as f64 / lengths.len() as f64;
+        println!("Fingerprint dimensions: min={min_len}, max={max_len}, avg={avg_len:.1}");
+
+        // Show a few sample fingerprints
+        let sample_count = fp_result.len().min(5);
+        println!();
+        println!("Sample fingerprints (first {sample_count}):");
+        for (i, fp) in fp_result.iter().take(sample_count).enumerate() {
+            println!("  tx[{i}]: {:?}", fp);
+        }
+    }
 
     // Cleanup
     let _ = std::fs::remove_dir_all(&tmp);
