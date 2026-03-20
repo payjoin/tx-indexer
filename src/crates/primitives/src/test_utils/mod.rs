@@ -129,6 +129,10 @@ impl AbstractTransaction for DummyTxData {
     fn locktime(&self) -> u32 {
         self.n_locktime
     }
+
+    fn is_coinbase(&self) -> bool {
+        self.spent_coins.is_empty()
+    }
 }
 
 impl OutputCount for DummyTxData {

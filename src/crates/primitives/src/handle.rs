@@ -215,6 +215,15 @@ impl<'a> AbstractTransaction for TxHandle<'a> {
     fn locktime(&self) -> u32 {
         self.index.locktime(&self.tx_id)
     }
+
+    fn is_coinbase(&self) -> bool {
+        let mut inputs = self.inputs();
+        if let Some(first_input) = inputs.next() {
+            return first_input.prev_txout_id().is_none();
+        }
+
+        false
+    }
 }
 
 impl<'a> AbstractTxIn for TxInHandle<'a> {
