@@ -88,6 +88,11 @@ impl AbstractTxOut for DummyTxOutData {
     fn script_pubkey_hash(&self) -> ScriptPubkeyHash {
         self.spk_hash
     }
+
+    fn script_pubkey_bytes(&self) -> Vec<u8> {
+        // TODO: enrich with real script bytes
+        vec![]
+    }
 }
 
 impl AbstractTransaction for DummyTxData {

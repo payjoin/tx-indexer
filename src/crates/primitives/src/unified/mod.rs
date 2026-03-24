@@ -617,6 +617,33 @@ impl TxOutDataIndex for UnifiedStorage {
         let spk_hash = script_pubkey_hash(&txout.script_pubkey);
         (txout.value, spk_hash)
     }
+
+    fn tx_out_spk_bytes(&self, out_id: &AnyOutId) -> Vec<u8> {
+        if let Some(loose_outid) = out_id.loose_id() {
+            let loose = self
+                .loose
+                .as_ref()
+                .expect("loose storage missing for loose outid");
+            let tx = loose
+                .txs
+                .get(&loose_outid.txid())
+                .expect("loose txid not found in storage");
+            let output = tx
+                .output_at(loose_outid.vout() as usize)
+                .expect("txout should be present if index is built correctly");
+            return output.script_pubkey_bytes();
+        }
+
+        let dense_outid = out_id
+            .confirmed_id()
+            .expect("confirmed outid must map to dense outid");
+        let dense = self
+            .dense
+            .as_ref()
+            .expect("dense storage missing for confirmed outid");
+        let txout = dense.get_txout(dense_outid);
+        txout.script_pubkey.to_bytes()
+    }
 }
 
 impl IndexedGraph for UnifiedStorage {}

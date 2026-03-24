@@ -4,8 +4,8 @@ use crate::{
         abstract_fingerprints::HasNLockTime,
         abstract_types::{
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateInputValueInArbitraryOrder,
-            EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts, HasSequence, OutputCount,
-            TxConstituent,
+            EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts, HasScriptPubkey,
+            HasSequence, OutputCount, TxConstituent,
         },
         graph_index::IndexedGraph,
     },
@@ -106,6 +106,12 @@ impl<'a> TxOutHandle<'a> {
     // TODO: seperate methods
     fn output_data(&self) -> (bitcoin::Amount, crate::ScriptPubkeyHash) {
         self.index.tx_out_data(&self.out_id)
+    }
+}
+
+impl<'a> HasScriptPubkey for TxOutHandle<'a> {
+    fn script_pubkey_bytes(&self) -> Vec<u8> {
+        self.index.tx_out_spk_bytes(&self.out_id)
     }
 }
 
@@ -235,6 +241,10 @@ impl<'a> AbstractTxOut for TxOutHandle<'a> {
     fn script_pubkey_hash(&self) -> crate::ScriptPubkeyHash {
         let (_value, spk_hash) = self.output_data();
         spk_hash
+    }
+
+    fn script_pubkey_bytes(&self) -> Vec<u8> {
+        HasScriptPubkey::script_pubkey_bytes(self)
     }
 }
 

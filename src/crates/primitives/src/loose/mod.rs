@@ -320,4 +320,18 @@ impl TxOutDataIndex for InMemoryIndex {
             .expect("txout should be present if index is built correctly");
         (output.value(), output.script_pubkey_hash())
     }
+
+    fn tx_out_spk_bytes(&self, out_id: &AnyOutId) -> Vec<u8> {
+        let loose_out = out_id
+            .loose_id()
+            .expect("loose storage only supports loose outids");
+        let tx = self
+            .txs
+            .get(&loose_out.txid())
+            .expect("loose txid not found in storage");
+        let output = tx
+            .output_at(loose_out.vout() as usize)
+            .expect("txout should be present if index is built correctly");
+        output.script_pubkey_bytes()
+    }
 }

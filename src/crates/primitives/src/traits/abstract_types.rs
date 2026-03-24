@@ -44,6 +44,8 @@ pub trait AbstractTxOut {
     /// Returns the script pubkey hash (20-byte hash) if available
     /// Returns None if the script doesn't contain a standard hash or is not supported
     fn script_pubkey_hash(&self) -> ScriptPubkeyHash;
+    /// Returns the full scriptPubKey bytes
+    fn script_pubkey_bytes(&self) -> Vec<u8>;
 }
 
 /// Trait for transaction looking things. Generic over the ids as they can be either loose or dense.
