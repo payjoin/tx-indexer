@@ -15,7 +15,7 @@ use std::{ops::Range, path::PathBuf};
 pub struct AnyTxId(i32);
 
 impl AnyTxId {
-    pub fn with(self, index: &dyn IndexedGraph) -> TxHandle {
+    pub fn with<'a>(self, index: &'a dyn IndexedGraph) -> TxHandle<'a> {
         TxHandle { tx_id: self, index }
     }
 
@@ -64,7 +64,7 @@ impl From<loose::TxId> for AnyTxId {
 pub struct AnyOutId(i64);
 
 impl AnyOutId {
-    pub fn with(self, index: &dyn IndexedGraph) -> TxOutHandle {
+    pub fn with<'a>(self, index: &'a dyn IndexedGraph) -> TxOutHandle<'a> {
         TxOutHandle {
             out_id: self,
             index,
@@ -127,7 +127,7 @@ impl From<loose::TxOutId> for AnyOutId {
 pub struct AnyInId(i64);
 
 impl AnyInId {
-    pub fn with(self, index: &dyn IndexedGraph) -> TxInHandle {
+    pub fn with<'a>(self, index: &'a dyn IndexedGraph) -> TxInHandle<'a> {
         TxInHandle { in_id: self, index }
     }
 
@@ -383,10 +383,10 @@ impl UnifiedStorage {
     }
 
     pub fn script_pubkey_to_txout_id(&self, script_pubkey: &ScriptPubkeyHash) -> Option<AnyOutId> {
-        if let Some(loose) = self.loose.as_ref() {
-            if let Some(out_id) = loose.spk_to_txout_ids.get(script_pubkey).copied() {
-                return Some(AnyOutId::from(out_id));
-            }
+        if let Some(loose) = self.loose.as_ref()
+            && let Some(out_id) = loose.spk_to_txout_ids.get(script_pubkey).copied()
+        {
+            return Some(AnyOutId::from(out_id));
         }
 
         if let Some(dense) = self.dense.as_ref() {

@@ -308,7 +308,7 @@ impl Engine {
         let node = self
             .ctx
             .get_node(id)
-            .expect(&format!("Node should always be registered: {:?}", id));
+            .unwrap_or_else(|| panic!("Node should always be registered: {:?}", id));
         let deps = node.dependencies();
         let is_first_eval = !self.storage.contains(id);
         let new_deps_facts = deps.iter().any(|dep_id| {

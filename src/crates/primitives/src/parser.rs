@@ -111,8 +111,7 @@ impl Parser {
                     spk_db,
                     txids: &mut txids,
                 };
-                bsl::Block::visit(block_slice, &mut collector)
-                    .map_err(|e| BlockFileError::Parse(e))?;
+                bsl::Block::visit(block_slice, &mut collector).map_err(BlockFileError::Parse)?;
                 if let Some(error) = collector.error.take() {
                     return Err(error);
                 }
@@ -173,11 +172,11 @@ impl Visitor for TxIdCollector<'_> {
             self.error = Some(BlockFileError::Io(err));
             return ControlFlow::Break(());
         }
-        if out_id != OUTID_NONE {
-            if let Err(err) = self.out_spent_index.set(out_id, in_id) {
-                self.error = Some(BlockFileError::Io(err));
-                return ControlFlow::Break(());
-            }
+        if out_id != OUTID_NONE
+            && let Err(err) = self.out_spent_index.set(out_id, in_id)
+        {
+            self.error = Some(BlockFileError::Io(err));
+            return ControlFlow::Break(());
         }
         self.current_in += 1;
         ControlFlow::Continue(())
@@ -241,7 +240,7 @@ impl Visitor for TxIdCollector<'_> {
 
 fn tx_io_totals(txptr_index: &ConfirmedTxPtrIndex) -> (u64, u64) {
     let len = txptr_index.len();
-    if len == 0 {
+    if txptr_index.is_empty() {
         return (0, 0);
     }
     let last = TxId::new((len - 1) as u32);

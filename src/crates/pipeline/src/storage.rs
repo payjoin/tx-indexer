@@ -27,6 +27,12 @@ impl<T: ?Sized> BaseFacts<T> {
     }
 }
 
+impl<T: ?Sized> Default for BaseFacts<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Segregated storage for node evaluation results.
 ///
 /// Each node has its own storage slot for its evaluation result.
@@ -59,7 +65,7 @@ impl NodeStorage {
     }
     /// Append a value for a node.
     pub fn append(&mut self, id: NodeId, value: Box<dyn Any + Send + Sync>) {
-        self.slots.entry(id).or_insert(vec![]).push(value);
+        self.slots.entry(id).or_default().push(value);
     }
 
     /// Reference to the last stored value for a node (for fixpoint no-progress check).

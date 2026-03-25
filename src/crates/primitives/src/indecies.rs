@@ -118,6 +118,10 @@ impl<const N: usize> FixedWidthIndex<N> {
         self.len
     }
 
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     fn append_bytes(&mut self, bytes: &[u8; N]) -> io::Result<u64> {
         self.file.seek(SeekFrom::End(0))?;
         self.file.write_all(bytes)?;
@@ -182,6 +186,10 @@ impl ConfirmedTxPtrIndex {
         self.inner.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
     pub fn append(&mut self, ptr: TxPtr) -> io::Result<TxId> {
         if self.inner.len() > u32::MAX as u64 {
             return Err(io::Error::new(
@@ -218,6 +226,10 @@ impl BlockTxIndex {
 
     pub fn len(&self) -> u64 {
         self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
     }
 
     pub fn last(&self) -> io::Result<Option<u32>> {
@@ -257,6 +269,10 @@ impl InPrevoutIndex {
         self.inner.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
     pub fn append(&mut self, out_id: u64) -> io::Result<u64> {
         self.inner.append_bytes(&out_id.to_le_bytes())
     }
@@ -284,6 +300,10 @@ impl OutSpentByIndex {
 
     pub fn len(&self) -> u64 {
         self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
     }
 
     pub fn append(&mut self, in_id: u64) -> io::Result<u64> {

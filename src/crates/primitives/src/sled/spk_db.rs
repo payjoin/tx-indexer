@@ -67,7 +67,7 @@ impl ScriptPubkeyDb for SledScriptPubkeyDb {
         let value = self
             .tree
             .get(key)
-            .map_err(|err| SledScriptPubkeyDbError::Backend(err))?;
+            .map_err(SledScriptPubkeyDbError::Backend)?;
         match value {
             Some(raw) => Ok(Some(Self::decode_out_id(raw.as_ref())?)),
             None => Ok(None),
@@ -84,7 +84,7 @@ impl ScriptPubkeyDb for SledScriptPubkeyDb {
         let result = self
             .tree
             .compare_and_swap(key, None as Option<&[u8]>, Some(value))
-            .map_err(|err| SledScriptPubkeyDbError::Backend(err))?;
+            .map_err(SledScriptPubkeyDbError::Backend)?;
         if result.is_err() {
             return Ok(());
         }

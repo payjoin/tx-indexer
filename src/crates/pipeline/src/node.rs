@@ -114,9 +114,9 @@ where
         other: Option<&(dyn Any + Send + Sync)>,
     ) -> (Box<dyn Any + Send + Sync>, bool) {
         let out = self.evaluate(ctx);
-        let changed = other
-            .and_then(|p| p.downcast_ref::<<N::OutputValue as ExprValue>::Output>())
-            .map_or(true, |prev| prev != &out);
+        let changed = other.and_then(|p| p.downcast_ref::<<N::OutputValue as ExprValue>::Output>())
+            != Some(&out);
+
         (Box::new(out), changed)
     }
 

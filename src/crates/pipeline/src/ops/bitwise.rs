@@ -34,8 +34,6 @@ impl<K: Eq + Hash + Clone + Send + Sync + 'static> Node for AndMasksNode<K> {
     fn evaluate(&self, ctx: &EvalContext) -> HashMap<K, bool> {
         let left = ctx.get(&self.left);
         let right = ctx.get(&self.right);
-
-        // Union of keys, AND of values
         let mut result = HashMap::new();
 
         for (k, &v) in left {
@@ -43,11 +41,9 @@ impl<K: Eq + Hash + Clone + Send + Sync + 'static> Node for AndMasksNode<K> {
             result.insert(k.clone(), v && right_val);
         }
 
-        // Also include keys only in right (they'll be false since left doesn't have them)
         for (k, &v) in right {
-            if !left.contains_key(k) {
-                result.insert(k.clone(), false && v);
-            }
+            let left_val = left.get(k).copied().unwrap_or(false);
+            result.insert(k.clone(), left_val && v);
         }
 
         result
@@ -111,16 +107,6 @@ impl<K: Eq + Hash + Clone + Send + Sync + 'static> BitAnd for Expr<Mask<K>> {
 
     fn bitand(self, rhs: Self) -> Self::Output {
         self.ctx.register(AndMasksNode::new(self.clone(), rhs))
-    }
-}
-
-// Also implement for references to avoid moves
-impl<K: Eq + Hash + Clone + Send + Sync + 'static> BitAnd for &Expr<Mask<K>> {
-    type Output = Expr<Mask<K>>;
-
-    fn bitand(self, rhs: Self) -> Self::Output {
-        self.ctx
-            .register(AndMasksNode::new(self.clone(), rhs.clone()))
     }
 }
 
