@@ -15,7 +15,7 @@ use std::{ops::Range, path::PathBuf};
 pub struct AnyTxId(i32);
 
 impl AnyTxId {
-    pub fn with(self, index: &dyn IndexedGraph) -> TxHandle {
+    pub fn with<'a>(self, index: &'a dyn IndexedGraph) -> TxHandle<'a> {
         TxHandle { tx_id: self, index }
     }
 
@@ -64,7 +64,7 @@ impl From<loose::TxId> for AnyTxId {
 pub struct AnyOutId(i64);
 
 impl AnyOutId {
-    pub fn with(self, index: &dyn IndexedGraph) -> TxOutHandle {
+    pub fn with<'a>(self, index: &'a dyn IndexedGraph) -> TxOutHandle<'a> {
         TxOutHandle {
             out_id: self,
             index,
@@ -127,7 +127,7 @@ impl From<loose::TxOutId> for AnyOutId {
 pub struct AnyInId(i64);
 
 impl AnyInId {
-    pub fn with(self, index: &dyn IndexedGraph) -> TxInHandle {
+    pub fn with<'a>(self, index: &'a dyn IndexedGraph) -> TxInHandle<'a> {
         TxInHandle { in_id: self, index }
     }
 
