@@ -1,4 +1,6 @@
 use bitcoin::Amount;
+use bitcoin::hashes::Hash as _;
+use bitcoin::hashes::hash160::Hash as Hash160;
 
 use crate::{
     AnyOutId, AnyTxId, ScriptPubkeyHash,
@@ -57,38 +59,34 @@ impl AbstractTxIn for DummyTxInWrapper {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DummyTxOutData {
     value: u64,
-    spk_hash: ScriptPubkeyHash,
     vout: u32,
     script_pubkey: Vec<u8>,
 }
 
 impl DummyTxOutData {
-    pub fn new(value: u64, spk_hash: ScriptPubkeyHash, vout: u32) -> Self {
+    pub fn new(value: u64, vout: u32) -> Self {
         Self {
             value,
-            spk_hash,
             vout,
             script_pubkey: vec![],
         }
     }
 
-    /// Create a new DummyTxOutData with a given amount and a dummy spk hash
+    /// Create a new DummyTxOutData with a given amount and a dummy script pubkey
     pub fn new_with_amount(amount: u64, vout: u32) -> Self {
         Self {
             value: amount,
-            spk_hash: [0u8; 20],
             vout,
             script_pubkey: vec![],
         }
     }
 
     /// Create a new DummyTxOutData with explicit script pubkey bytes
-    pub fn new_with_script(amount: u64, vout: u32, script_pubkey: Vec<u8>) -> Self {
+    pub fn new_with_script(amount: u64, vout: u32, script_pubkey: impl Into<Vec<u8>>) -> Self {
         Self {
             value: amount,
-            spk_hash: [0u8; 20],
             vout,
-            script_pubkey,
+            script_pubkey: script_pubkey.into(),
         }
     }
 }
@@ -99,7 +97,7 @@ impl AbstractTxOut for DummyTxOutData {
     }
 
     fn script_pubkey_hash(&self) -> ScriptPubkeyHash {
-        self.spk_hash
+        Hash160::hash(&self.script_pubkey).to_byte_array()
     }
 
     fn script_pubkey_bytes(&self) -> Vec<u8> {
