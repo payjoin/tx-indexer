@@ -16,8 +16,15 @@ members = [
 [workspace.dependencies]
 bitcoin = { version = "0.32.0", features = ["rand"] }
 
+[[bin]]
+name = "fingerprint"
+path = "bin/fingerprint.rs"
+
 [dependencies]
 tx-indexer-primitives = { path = "src/crates/primitives" }
 tx-indexer-heuristics = { path = "src/crates/heuristics" }
 tx-indexer-pipeline = { path = "src/crates/pipeline" }
+tx-indexer-fingerprints = { path = "src/crates/fingerprints" }
 bitcoin = { workspace = true }
+hex = "0.4"
+serde_json = "1"

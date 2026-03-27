@@ -120,6 +120,9 @@ name = "bitcoin-transaction-indexer"
 version = "0.1.0"
 dependencies = [
  "bitcoin",
+ "hex",
+ "serde_json",
+ "tx-indexer-fingerprints",
  "tx-indexer-heuristics",
  "tx-indexer-pipeline",
  "tx-indexer-primitives",
