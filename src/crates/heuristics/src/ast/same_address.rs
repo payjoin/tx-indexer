@@ -64,7 +64,7 @@ mod tests {
         Engine, PipelineContext,
         ops::{AllDenseTxs, AllLooseTxs},
     };
-    use tx_indexer_primitives::UnifiedStorageBuilder;
+    use tx_indexer_primitives::UnifiedStorage;
     use tx_indexer_primitives::dense::IndexPaths;
     use tx_indexer_primitives::integration::NodeHarness;
     use tx_indexer_primitives::loose::LooseIndexBuilder;
@@ -132,10 +132,7 @@ mod tests {
         for tx in txs {
             builder.add_tx(tx);
         }
-        let unified = UnifiedStorageBuilder::new()
-            .with_loose(builder)
-            .build()
-            .expect("build unified storage");
+        let unified = UnifiedStorage::from(builder);
         Engine::new(ctx, Arc::new(unified))
     }
 
@@ -180,14 +177,12 @@ mod tests {
             out_spent: index_dir.join("out_spent.idx"),
         };
         let spk_db = SledDBFactory::open(temp_dir("tx_indexer_dense_mainnet_spk"))?.spk_db()?;
-        let unified = UnifiedStorageBuilder::new()
-            .with_dense(tx_indexer_primitives::unified::DenseBuildSpec {
-                blocks_dir: blocks_dir.clone(),
-                range: 0..1,
-                paths,
-                spk_db,
-            })
-            .build()?;
+        let unified = UnifiedStorage::try_from(tx_indexer_primitives::unified::DenseBuildSpec {
+            blocks_dir: blocks_dir.clone(),
+            range: 0..1,
+            paths,
+            spk_db,
+        })?;
 
         let ctx = Arc::new(PipelineContext::new());
         let mut engine = Engine::new(ctx.clone(), Arc::new(unified));

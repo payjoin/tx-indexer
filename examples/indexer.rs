@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc, time::Instant};
 use tx_indexer_heuristics::ast::SignalsRbf;
 use tx_indexer_pipeline::{context::PipelineContext, engine::Engine, ops::AllDenseTxs};
 use tx_indexer_primitives::{
-    UnifiedStorageBuilder, dense::IndexPaths, sled::db::SledDBFactory, test_utils::temp_dir,
+    UnifiedStorage, dense::IndexPaths, sled::db::SledDBFactory, test_utils::temp_dir,
     unified::DenseBuildSpec,
 };
 
@@ -73,15 +73,13 @@ fn main() {
         .expect("failed to open spk_db tree");
 
     let start = Instant::now();
-    let unified = UnifiedStorageBuilder::new()
-        .with_dense(DenseBuildSpec {
-            blocks_dir: blocks_dir.clone(),
-            range: range.clone(),
-            paths,
-            spk_db,
-        })
-        .build()
-        .expect("failed to build indices");
+    let unified = UnifiedStorage::try_from(DenseBuildSpec {
+        blocks_dir: blocks_dir.clone(),
+        range: range.clone(),
+        paths,
+        spk_db,
+    })
+    .expect("failed to build indices");
     let index_elapsed = start.elapsed();
 
     let tx_count = unified.dense_txids_len();

@@ -190,56 +190,39 @@ pub struct DenseBuildSpec {
     pub spk_db: SledScriptPubkeyDb,
 }
 
-pub struct UnifiedStorageBuilder {
-    dense: Option<DenseBuildSpec>,
-    loose: Option<LooseIndexBuilder>,
-}
-
-impl UnifiedStorageBuilder {
-    pub fn new() -> Self {
-        Self {
-            dense: None,
-            loose: None,
-        }
-    }
-
-    pub fn with_dense(mut self, spec: DenseBuildSpec) -> Self {
-        self.dense = Some(spec);
-        self
-    }
-
-    pub fn with_loose(mut self, builder: LooseIndexBuilder) -> Self {
-        self.loose = Some(builder);
-        self
-    }
-
-    // TODO: specific error for unified storage
-    pub fn build(self) -> Result<UnifiedStorage, BlockFileError> {
-        let dense = if let Some(spec) = self.dense {
-            let storage = build_indices(spec.blocks_dir, spec.range, spec.paths, spec.spk_db)?;
-            Some(storage)
-        } else {
-            None
-        };
-
-        let loose = self.loose.map(|builder| builder.build());
-
-        Ok(UnifiedStorage { dense, loose })
-    }
-}
-
-impl Default for UnifiedStorageBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 pub struct UnifiedStorage {
     dense: Option<DenseStorage>,
     loose: Option<InMemoryIndex>,
 }
 
+impl From<LooseIndexBuilder> for UnifiedStorage {
+    fn from(builder: LooseIndexBuilder) -> Self {
+        Self {
+            dense: None,
+            loose: Some(builder.build()),
+        }
+    }
+}
+
+// TODO: specific error for unified storage
+impl TryFrom<DenseBuildSpec> for UnifiedStorage {
+    type Error = BlockFileError;
+
+    fn try_from(spec: DenseBuildSpec) -> Result<Self, Self::Error> {
+        let dense = build_indices(spec.blocks_dir, spec.range, spec.paths, spec.spk_db)?;
+        Ok(Self {
+            dense: Some(dense),
+            loose: None,
+        })
+    }
+}
+
 impl UnifiedStorage {
+    pub fn with_loose(mut self, builder: LooseIndexBuilder) -> Self {
+        self.loose = Some(builder.build());
+        self
+    }
+
     pub fn loose_txids(&self) -> Vec<AnyTxId> {
         let loose = self
             .loose

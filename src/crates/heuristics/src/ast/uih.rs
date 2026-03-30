@@ -137,7 +137,7 @@ mod tests {
 
     use tx_indexer_pipeline::{context::PipelineContext, engine::Engine, ops::source::AllLooseTxs};
     use tx_indexer_primitives::{
-        UnifiedStorageBuilder,
+        UnifiedStorage,
         loose::{LooseIndexBuilder, TxId, TxOutId},
         test_utils::{DummyTxData, DummyTxOutData},
         traits::abstract_types::AbstractTransaction,
@@ -155,10 +155,7 @@ mod tests {
         for tx in txs {
             builder.add_tx(tx);
         }
-        let unified = UnifiedStorageBuilder::new()
-            .with_loose(builder)
-            .build()
-            .expect("build unified storage");
+        let unified = UnifiedStorage::from(builder);
         Engine::new(ctx, Arc::new(unified))
     }
 
