@@ -40,6 +40,7 @@ pub fn mixed_input_types(prevouts: &[impl HasScriptPubkey]) -> bool {
 /// `inputs` provides outpoint data for BIP69 checking.
 /// `prevout_values` provides the value of each prevout (in input order) for
 /// ascending/descending checking.
+// TODO: should only have one argument. A rich input type that has prevout values and outpoint.
 pub fn input_order<I, P>(inputs: &[I], prevout_values: &[P]) -> Vec<InputSortingType>
 where
     I: HasPrevOutput,
