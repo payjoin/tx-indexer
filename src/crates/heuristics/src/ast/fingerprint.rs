@@ -115,8 +115,6 @@ impl Node for CollectFingerprintsNode {
             // bip68_with_absolute_locktime
             f.push(bip68_with_absolute_locktime(&inputs, locktime) as u32);
 
-            let tx = tx_id.with(storage);
-
             // For dense (confirmed) txs, add fingerprints that need raw bitcoin types
             // output_types - sorted deduped discriminants
             let output_types = sorted_deduped(
@@ -144,48 +142,45 @@ impl Node for CollectFingerprintsNode {
                 })
                 .collect();
 
-            // Only add prevout-based fingerprints when all prevouts resolved
-            if prevouts.len() == inputs.len() {
-                // input_type - sorted deduped output types of prevout scripts
-                let input_types = sorted_deduped(
-                    prevouts
-                        .iter()
-                        .map(|o| classify_script_pubkey(&o.script_pubkey_bytes()).as_u32()),
-                );
-                f.extend(input_types);
+            // input_type - sorted deduped output types of prevout scripts
+            let input_types = sorted_deduped(
+                prevouts
+                    .iter()
+                    .map(|o| classify_script_pubkey(&o.script_pubkey_bytes()).as_u32()),
+            );
+            f.extend(input_types);
 
-                // mixed_input_types
-                f.push(mixed_input_types(&prevouts) as u32);
+            // mixed_input_types
+            f.push(mixed_input_types(&prevouts) as u32);
 
-                // intra address_reuse
-                f.push(address_reuse(&tx.outputs().collect::<Vec<_>>(), &prevouts) as u32);
+            // intra address_reuse
+            f.push(address_reuse(&tx.outputs().collect::<Vec<_>>(), &prevouts) as u32);
 
-                // input_order - sorted deduped discriminants
-                let order_types = sorted_deduped(
-                    input_order(&inputs, &prevouts)
-                        .into_iter()
-                        .map(InputSortingType::as_u32),
-                );
-                f.extend(order_types);
+            // input_order - sorted deduped discriminants
+            let order_types = sorted_deduped(
+                input_order(&inputs, &prevouts)
+                    .into_iter()
+                    .map(InputSortingType::as_u32),
+            );
+            f.extend(order_types);
 
-                // has_uncompressed_pubkey - any input with uncompressed pubkey
-                f.push(
-                    inputs
-                        .iter()
-                        .zip(prevouts.iter())
-                        .any(|(inp, prevout)| has_uncompressed_pubkey(inp, prevout))
-                        as u32,
-                );
+            // has_uncompressed_pubkey - any input with uncompressed pubkey
+            f.push(
+                inputs
+                    .iter()
+                    .zip(prevouts.iter())
+                    .any(|(inp, prevout)| has_uncompressed_pubkey(inp, prevout))
+                    as u32,
+            );
 
-                // taproot_keyspend_non_default_sighash - any input with explicit sighash in taproot keyspend
-                f.push(
-                    inputs
-                        .iter()
-                        .zip(prevouts.iter())
-                        .any(|(inp, prevout)| taproot_keyspend_non_default_sighash(inp, prevout))
-                        as u32,
-                );
-            }
+            // taproot_keyspend_non_default_sighash - any input with explicit sighash in taproot keyspend
+            f.push(
+                inputs
+                    .iter()
+                    .zip(prevouts.iter())
+                    .any(|(inp, prevout)| taproot_keyspend_non_default_sighash(inp, prevout))
+                    as u32,
+            );
 
             fingerprints.push(f);
         });
