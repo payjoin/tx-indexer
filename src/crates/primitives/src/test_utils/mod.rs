@@ -21,6 +21,7 @@ pub struct DummyTxData {
 }
 
 impl DummyTxData {
+    /// Base constructor.
     pub fn new(outputs: Vec<DummyTxOutData>, spent_coins: Vec<TxOutId>, n_locktime: u32) -> Self {
         Self {
             outputs,
@@ -28,13 +29,29 @@ impl DummyTxData {
             n_locktime,
         }
     }
-
+    /// Tx with explicit outputs, no spent coins.
     pub fn new_with_outputs(outputs: Vec<DummyTxOutData>) -> Self {
         Self {
             outputs,
             spent_coins: vec![],
             n_locktime: 0,
         }
+    }
+
+    /// Create funding tx from amounts.
+    pub fn new_with_amounts(amounts: Vec<u64>) -> Self {
+        let outputs = amounts
+            .into_iter()
+            .enumerate()
+            .map(|(vout, amount)| DummyTxOutData::new(amount, vout as u32))
+            .collect();
+        Self::new_with_outputs(outputs)
+    }
+
+    /// Create spending tx from amounts and spent coins.
+    pub fn new_with_spent(amounts: Vec<u64>, spent_coins: Vec<TxOutId>) -> Self {
+        let base = Self::new_with_amounts(amounts);
+        Self::new(base.outputs, spent_coins, 0)
     }
 
     pub fn spent_coins(&self) -> &[TxOutId] {
@@ -76,16 +93,8 @@ pub struct DummyTxOutData {
 }
 
 impl DummyTxOutData {
-    pub fn new(value: u64, vout: u32) -> Self {
-        Self {
-            value,
-            vout,
-            script_pubkey: vec![],
-        }
-    }
-
-    /// Create a new DummyTxOutData with a given amount and a dummy script pubkey
-    pub fn new_with_amount(amount: u64, vout: u32) -> Self {
+    /// Create a new output with empty script pubkey.
+    pub fn new(amount: u64, vout: u32) -> Self {
         Self {
             value: amount,
             vout,
@@ -93,7 +102,7 @@ impl DummyTxOutData {
         }
     }
 
-    /// Create a new DummyTxOutData with explicit script pubkey bytes
+    /// Create a new output with explicit script pubkey.
     pub fn new_with_script(amount: u64, vout: u32, script_pubkey: impl Into<Vec<u8>>) -> Self {
         Self {
             value: amount,

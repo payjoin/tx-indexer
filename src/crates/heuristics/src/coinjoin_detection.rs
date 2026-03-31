@@ -29,30 +29,17 @@ impl NaiveCoinjoinDetection {
 #[cfg(test)]
 mod tests {
 
-    use tx_indexer_primitives::test_utils::{DummyTxData, DummyTxOutData};
+    use tx_indexer_primitives::test_utils::DummyTxData;
 
     use super::*;
 
     #[test]
     fn test_is_coinjoin_tx() {
-        let not_coinjoin = DummyTxData::new_with_outputs(vec![
-            DummyTxOutData::new_with_amount(100, 0),
-            DummyTxOutData::new_with_amount(200, 1),
-            DummyTxOutData::new_with_amount(300, 2),
-        ]);
+        let not_coinjoin = DummyTxData::new_with_amounts(vec![100, 200, 300]);
         assert!(!NaiveCoinjoinDetection::is_coinjoin(&not_coinjoin));
 
-        let coinjoin = DummyTxData::new_with_outputs(vec![
-            DummyTxOutData::new_with_amount(100, 0),
-            DummyTxOutData::new_with_amount(100, 1),
-            DummyTxOutData::new_with_amount(100, 2),
-            DummyTxOutData::new_with_amount(200, 3),
-            DummyTxOutData::new_with_amount(200, 4),
-            DummyTxOutData::new_with_amount(200, 5),
-            DummyTxOutData::new_with_amount(300, 6),
-            DummyTxOutData::new_with_amount(300, 7),
-            DummyTxOutData::new_with_amount(300, 8),
-        ]);
+        let coinjoin =
+            DummyTxData::new_with_amounts(vec![100, 100, 100, 200, 200, 200, 300, 300, 300]);
         assert!(NaiveCoinjoinDetection::is_coinjoin(&coinjoin));
     }
 }

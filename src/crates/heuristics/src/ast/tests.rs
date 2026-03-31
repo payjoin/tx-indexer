@@ -23,27 +23,18 @@ pub(crate) mod tests {
 
     impl TestFixture {
         pub fn spending_tx() -> DummyTxData {
-            DummyTxData::new(
-                vec![
-                    // Payment output
-                    DummyTxOutData::new_with_amount(100, 0),
-                    // Change output
-                    DummyTxOutData::new_with_amount(150, 1),
-                ],
+            DummyTxData::new_with_spent(
+                vec![100, 150],
                 vec![TxOutId::new(TxId(1), 0), TxOutId::new(TxId(2), 0)],
-                0,
             )
         }
 
         pub fn coinbase1() -> DummyTxData {
-            DummyTxData::new_with_outputs(vec![
-                DummyTxOutData::new_with_amount(100, 0),
-                DummyTxOutData::new_with_amount(150, 1),
-            ])
+            DummyTxData::new_with_amounts(vec![100, 150])
         }
 
         pub fn coinbase2() -> DummyTxData {
-            DummyTxData::new_with_outputs(vec![DummyTxOutData::new_with_amount(150, 0)])
+            DummyTxData::new_with_amounts(vec![150])
         }
 
         pub fn payment_output() -> TxOutId {
@@ -56,14 +47,7 @@ pub(crate) mod tests {
 
         /// Single-input spending tx (spends coinbase2). Used for UIH2 single-input tests.
         pub fn single_input_spending_tx() -> DummyTxData {
-            DummyTxData::new(
-                vec![
-                    DummyTxOutData::new_with_amount(200, 0),
-                    DummyTxOutData::new_with_amount(300, 1),
-                ],
-                vec![TxOutId::new(TxId(2), 0)],
-                0,
-            )
+            DummyTxData::new_with_spent(vec![200, 300], vec![TxOutId::new(TxId(2), 0)])
         }
     }
 
@@ -90,17 +74,10 @@ pub(crate) mod tests {
     #[test]
     fn test_coinjoin_detection() {
         // Non-coinjoin tx
-        let normal_tx = DummyTxData::new_with_outputs(vec![
-            DummyTxOutData::new_with_amount(100, 0),
-            DummyTxOutData::new_with_amount(200, 1),
-        ]);
+        let normal_tx = DummyTxData::new_with_amounts(vec![100, 200]);
 
         // Coinjoin tx (3+ outputs with same value)
-        let coinjoin_tx = DummyTxData::new_with_outputs(vec![
-            DummyTxOutData::new_with_amount(100, 0),
-            DummyTxOutData::new_with_amount(100, 1),
-            DummyTxOutData::new_with_amount(100, 2),
-        ]);
+        let coinjoin_tx = DummyTxData::new_with_amounts(vec![100, 100, 100]);
 
         let all_txs: Vec<Arc<dyn AbstractTransaction + Send + Sync>> =
             vec![Arc::new(normal_tx), Arc::new(coinjoin_tx)];
@@ -263,29 +240,18 @@ pub(crate) mod tests {
 
         let txs = vec![
             // Coinbase 0
-            DummyTxData::new_with_outputs(vec![DummyTxOutData::new_with_amount(1000, 0)]),
+            DummyTxData::new_with_amounts(vec![1000]),
             // tx1: spends coinbase 0, produces payment + change
-            DummyTxData::new(
-                vec![
-                    DummyTxOutData::new_with_amount(700, 0), // payment
-                    DummyTxOutData::new_with_amount(300, 1), // change
-                ],
-                vec![TxOutId::new(TxId(1), 0)],
-                0,
-            ),
+            DummyTxData::new_with_spent(vec![700, 300], vec![TxOutId::new(TxId(1), 0)]),
             // coinbase 2
-            DummyTxData::new_with_outputs(vec![DummyTxOutData::new_with_amount(500, 0)]),
+            DummyTxData::new_with_amounts(vec![500]),
             // tx3: spends tx1 change + coinbase2
-            DummyTxData::new(
-                vec![
-                    DummyTxOutData::new_with_amount(400, 0), // payment
-                    DummyTxOutData::new_with_amount(100, 1), // change
-                ],
+            DummyTxData::new_with_spent(
+                vec![400, 100],
                 vec![
                     TxOutId::new(TxId(2), 1), // spends tx1 change
                     TxOutId::new(TxId(3), 0), // spends coinbase2
                 ],
-                0,
             ),
         ];
 
@@ -318,17 +284,17 @@ pub(crate) mod tests {
         let ctx = Arc::new(PipelineContext::new());
 
         let txs = vec![
-            DummyTxData::new_with_outputs(vec![DummyTxOutData::new_with_amount(1000, 0)]),
+            DummyTxData::new_with_amounts(vec![1000]),
             DummyTxData::new(
                 vec![
-                    DummyTxOutData::new_with_amount(700, 0), // payment
-                    DummyTxOutData::new_with_amount(300, 1), // change
+                    DummyTxOutData::new(700, 0), // payment
+                    DummyTxOutData::new(300, 1), // change
                 ],
                 vec![TxOutId::new(TxId(1), 0)],
                 0,
             ),
-            DummyTxData::new_with_outputs(vec![DummyTxOutData::new_with_amount(300, 0)]),
-            DummyTxData::new_with_outputs(vec![DummyTxOutData::new_with_amount(700, 0)]),
+            DummyTxData::new_with_amounts(vec![300]),
+            DummyTxData::new_with_amounts(vec![700]),
         ];
 
         let mut builder = LooseIndexBuilder::new();
