@@ -131,7 +131,7 @@ where
         }
         let mut acc = facts[0].clone();
         for rest in &facts[1..] {
-            acc.extend(rest.iter().cloned().into_iter());
+            acc.extend(rest.iter().cloned());
         }
         acc
     }

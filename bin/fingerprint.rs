@@ -40,6 +40,7 @@ fn output_structure_str(t: &OutputStructureType) -> &'static str {
         OutputStructureType::Double => "double",
         OutputStructureType::Multi => "multi",
         OutputStructureType::Bip69 => "bip69",
+        OutputStructureType::Unknown => "unknown",
     }
 }
 
