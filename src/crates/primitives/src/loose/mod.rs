@@ -300,6 +300,14 @@ impl TxIoIndex for InMemoryIndex {
     fn block_height(&self, _txid: &AnyTxId) -> Option<u64> {
         None
     }
+
+    fn prev_outpoint_vout(&self, _in_id: &AnyInId) -> u32 {
+        todo!()
+    }
+
+    fn prev_outpoint_txid_bytes(&self, _in_id: &AnyInId) -> [u8; 32] {
+        todo!()
+    }
 }
 
 impl OutpointIndex for InMemoryIndex {
