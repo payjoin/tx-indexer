@@ -78,6 +78,7 @@ fn main() {
         range: range.clone(),
         paths,
         spk_db,
+        file_hints: vec![],
     })
     .expect("failed to build indices");
     let index_elapsed = start.elapsed();

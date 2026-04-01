@@ -84,11 +84,12 @@ pub struct DenseStorage {
 pub fn build_indices(
     blocks_dir: impl Into<PathBuf>,
     range: std::ops::Range<u64>,
+    file_hints: Vec<(u32, u32, u32)>,
     paths: IndexPaths,
     mut spk_db: SledScriptPubkeyDb,
 ) -> Result<DenseStorage, BlockFileError> {
     let block_height_offset = range.start;
-    let mut parser = Parser::new(blocks_dir);
+    let mut parser = Parser::new(blocks_dir).with_file_hints(file_hints);
     let mut txptr_index = ConfirmedTxPtrIndex::create(&paths.txptr).map_err(BlockFileError::Io)?;
     let mut block_tx_index = BlockTxIndex::create(&paths.block_tx).map_err(BlockFileError::Io)?;
     let mut in_prevout_index =

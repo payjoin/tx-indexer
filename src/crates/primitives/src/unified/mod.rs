@@ -188,6 +188,10 @@ pub struct DenseBuildSpec {
     pub range: Range<u64>,
     pub paths: dense::IndexPaths,
     pub spk_db: SledScriptPubkeyDb,
+    /// Blk file layout hints: `(file_no, height_first, height_last)`, sorted by `file_no`.
+    ///
+    /// If empty, assumes all blocks are in `blk00000.dat` starting at height 0.
+    pub file_hints: Vec<(u32, u32, u32)>,
 }
 
 pub struct UnifiedStorage {
@@ -209,12 +213,95 @@ impl TryFrom<DenseBuildSpec> for UnifiedStorage {
     type Error = BlockFileError;
 
     fn try_from(spec: DenseBuildSpec) -> Result<Self, Self::Error> {
-        let dense = build_indices(spec.blocks_dir, spec.range, spec.paths, spec.spk_db)?;
+        let dense = build_indices(
+            spec.blocks_dir,
+            spec.range,
+            spec.file_hints,
+            spec.paths,
+            spec.spk_db,
+        )?;
         Ok(Self {
             dense: Some(dense),
             loose: None,
         })
     }
+}
+
+/// Error returned by [`sync_from_tip`].
+#[derive(Debug)]
+pub enum SyncError {
+    BlockIndex(bitcoin_block_index::Error),
+    Parse(BlockFileError),
+}
+
+impl std::fmt::Display for SyncError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SyncError::BlockIndex(e) => write!(f, "block index: {e}"),
+            SyncError::Parse(e) => write!(f, "parse: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for SyncError {}
+
+/// Build a [`UnifiedStorage`] for the `depth + 1` blocks ending at the chain tip.
+///
+/// Opens the block index at `index_path`, finds the tip via [`bitcoin_block_index::BlockIndex::best_block`],
+/// walks back `depth` blocks via `prev_hash` links, then indexes those blocks forward into
+/// the dense storage using the blk files in `blocks_dir`.
+pub fn sync_from_tip(
+    blocks_dir: impl Into<PathBuf>,
+    index_path: &std::path::Path,
+    depth: u32,
+    paths: dense::IndexPaths,
+    spk_db: SledScriptPubkeyDb,
+) -> Result<UnifiedStorage, SyncError> {
+    use bitcoin_block_index::BlockIndex;
+
+    let blocks_dir = blocks_dir.into();
+    let mut index = BlockIndex::open(index_path).map_err(SyncError::BlockIndex)?;
+
+    let tip_hash = index.best_block().map_err(SyncError::BlockIndex)?;
+    let chain = index
+        .walk_back(&tip_hash, depth)
+        .map_err(SyncError::BlockIndex)?;
+
+    let start_height = chain
+        .first()
+        .expect("walk_back returns depth+1 items")
+        .height as u64;
+    let end_height = chain
+        .last()
+        .expect("walk_back returns depth+1 items")
+        .height as u64;
+
+    // Collect file layout hints from BlockIndex so the parser can locate the right blk files.
+    let last_file = index.last_block_file().map_err(SyncError::BlockIndex)?;
+    let mut file_hints: Vec<(u32, u32, u32)> = Vec::new();
+    for file_no in 0..=last_file {
+        match index.block_file_info(file_no) {
+            Ok(info) => {
+                if (info.height_last as u64) < start_height {
+                    continue;
+                }
+                if (info.height_first as u64) > end_height {
+                    break;
+                }
+                file_hints.push((file_no, info.height_first, info.height_last));
+            }
+            Err(_) => continue,
+        }
+    }
+
+    let spec = DenseBuildSpec {
+        blocks_dir,
+        range: start_height..end_height + 1,
+        paths,
+        spk_db,
+        file_hints,
+    };
+    UnifiedStorage::try_from(spec).map_err(SyncError::Parse)
 }
 
 impl UnifiedStorage {

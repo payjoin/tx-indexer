@@ -32,13 +32,27 @@ const BLOCK_START_LEN: usize = 8;
 #[derive(Debug)]
 pub struct Parser {
     blocks_dir: PathBuf,
+    /// Blk file layout: each entry is `(file_no, height_first, height_last)`.
+    ///
+    /// If empty, all blocks are assumed to be in `blk00000.dat` starting at height 0
+    /// (suitable for regtest or small test chains).
+    file_hints: Vec<(u32, u32, u32)>,
 }
 
 impl Parser {
     pub fn new(blocks_dir: impl Into<PathBuf>) -> Self {
         Self {
             blocks_dir: blocks_dir.into(),
+            file_hints: Vec::new(),
         }
+    }
+
+    /// Set blk file layout hints so the parser can locate blocks in multi-file chains.
+    ///
+    /// Each hint is `(file_no, height_first, height_last)`, sorted by `file_no`.
+    pub fn with_file_hints(mut self, hints: Vec<(u32, u32, u32)>) -> Self {
+        self.file_hints = hints;
+        self
     }
 
     pub fn blocks_dir(&self) -> &Path {
@@ -50,9 +64,10 @@ impl Parser {
         self.blocks_dir.join(file_name)
     }
 
-    /// Parse the first `range.len()` blocks from the first block file (blk00000.dat).
-    /// Returns the dense TxIds of all transactions in those blocks and writes
-    /// tx pointers to the confirmed tx pointer index.
+    /// Parse blocks in `range` (by global block height) and write index entries.
+    ///
+    /// Uses file hints to locate the right blk files.  When no hints are set,
+    /// falls back to `blk00000.dat` starting at height 0.
     pub fn parse_blocks(
         &mut self,
         range: std::ops::Range<u64>,
@@ -62,12 +77,14 @@ impl Parser {
         out_spent_index: &mut OutSpentByIndex,
         spk_db: &mut SledScriptPubkeyDb,
     ) -> Result<(), BlockFileError> {
-        let file_id = BlockFileId(0);
-        let path = self.block_file_path(file_id);
-        let bytes = std::fs::read(&path).map_err(BlockFileError::Io)?;
+        // Default: single file starting at height 0.
+        let default_hint = [(0u32, 0u32, u32::MAX)];
+        let hints: &[(u32, u32, u32)] = if self.file_hints.is_empty() {
+            &default_hint
+        } else {
+            &self.file_hints
+        };
 
-        let mut offset = 0usize;
-        let mut blocks_parsed = 0u64;
         let (mut tx_in_total, mut tx_out_total) = tx_io_totals(txptr_index);
         let mut tx_total = block_tx_index
             .last()
@@ -75,57 +92,77 @@ impl Parser {
             .unwrap_or(0) as u64;
         let mut txids = HashMap::new();
 
-        while blocks_parsed < range.end && offset + BLOCK_START_LEN <= bytes.len() {
-            let block_size =
-                u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().map_err(|_| {
-                    BlockFileError::UnexpectedEof {
-                        offset: offset + 8,
+        'files: for &(file_no, height_first, _height_last) in hints {
+            let file_first = height_first as u64;
+            // Skip files entirely before range.
+            if file_first > range.end.saturating_sub(1) {
+                break;
+            }
+
+            let file_id = BlockFileId(file_no);
+            let path = self.block_file_path(file_id);
+            let bytes = std::fs::read(&path).map_err(BlockFileError::Io)?;
+
+            let mut global_height = file_first;
+            let mut offset = 0usize;
+
+            while offset + BLOCK_START_LEN <= bytes.len() {
+                if global_height >= range.end {
+                    break 'files;
+                }
+
+                let block_size =
+                    u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().map_err(|_| {
+                        BlockFileError::UnexpectedEof {
+                            offset: offset + 8,
+                            len: bytes.len(),
+                        }
+                    })?) as usize;
+                let block_start = offset + BLOCK_START_LEN;
+                let block_end = block_start + block_size;
+                if block_end > bytes.len() {
+                    return Err(BlockFileError::UnexpectedEof {
+                        offset: block_end,
                         len: bytes.len(),
+                    });
+                }
+
+                if global_height >= range.start {
+                    let block_slice = &bytes[block_start..block_end];
+                    let block_start_in_file = block_start as u64;
+                    let mut collector = TxIdCollector {
+                        block_file: file_id,
+                        block_start_in_file,
+                        block_slice,
+                        txptr_index,
+                        error: None,
+                        tx_in_total: &mut tx_in_total,
+                        tx_out_total: &mut tx_out_total,
+                        tx_count: 0,
+                        current_in: 0,
+                        current_out: 0,
+                        in_prevout_index,
+                        out_spent_index,
+                        spk_db,
+                        txids: &mut txids,
+                    };
+                    bsl::Block::visit(block_slice, &mut collector)
+                        .map_err(BlockFileError::Parse)?;
+                    if let Some(error) = collector.error.take() {
+                        return Err(error);
                     }
-                })?) as usize;
-            let block_start = offset + BLOCK_START_LEN;
-            let block_end = block_start + block_size;
-            if block_end > bytes.len() {
-                return Err(BlockFileError::UnexpectedEof {
-                    offset: block_end,
-                    len: bytes.len(),
-                });
-            }
-
-            if blocks_parsed >= range.start {
-                let block_slice = &bytes[block_start..block_end];
-                let block_start_in_file = block_start as u64;
-                let mut collector = TxIdCollector {
-                    block_file: file_id,
-                    block_start_in_file,
-                    block_slice,
-                    txptr_index,
-                    error: None,
-                    tx_in_total: &mut tx_in_total,
-                    tx_out_total: &mut tx_out_total,
-                    tx_count: 0,
-                    current_in: 0,
-                    current_out: 0,
-                    in_prevout_index,
-                    out_spent_index,
-                    spk_db,
-                    txids: &mut txids,
-                };
-                bsl::Block::visit(block_slice, &mut collector).map_err(BlockFileError::Parse)?;
-                if let Some(error) = collector.error.take() {
-                    return Err(error);
+                    tx_total += collector.tx_count;
+                    if tx_total > u32::MAX as u64 {
+                        return Err(BlockFileError::CorruptId());
+                    }
+                    block_tx_index
+                        .append(tx_total as u32)
+                        .map_err(BlockFileError::Io)?;
                 }
-                tx_total += collector.tx_count;
-                if tx_total > u32::MAX as u64 {
-                    return Err(BlockFileError::CorruptId());
-                }
-                block_tx_index
-                    .append(tx_total as u32)
-                    .map_err(BlockFileError::Io)?;
-            }
 
-            offset = block_end;
-            blocks_parsed += 1;
+                offset = block_end;
+                global_height += 1;
+            }
         }
 
         Ok(())

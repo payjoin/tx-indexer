@@ -1210,6 +1210,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bitcoin",
+ "bitcoin-block-index",
  "bitcoin-test-data",
  "bitcoin_slices",
  "corepc-node",
