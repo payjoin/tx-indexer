@@ -2,27 +2,20 @@ use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use tx_indexer_heuristics::ast::SignalsRbf;
 use tx_indexer_pipeline::{context::PipelineContext, engine::Engine, ops::AllDenseTxs};
-use tx_indexer_primitives::{
-    dense::IndexPaths, sled::db::SledDBFactory, test_utils::temp_dir, unified::sync_from_tip,
-};
+use tx_indexer_primitives::{test_utils::temp_dir, unified::sync_from_tip};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    let mut blocks_dir: Option<PathBuf> = None;
-    let mut index_dir: Option<PathBuf> = None;
+    let mut datadir: Option<PathBuf> = None;
     let mut depth: u32 = 10;
 
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--blocks-dir" => {
+            "--datadir" => {
                 i += 1;
-                blocks_dir = Some(PathBuf::from(&args[i]));
-            }
-            "--index-dir" => {
-                i += 1;
-                index_dir = Some(PathBuf::from(&args[i]));
+                datadir = Some(PathBuf::from(&args[i]));
             }
             "--depth" => {
                 i += 1;
@@ -40,57 +33,31 @@ fn main() {
         i += 1;
     }
 
-    let blocks_dir = blocks_dir.unwrap_or_else(|| {
-        eprintln!("Error: --blocks-dir is required");
+    let datadir = datadir.unwrap_or_else(|| {
+        eprintln!("Error: --datadir is required");
         print_usage();
         std::process::exit(1);
     });
 
-    let index_dir = index_dir.unwrap_or_else(|| {
-        eprintln!("Error: --index-dir is required");
-        print_usage();
-        std::process::exit(1);
-    });
-
-    if !blocks_dir.exists() {
-        eprintln!(
-            "Error: blocks directory does not exist: {}",
-            blocks_dir.display()
-        );
-        std::process::exit(1);
-    }
-
-    if !index_dir.exists() {
-        eprintln!(
-            "Error: index directory does not exist: {}",
-            index_dir.display()
-        );
+    if !datadir.exists() {
+        eprintln!("Error: datadir does not exist: {}", datadir.display());
         std::process::exit(1);
     }
 
     println!(
-        "Indexing {} blocks from tip (blocks-dir: {})",
+        "Indexing {} blocks from tip (datadir: {})",
         depth + 1,
-        blocks_dir.display()
+        datadir.display()
     );
 
-    // 1. Build indices into a temp directory
-    let tmp = temp_dir("tx-indexer-example");
-    let paths = IndexPaths {
-        txptr: tmp.join("txptr.bin"),
-        block_tx: tmp.join("block_tx.bin"),
-        in_prevout: tmp.join("in_prevout.bin"),
-        out_spent: tmp.join("out_spent.bin"),
-    };
-
-    let spk_db = SledDBFactory::open(tmp.join("spk_db"))
-        .expect("failed to open sled DB")
-        .spk_db()
-        .expect("failed to open spk_db tree");
+    // 1. Build indices into a temp directory (or user-specified index-dir)
+    let out_dir = temp_dir("tx-indexer-example");
 
     let start = Instant::now();
-    let unified = sync_from_tip(&blocks_dir, &index_dir, depth, paths, spk_db)
-        .expect("failed to build indices");
+    let unified = sync_from_tip(&datadir, &out_dir, depth).unwrap_or_else(|e| {
+        eprintln!("Error: failed to build indices: {e}");
+        std::process::exit(1);
+    });
     let index_elapsed = start.elapsed();
 
     let tx_count = unified.dense_txids_len();
@@ -128,15 +95,11 @@ fn main() {
             rbf_count as f64 / total as f64 * 100.0
         }
     );
-
-    // Cleanup
-    let _ = std::fs::remove_dir_all(&tmp);
 }
 
 fn print_usage() {
-    eprintln!("Usage: indexer --blocks-dir <path> --index-dir <path> [--depth N]");
+    eprintln!("Usage: indexer --datadir <path> [--depth N]");
     eprintln!();
-    eprintln!("  --blocks-dir <path>   Directory containing blk*.dat files");
-    eprintln!("  --index-dir <path>    Path to Bitcoin Core's blocks/index LevelDB");
+    eprintln!("  --datadir <path>      Bitcoin Core data directory (e.g. ~/.bitcoin/)");
     eprintln!("  --depth N             Number of blocks before tip to index (default: 10)");
 }

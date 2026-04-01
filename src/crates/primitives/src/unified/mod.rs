@@ -7,7 +7,11 @@ use crate::traits::graph_index::{
     TxIndex, TxIoIndex, TxOutDataIndex,
 };
 use crate::{ScriptPubkeyHash, dense, loose, traits::abstract_types::AbstractTransaction};
-use crate::{dense::build_indices, loose::LooseIndexBuilder, sled::spk_db::SledScriptPubkeyDb};
+use crate::{
+    dense::build_indices,
+    loose::LooseIndexBuilder,
+    sled::{db::SledDBFactory, spk_db::SledScriptPubkeyDb},
+};
 use bitcoin::Amount;
 use std::{ops::Range, path::PathBuf};
 
@@ -232,6 +236,7 @@ impl TryFrom<DenseBuildSpec> for UnifiedStorage {
 pub enum SyncError {
     BlockIndex(bitcoin_block_index::Error),
     Parse(BlockFileError),
+    Sled(sled::Error),
 }
 
 impl std::fmt::Display for SyncError {
@@ -239,6 +244,7 @@ impl std::fmt::Display for SyncError {
         match self {
             SyncError::BlockIndex(e) => write!(f, "block index: {e}"),
             SyncError::Parse(e) => write!(f, "parse: {e}"),
+            SyncError::Sled(e) => write!(f, "sled: {e}"),
         }
     }
 }
@@ -247,20 +253,35 @@ impl std::error::Error for SyncError {}
 
 /// Build a [`UnifiedStorage`] for the `depth + 1` blocks ending at the chain tip.
 ///
-/// Opens the block index at `index_path`, finds the tip via [`bitcoin_block_index::BlockIndex::best_block`],
-/// walks back `depth` blocks via `prev_hash` links, then indexes those blocks forward into
-/// the dense storage using the blk files in `blocks_dir`.
+/// `bitcoind_datadir` is Bitcoin Core's data directory (e.g. `~/.bitcoin/` or
+/// `~/.bitcoin/regtest/`); `blocks/` and `blocks/index/` are derived from it automatically.
+///
+/// `index_dir` is the output directory where all dense index files and the sled database
+/// will be written. The caller is responsible for creating this directory before calling.
 pub fn sync_from_tip(
-    blocks_dir: impl Into<PathBuf>,
-    index_path: &std::path::Path,
+    bitcoind_datadir: impl Into<PathBuf>,
+    index_dir: impl Into<PathBuf>,
     depth: u32,
-    paths: dense::IndexPaths,
-    spk_db: SledScriptPubkeyDb,
 ) -> Result<UnifiedStorage, SyncError> {
     use bitcoin_block_index::BlockIndex;
 
-    let blocks_dir = blocks_dir.into();
-    let mut index = BlockIndex::open(index_path).map_err(SyncError::BlockIndex)?;
+    let datadir = bitcoind_datadir.into();
+    let blocks_dir = datadir.join("blocks");
+    let index_path = datadir.join("blocks").join("index");
+    let index_dir = index_dir.into();
+
+    let paths = dense::IndexPaths {
+        txptr: index_dir.join("txptr.bin"),
+        block_tx: index_dir.join("block_tx.bin"),
+        in_prevout: index_dir.join("in_prevout.bin"),
+        out_spent: index_dir.join("out_spent.bin"),
+    };
+    let spk_db = SledDBFactory::open(index_dir.join("spk_db"))
+        .map_err(SyncError::Sled)?
+        .spk_db()
+        .map_err(SyncError::Sled)?;
+
+    let mut index = BlockIndex::open(&index_path).map_err(SyncError::BlockIndex)?;
 
     let tip_hash = index.best_block().map_err(SyncError::BlockIndex)?;
     let chain = index
