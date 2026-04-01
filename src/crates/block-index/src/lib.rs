@@ -6,7 +6,7 @@ pub use error::Error;
 use std::io::Cursor;
 use std::path::Path;
 
-use rusty_leveldb::{DB, Options};
+use rusty_leveldb::{DB, LdbIterator, Options};
 
 use varint::read_varint;
 
@@ -21,6 +21,8 @@ pub struct BlockLocation {
     pub data_pos: u32,
     pub n_tx: u32,
     pub height: u32,
+    /// The hash of the previous block (from the 80-byte block header).
+    pub prev_hash: [u8; 32],
 }
 
 impl BlockLocation {
@@ -55,8 +57,10 @@ impl BlockIndex {
     ///
     /// `index_path` is typically `~/.bitcoin/blocks/index/`.
     pub fn open(index_path: &Path) -> Result<Self, Error> {
-        let mut opts = Options::default();
-        opts.create_if_missing = false;
+        let opts = Options {
+            create_if_missing: false,
+            ..Options::default()
+        };
 
         let mut db = DB::open(index_path, opts)?;
 
@@ -107,6 +111,71 @@ impl BlockIndex {
         let raw = self.db.get(&key).ok_or(Error::KeyNotFound("b"))?;
         let deobfuscated = self.deobfuscate(&raw);
         parse_block_location(&deobfuscated)
+    }
+
+    /// Scan all block entries to find the best-chain tip hash.
+    ///
+    /// Iterates every `'b'` + hash entry in the index and returns the hash of the
+    /// block with the highest height that has its data stored on disk.
+    pub fn best_block(&mut self) -> Result<[u8; 32], Error> {
+        let mut iter = self.db.new_iter().map_err(Error::LevelDb)?;
+        iter.seek(b"b");
+
+        let mut best_hash = [0u8; 32];
+        let mut best_height = u32::MAX; // sentinel meaning "none found yet"
+        let mut found = false;
+
+        loop {
+            let Some((key, val)) = iter.current() else {
+                break;
+            };
+            if key.first() != Some(&b'b') {
+                break;
+            }
+            if key.len() == 33 {
+                let deobfuscated = self.deobfuscate(&val);
+                // Only consider blocks whose data is stored on disk.
+                if let Ok(loc) = parse_block_location(&deobfuscated)
+                    && (!found || loc.height > best_height)
+                {
+                    best_height = loc.height;
+                    best_hash.copy_from_slice(&key[1..33]);
+                    found = true;
+                }
+            }
+            if !iter.advance() {
+                break;
+            }
+        }
+
+        if found {
+            Ok(best_hash)
+        } else {
+            Err(Error::KeyNotFound("b"))
+        }
+    }
+
+    /// Walk backwards from `tip_hash` by following `prev_hash` links `depth` times.
+    ///
+    /// Returns a `Vec<BlockLocation>` in **forward order** (oldest first, tip last),
+    /// with length `depth + 1`. The first element is `depth` blocks before the tip.
+    pub fn walk_back(
+        &mut self,
+        tip_hash: &[u8; 32],
+        depth: u32,
+    ) -> Result<Vec<BlockLocation>, Error> {
+        let mut chain = Vec::with_capacity(depth as usize + 1);
+        let mut current_hash = *tip_hash;
+
+        for _ in 0..=depth {
+            let loc = self.block_location(&current_hash)?;
+            let prev = loc.prev_hash;
+            chain.push(loc);
+            current_hash = prev;
+        }
+
+        chain.reverse();
+        Ok(chain)
     }
 
     /// Construct the blk file path: `blocks_dir/blkNNNNN.dat`.
@@ -161,11 +230,26 @@ fn parse_block_location(data: &[u8]) -> Result<BlockLocation, Error> {
         return Err(Error::BlockNotStored);
     };
 
+    if n_status & BLOCK_HAVE_UNDO != 0 {
+        let _undo_pos = read_varint(&mut cursor)?;
+    }
+
+    // The remaining bytes are the 80-byte block header.
+    // prev_block_hash is at bytes [4..36] of the header.
+    let pos = cursor.position() as usize;
+    let remaining = &data[pos..];
+    if remaining.len() < 36 {
+        return Err(Error::UnexpectedEof);
+    }
+    let mut prev_hash = [0u8; 32];
+    prev_hash.copy_from_slice(&remaining[4..36]);
+
     Ok(BlockLocation {
         n_file,
         data_pos,
         n_tx,
         height,
+        prev_hash,
     })
 }
 
@@ -245,21 +329,27 @@ mod tests {
 
     #[test]
     fn parse_block_location_with_data() {
-        // n_version=1, height=500000, status=HAVE_DATA(8)|valid(5)=13, n_tx=2000,
-        // n_file=42, data_pos=12345
-        let data = vec![
+        // n_version=0, height=100, status=HAVE_DATA(8)|valid(4)|valid_headers(1)=13,
+        // n_tx=50, n_file=3, data_pos=99, then 80-byte block header.
+        let mut data = vec![
             0x00, // n_version = 0
             100,  // height = 100
-            13,   // status = 13
+            13,   // status = 13 (BLOCK_HAVE_DATA, no BLOCK_HAVE_UNDO)
             50,   // n_tx = 50
             3,    // n_file = 3
             99,   // data_pos = 99
         ];
+        // Append an 80-byte block header with a recognisable prev_hash at bytes [4..36].
+        let mut header = [0u8; 80];
+        header[4..36].copy_from_slice(&[0xAB; 32]);
+        data.extend_from_slice(&header);
+
         let loc = parse_block_location(&data).unwrap();
         assert_eq!(loc.height, 100);
         assert_eq!(loc.n_tx, 50);
         assert_eq!(loc.n_file, 3);
         assert_eq!(loc.data_pos, 99);
+        assert_eq!(loc.prev_hash, [0xABu8; 32]);
     }
 
     #[test]
