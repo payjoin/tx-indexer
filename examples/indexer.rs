@@ -3,16 +3,15 @@ use std::{path::PathBuf, sync::Arc, time::Instant};
 use tx_indexer_heuristics::ast::SignalsRbf;
 use tx_indexer_pipeline::{context::PipelineContext, engine::Engine, ops::AllDenseTxs};
 use tx_indexer_primitives::{
-    UnifiedStorage, dense::IndexPaths, sled::db::SledDBFactory, test_utils::temp_dir,
-    unified::DenseBuildSpec,
+    dense::IndexPaths, sled::db::SledDBFactory, test_utils::temp_dir, unified::sync_from_tip,
 };
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     let mut blocks_dir: Option<PathBuf> = None;
-    let mut range_start: u64 = 0;
-    let mut range_end: u64 = 10;
+    let mut index_dir: Option<PathBuf> = None;
+    let mut depth: u32 = 10;
 
     let mut i = 1;
     while i < args.len() {
@@ -21,11 +20,16 @@ fn main() {
                 i += 1;
                 blocks_dir = Some(PathBuf::from(&args[i]));
             }
-            "--range" => {
+            "--index-dir" => {
                 i += 1;
-                let (start, end) = parse_range(&args[i]);
-                range_start = start;
-                range_end = end;
+                index_dir = Some(PathBuf::from(&args[i]));
+            }
+            "--depth" => {
+                i += 1;
+                depth = args[i].parse().unwrap_or_else(|_| {
+                    eprintln!("Error: invalid depth: {}", args[i]);
+                    std::process::exit(1);
+                });
             }
             other => {
                 eprintln!("Unknown argument: {other}");
@@ -42,6 +46,12 @@ fn main() {
         std::process::exit(1);
     });
 
+    let index_dir = index_dir.unwrap_or_else(|| {
+        eprintln!("Error: --index-dir is required");
+        print_usage();
+        std::process::exit(1);
+    });
+
     if !blocks_dir.exists() {
         eprintln!(
             "Error: blocks directory does not exist: {}",
@@ -50,11 +60,17 @@ fn main() {
         std::process::exit(1);
     }
 
-    let range = range_start..range_end;
+    if !index_dir.exists() {
+        eprintln!(
+            "Error: index directory does not exist: {}",
+            index_dir.display()
+        );
+        std::process::exit(1);
+    }
+
     println!(
-        "Indexing blocks {}..{} from {}",
-        range_start,
-        range_end,
+        "Indexing {} blocks from tip (blocks-dir: {})",
+        depth + 1,
         blocks_dir.display()
     );
 
@@ -73,21 +89,15 @@ fn main() {
         .expect("failed to open spk_db tree");
 
     let start = Instant::now();
-    let unified = UnifiedStorage::try_from(DenseBuildSpec {
-        blocks_dir: blocks_dir.clone(),
-        range: range.clone(),
-        paths,
-        spk_db,
-        file_hints: vec![],
-    })
-    .expect("failed to build indices");
+    let unified = sync_from_tip(&blocks_dir, &index_dir, depth, paths, spk_db)
+        .expect("failed to build indices");
     let index_elapsed = start.elapsed();
 
     let tx_count = unified.dense_txids_len();
     println!(
         "Indexed {} transactions in {} blocks ({index_elapsed:.2?})",
         tx_count,
-        range_end - range_start,
+        depth + 1,
     );
 
     // 2. Set up the pipeline
@@ -123,26 +133,10 @@ fn main() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-fn parse_range(s: &str) -> (u64, u64) {
-    let parts: Vec<&str> = s.split("..").collect();
-    if parts.len() != 2 {
-        eprintln!("Error: invalid range format, expected START..END (e.g. 0..10)");
-        std::process::exit(1);
-    }
-    let start: u64 = parts[0].parse().unwrap_or_else(|_| {
-        eprintln!("Error: invalid range start: {}", parts[0]);
-        std::process::exit(1);
-    });
-    let end: u64 = parts[1].parse().unwrap_or_else(|_| {
-        eprintln!("Error: invalid range end: {}", parts[1]);
-        std::process::exit(1);
-    });
-    (start, end)
-}
-
 fn print_usage() {
-    eprintln!("Usage: indexer --blocks-dir <path> [--range START..END]");
+    eprintln!("Usage: indexer --blocks-dir <path> --index-dir <path> [--depth N]");
     eprintln!();
     eprintln!("  --blocks-dir <path>   Directory containing blk*.dat files");
-    eprintln!("  --range START..END    Block range to index (default: 0..10)");
+    eprintln!("  --index-dir <path>    Path to Bitcoin Core's blocks/index LevelDB");
+    eprintln!("  --depth N             Number of blocks before tip to index (default: 10)");
 }
