@@ -8,7 +8,7 @@ use crate::fingerprints::output::output_type;
 use crate::fingerprints::transaction::{
     address_reuse, anti_fee_snipe, input_order, mixed_input_types, output_structure, tx_signals_rbf,
 };
-use crate::transaction::round_fee;
+use crate::transaction::{is_bip69_sorted, round_fee};
 use crate::types::{InputSortingType, OutputStructureType, OutputType};
 
 fn get_tx_from_hex(hex_str: &str) -> Transaction {
@@ -399,19 +399,14 @@ fn test_input_order_unknown() {
 #[test]
 fn test_output_structure_single() {
     let outputs = [make_txout_with_value(1000)];
-    assert_eq!(
-        output_structure(&outputs),
-        vec![OutputStructureType::Single]
-    );
+    assert_eq!(output_structure(&outputs), OutputStructureType::Single);
 }
 
 #[test]
 fn test_output_structure_double() {
     let outputs = [make_txout_with_value(100), make_txout_with_value(200)];
     let result = output_structure(&outputs);
-    assert!(result.contains(&OutputStructureType::Double));
-    // Values are ascending → BIP69
-    assert!(result.contains(&OutputStructureType::Bip69));
+    assert_eq!(result, OutputStructureType::Double);
 }
 
 #[test]
@@ -422,16 +417,14 @@ fn test_output_structure_multi() {
         make_txout_with_value(300),
     ];
     let result = output_structure(&outputs);
-    assert!(result.contains(&OutputStructureType::Multi));
-    assert!(result.contains(&OutputStructureType::Bip69));
+    assert_eq!(result, OutputStructureType::Multi);
 }
 
 #[test]
 fn test_output_structure_not_bip69() {
     let outputs = [make_txout_with_value(300), make_txout_with_value(100)];
     let result = output_structure(&outputs);
-    assert!(result.contains(&OutputStructureType::Double));
-    assert!(!result.contains(&OutputStructureType::Bip69));
+    assert_eq!(result, OutputStructureType::Double);
 }
 
 #[test]
@@ -466,8 +459,8 @@ fn test_output_structure_bip69_with_duplicate_amounts() {
             script_pubkey: second_spk.clone(),
         },
     ];
-    let result = output_structure(&outputs_sorted);
-    assert!(result.contains(&OutputStructureType::Bip69));
+    let result = is_bip69_sorted(&outputs_sorted);
+    assert!(result);
 
     // Reverse order — not BIP69
     let outputs_unsorted = [
@@ -480,8 +473,8 @@ fn test_output_structure_bip69_with_duplicate_amounts() {
             script_pubkey: first_spk,
         },
     ];
-    let result = output_structure(&outputs_unsorted);
-    assert!(!result.contains(&OutputStructureType::Bip69));
+    let result = is_bip69_sorted(&outputs_unsorted);
+    assert!(!result);
 }
 
 // --- integration test with real tx ---
@@ -511,8 +504,8 @@ fn test_electrum_tx_fingerprints() {
 
     // Output structure: 2 outputs (Double), values 9718 < 16147 so BIP69
     let structure = output_structure(&tx.output);
-    assert!(structure.contains(&OutputStructureType::Double));
-    assert!(structure.contains(&OutputStructureType::Bip69));
+    assert_eq!(structure, OutputStructureType::Double);
+    assert!(is_bip69_sorted(&tx.output));
 }
 
 #[test]

@@ -296,6 +296,14 @@ impl TxIoIndex for InMemoryIndex {
     fn script_sig_bytes(&self, _in_id: &AnyInId) -> Vec<u8> {
         todo!()
     }
+
+    fn prev_outpoint_vout(&self, _in_id: &AnyInId) -> u32 {
+        todo!()
+    }
+
+    fn prev_outpoint_txid_bytes(&self, _in_id: &AnyInId) -> [u8; 32] {
+        todo!()
+    }
 }
 
 impl OutpointIndex for InMemoryIndex {

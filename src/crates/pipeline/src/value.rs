@@ -116,8 +116,31 @@ impl ExprValue for TransactionOutSet {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContainerType<T>(PhantomData<T>);
+
+impl<T> ExprValue for ContainerType<T>
+where
+    T: PartialEq + Clone + Send + Sync + 'static,
+{
+    type Output = Vec<T>;
+
+    fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
+        if facts.is_empty() {
+            return Default::default();
+        }
+        let mut acc = facts[0].clone();
+        for rest in &facts[1..] {
+            acc.extend(rest.iter().cloned());
+        }
+        acc
+    }
+}
+
 pub type TxSet = TransactionSet;
 pub type TxOutSet = TransactionOutSet;
 pub type TxMask = Mask<AnyTxId>;
 pub type TxOutMask = Mask<AnyOutId>;
 pub type TxOutClustering = Clustering<AnyOutId>;
+// TODO: replace with fixed size array
+pub type NormalizedFingerprints = ContainerType<Vec<u32>>;

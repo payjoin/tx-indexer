@@ -64,9 +64,7 @@ pub trait AbstractTransaction {
     fn output_len(&self) -> usize;
     /// Returns the output at the given index, if it exists
     fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut + '_>>;
-
     fn locktime(&self) -> u32;
-
     fn is_coinbase(&self) -> bool;
 }
 
