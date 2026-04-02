@@ -65,9 +65,11 @@ impl BlockIndex {
         let mut db = DB::open(index_path, opts)?;
 
         // Read the obfuscation key (may be absent on very old Bitcoin Core installs).
+        // Bitcoin Core serializes the key as a `std::vector<unsigned char>`: one CompactSize
+        // length-prefix byte followed by the actual XOR key bytes.  Skip the prefix.
         let obfuscation_key = db
             .get(OBFUSCATE_KEY_KEY)
-            .map(|b| b.to_vec())
+            .map(|b| b[1..].to_vec())
             .unwrap_or_default();
 
         Ok(Self {
@@ -374,6 +376,34 @@ mod tests {
             parse_block_location(&data),
             Err(Error::BlockNotStored)
         ));
+    }
+
+    #[test]
+    fn open_strips_obfuscation_key_length_prefix() {
+        // Bitcoin Core stores the obfuscation key as: [0x08, k0..k7] (CompactSize prefix + 8 bytes).
+        // Verify that open() discards the prefix byte and uses only the 8 key bytes.
+        let opts = rusty_leveldb::in_memory();
+        let mut db = DB::open("test", opts).unwrap();
+
+        // Write the key exactly as Bitcoin Core would: length byte + 8 XOR bytes.
+        let xor_key = [0x01u8, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+        let mut value = vec![0x08u8]; // CompactSize length = 8
+        value.extend_from_slice(&xor_key);
+        db.put(OBFUSCATE_KEY_KEY, &value).unwrap();
+        db.flush().unwrap();
+
+        let idx = BlockIndex {
+            db,
+            obfuscation_key: value[1..].to_vec(), // simulates what open() should store
+        };
+        // Deobfuscating with the 8-byte key (not the 9-byte value) must round-trip.
+        let plaintext = vec![0xAAu8, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22];
+        let obfuscated: Vec<u8> = plaintext
+            .iter()
+            .zip(xor_key.iter().cycle())
+            .map(|(b, k)| b ^ k)
+            .collect();
+        assert_eq!(idx.deobfuscate(&obfuscated), plaintext);
     }
 
     fn open_dummy_db() -> DB {

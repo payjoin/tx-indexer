@@ -37,13 +37,19 @@ pub struct Parser {
     /// If empty, all blocks are assumed to be in `blk00000.dat` starting at height 0
     /// (suitable for regtest or small test chains).
     file_hints: Vec<(u32, u32, u32)>,
+    /// XOR key read from `blocks/xor.dat` (Bitcoin Core v27+).
+    /// Empty when the file is absent or all-zero (most pre-v27 nodes and regtest fixtures).
+    xor_key: Vec<u8>,
 }
 
 impl Parser {
     pub fn new(blocks_dir: impl Into<PathBuf>) -> Self {
+        let blocks_dir = blocks_dir.into();
+        let xor_key = read_xor_key(&blocks_dir);
         Self {
-            blocks_dir: blocks_dir.into(),
+            blocks_dir,
             file_hints: Vec::new(),
+            xor_key,
         }
     }
 
@@ -62,6 +68,18 @@ impl Parser {
     fn block_file_path(&self, block_file: BlockFileId) -> PathBuf {
         let file_name = format!("blk{:05}.dat", block_file.0);
         self.blocks_dir.join(file_name)
+    }
+
+    /// Read and XOR-decrypt a blk file.  When `xor_key` is empty the bytes are returned as-is.
+    fn read_blk_file(&self, path: &Path) -> Result<Vec<u8>, BlockFileError> {
+        let mut bytes = std::fs::read(path).map_err(BlockFileError::Io)?;
+        if !self.xor_key.is_empty() {
+            let key_len = self.xor_key.len();
+            for (i, byte) in bytes.iter_mut().enumerate() {
+                *byte ^= self.xor_key[i % key_len];
+            }
+        }
+        Ok(bytes)
     }
 
     /// Parse blocks in `range` (by global block height) and write index entries.
@@ -101,7 +119,7 @@ impl Parser {
 
             let file_id = BlockFileId(file_no);
             let path = self.block_file_path(file_id);
-            let bytes = std::fs::read(&path).map_err(BlockFileError::Io)?;
+            let bytes = self.read_blk_file(&path)?;
 
             let mut global_height = file_first;
             let mut offset = 0usize;
@@ -166,6 +184,18 @@ impl Parser {
         }
 
         Ok(())
+    }
+}
+
+/// Read the XOR key from `blocks/xor.dat` (present in Bitcoin Core v27+).
+///
+/// Returns an empty `Vec` when the file is absent (pre-v27 nodes) or contains all zeros
+/// (regtest fixtures), so the caller can use `is_empty()` as a fast-path skip.
+fn read_xor_key(blocks_dir: &Path) -> Vec<u8> {
+    let path = blocks_dir.join("xor.dat");
+    match std::fs::read(&path) {
+        Ok(key) if key.iter().any(|&b| b != 0) => key,
+        _ => Vec::new(),
     }
 }
 

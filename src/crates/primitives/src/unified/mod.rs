@@ -435,10 +435,12 @@ impl UnifiedStorage {
 
     pub fn dense_txids_from(&self, start: usize) -> Vec<AnyTxId> {
         let Some(dense) = self.dense.as_ref() else {
+            // TODO: should panic or this should just be exposed on dense traits
             return Vec::new();
         };
         let total = usize::try_from(dense.tx_count()).expect("dense tx count should fit in usize");
         if start >= total {
+            // TODO: return error
             return Vec::new();
         }
         (start..total)
