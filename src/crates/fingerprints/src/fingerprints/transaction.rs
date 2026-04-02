@@ -115,33 +115,15 @@ pub fn bip68_with_absolute_locktime(inputs: &[impl HasSequence], locktime: u32) 
     locktime > 0 && inputs.iter().any(|input| input.sequence() < 0x80000000)
 }
 
-/// Returns the output structure types detected in the transaction.
-pub fn output_structure<O>(outputs: &[O]) -> Vec<OutputStructureType>
-where
-    O: HasValue + HasScriptPubkey,
-{
-    if outputs.len() == 1 {
-        return vec![OutputStructureType::Single];
-    }
-
-    let mut structure = Vec::new();
-
-    if outputs.len() == 2 {
-        structure.push(OutputStructureType::Double);
-    } else {
-        structure.push(OutputStructureType::Multi);
-    }
-
-    // Check BIP69 output sorting: sort by (value, scriptPubKey bytes)
+pub fn is_bip69_sorted(outputs: &[impl HasValue + HasScriptPubkey]) -> bool {
     let pairs: Vec<(Amount, Vec<u8>)> = outputs
         .iter()
         .map(|o| (o.value(), o.script_pubkey_bytes()))
         .collect();
-
     let amounts: Vec<Amount> = pairs.iter().map(|(v, _)| *v).collect();
     let unique_amounts: HashSet<Amount> = amounts.iter().copied().collect();
 
-    let is_bip69 = if unique_amounts.len() != amounts.len() {
+    if unique_amounts.len() != amounts.len() {
         // Duplicate amounts — check both value and scriptPubKey are sorted
         let mut sorted_pairs = pairs.clone();
         sorted_pairs.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
@@ -149,13 +131,22 @@ where
     } else {
         // Unique amounts — just check amounts are sorted
         amounts.windows(2).all(|w| w[0] <= w[1])
-    };
+    }
+}
 
-    if is_bip69 {
-        structure.push(OutputStructureType::Bip69);
+/// Returns the output structure types detected in the transaction.
+pub fn output_structure<O>(outputs: &[O]) -> OutputStructureType
+where
+    O: HasValue + HasScriptPubkey,
+{
+    if outputs.len() == 1 {
+        return OutputStructureType::Single;
     }
 
-    structure
+    if outputs.len() == 2 {
+        return OutputStructureType::Double;
+    }
+    OutputStructureType::Multi
 }
 
 /// Returns true if the transaction fee appears to be a round number,

@@ -37,8 +37,7 @@ pub enum OutputStructureType {
     Single = 0,
     Double = 1,
     Multi = 2,
-    Bip69 = 3,
-    Unknown = 4,
+    Unknown = 3,
 }
 
 impl OutputStructureType {

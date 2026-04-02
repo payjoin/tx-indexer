@@ -139,7 +139,7 @@ mod tests {
     use tx_indexer_primitives::{
         UnifiedStorage,
         loose::{LooseIndexBuilder, TxId, TxOutId},
-        test_utils::{DummyTxData, DummyTxOutData},
+        test_utils::DummyTxData,
         traits::abstract_types::AbstractTransaction,
         unified::{AnyOutId, AnyTxId},
     };

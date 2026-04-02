@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use tx_indexer_fingerprints::{
-    InputSortingType, OutputStructureType, classify_script_pubkey,
+    InputSortingType, classify_script_pubkey,
     input::HasInputFingerprints,
     input_with_prevout::{has_uncompressed_pubkey, taproot_keyspend_non_default_sighash},
     transaction::{
-        address_reuse, anti_fee_snipe, bip68_with_absolute_locktime, input_order,
+        address_reuse, anti_fee_snipe, bip68_with_absolute_locktime, input_order, is_bip69_sorted,
         mixed_input_types, nlocktime_optin_without_use, output_structure,
     },
 };
@@ -126,12 +126,10 @@ impl Node for CollectFingerprintsNode {
             f.extend(output_types);
 
             // output_structure - sorted deduped discriminants
-            let structure_types = sorted_deduped(
-                output_structure(&tx.outputs().collect::<Vec<_>>())
-                    .into_iter()
-                    .map(OutputStructureType::as_u32),
-            );
-            f.extend(structure_types);
+            f.push(output_structure(&tx.outputs().collect::<Vec<_>>()).as_u32());
+
+            // Is outputs bip69 sorted
+            f.push(is_bip69_sorted(&tx.outputs().collect::<Vec<_>>()) as u32);
 
             // Collect prevout TxOuts for inputs (requires loading spent txs)
             let prevouts: Vec<TxOutHandle<'_>> = inputs
