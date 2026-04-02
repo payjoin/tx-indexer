@@ -167,8 +167,17 @@ impl BlockIndex {
         let mut chain = Vec::with_capacity(depth as usize + 1);
         let mut current_hash = *tip_hash;
 
-        for _ in 0..=depth {
-            let loc = self.block_location(&current_hash)?;
+        for step in 0..=depth {
+            let loc = self.block_location(&current_hash).map_err(|e| {
+                if matches!(e, Error::KeyNotFound(_)) {
+                    Error::DepthExceedsChain {
+                        requested: depth,
+                        available: step,
+                    }
+                } else {
+                    e
+                }
+            })?;
             let prev = loc.prev_hash;
             chain.push(loc);
             current_hash = prev;
