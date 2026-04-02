@@ -39,7 +39,6 @@ fn output_structure_str(t: &OutputStructureType) -> &'static str {
         OutputStructureType::Single => "single",
         OutputStructureType::Double => "double",
         OutputStructureType::Multi => "multi",
-        OutputStructureType::Bip69 => "bip69",
         OutputStructureType::Unknown => "unknown",
     }
 }
@@ -70,7 +69,8 @@ fn fingerprint_spending_tx(tx: &Transaction) -> Value {
         "version": tx.version(),
         "signals_rbf": transaction::tx_signals_rbf(&tx.input),
         "anti_fee_snipe": transaction::anti_fee_snipe(tx.lock_time.to_consensus_u32()),
-        "output_structure": transaction::output_structure(&tx.output).iter().map(output_structure_str).collect::<Vec<_>>(),
+        "output_structure": output_structure_str(&transaction::output_structure(&tx.output)),
+        "is_bip69_sorted": transaction::is_bip69_sorted(&tx.output),
         "inputs": inputs,
         "outputs": outputs,
     })
@@ -106,7 +106,8 @@ fn fingerprint_with_prevouts(tx: &Transaction, prev_outs: &[bitcoin::TxOut]) -> 
         "version": tx.version(),
         "signals_rbf": transaction::tx_signals_rbf(&tx.input),
         "anti_fee_snipe": transaction::anti_fee_snipe(tx.lock_time.to_consensus_u32()),
-        "output_structure": transaction::output_structure(&tx.output).iter().map(output_structure_str).collect::<Vec<_>>(),
+        "output_structure": output_structure_str(&transaction::output_structure(&tx.output)),
+        "is_bip69_sorted": transaction::is_bip69_sorted(&tx.output),
         "address_reuse": transaction::address_reuse(&tx.output, prev_outs),
         "mixed_input_types": transaction::mixed_input_types(prev_outs),
         "input_order": transaction::input_order(&tx.input, prev_outs).iter().map(input_order_str).collect::<Vec<_>>(),
