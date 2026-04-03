@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-};
+use std::{collections::HashMap, path::Path};
 
 use bitcoin_slices::bitcoin_hashes::Hash;
 use bitcoin_slices::{Visit, Visitor, bsl};
@@ -11,6 +8,7 @@ use core::ops::ControlFlow;
 
 use crate::{
     ScriptPubkeyHash,
+    blk_file::BlkFileStore,
     dense::{BlockFileId, TxId, TxOutId},
     indecies::{
         BlockTxIndex, ConfirmedTxPtrIndex, INID_NONE, InPrevoutIndex, OUTID_NONE, OutSpentByIndex,
@@ -29,27 +27,20 @@ const BLOCK_START_LEN: usize = 8;
 /// Storage for dense IDs backed by Bitcoin Core block files.
 ///
 /// Parses blocks via bitcoin_slices (Visitor pattern).
-#[derive(Debug)]
 pub struct Parser {
-    blocks_dir: PathBuf,
+    store: BlkFileStore,
     /// Blk file layout: each entry is `(file_no, height_first, height_last)`.
     ///
     /// If empty, all blocks are assumed to be in `blk00000.dat` starting at height 0
     /// (suitable for regtest or small test chains).
     file_hints: Vec<(u32, u32, u32)>,
-    /// XOR key read from `blocks/xor.dat` (Bitcoin Core v27+).
-    /// Empty when the file is absent or all-zero (most pre-v27 nodes and regtest fixtures).
-    xor_key: Vec<u8>,
 }
 
 impl Parser {
-    pub fn new(blocks_dir: impl Into<PathBuf>) -> Self {
-        let blocks_dir = blocks_dir.into();
-        let xor_key = read_xor_key(&blocks_dir);
+    pub fn new(blocks_dir: impl Into<std::path::PathBuf>) -> Self {
         Self {
-            blocks_dir,
+            store: BlkFileStore::open(blocks_dir),
             file_hints: Vec::new(),
-            xor_key,
         }
     }
 
@@ -62,24 +53,12 @@ impl Parser {
     }
 
     pub fn blocks_dir(&self) -> &Path {
-        &self.blocks_dir
+        self.store.blocks_dir()
     }
 
-    fn block_file_path(&self, block_file: BlockFileId) -> PathBuf {
-        let file_name = format!("blk{:05}.dat", block_file.0);
-        self.blocks_dir.join(file_name)
-    }
-
-    /// Read and XOR-decrypt a blk file.  When `xor_key` is empty the bytes are returned as-is.
-    fn read_blk_file(&self, path: &Path) -> Result<Vec<u8>, BlockFileError> {
-        let mut bytes = std::fs::read(path).map_err(BlockFileError::Io)?;
-        if !self.xor_key.is_empty() {
-            let key_len = self.xor_key.len();
-            for (i, byte) in bytes.iter_mut().enumerate() {
-                *byte ^= self.xor_key[i % key_len];
-            }
-        }
-        Ok(bytes)
+    /// Consume the parser and return the underlying [`BlkFileStore`] for reuse.
+    pub fn into_blk_store(self) -> BlkFileStore {
+        self.store
     }
 
     /// Parse blocks in `range` (by global block height) and write index entries.
@@ -118,8 +97,7 @@ impl Parser {
             }
 
             let file_id = BlockFileId(file_no);
-            let path = self.block_file_path(file_id);
-            let bytes = self.read_blk_file(&path)?;
+            let bytes = self.store.read_file(file_no).map_err(BlockFileError::Io)?;
 
             let mut global_height = file_first;
             let mut offset = 0usize;
@@ -184,18 +162,6 @@ impl Parser {
         }
 
         Ok(())
-    }
-}
-
-/// Read the XOR key from `blocks/xor.dat` (present in Bitcoin Core v27+).
-///
-/// Returns an empty `Vec` when the file is absent (pre-v27 nodes) or contains all zeros
-/// (regtest fixtures), so the caller can use `is_empty()` as a fast-path skip.
-fn read_xor_key(blocks_dir: &Path) -> Vec<u8> {
-    let path = blocks_dir.join("xor.dat");
-    match std::fs::read(&path) {
-        Ok(key) if key.iter().any(|&b| b != 0) => key,
-        _ => Vec::new(),
     }
 }
 
