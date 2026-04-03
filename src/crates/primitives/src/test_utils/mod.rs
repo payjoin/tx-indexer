@@ -8,33 +8,79 @@ use crate::{
     traits::HasNLockTime,
     traits::abstract_types::{
         AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
-        EnumerateSpentTxOuts, InputCount, OutputCount, TxConstituent,
+        EnumerateSpentTxOuts, HasBlockHeight, InputCount, OutputCount, TxConstituent,
     },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DummyTxData {
     outputs: Vec<DummyTxOutData>,
-    /// The outputs that are spent by this transaction
     spent_coins: Vec<TxOutId>,
+    spent_sequences: Vec<u32>,
     n_locktime: u32,
+    block_height: Option<u64>,
 }
 
 impl DummyTxData {
     /// Base constructor.
     pub fn new(outputs: Vec<DummyTxOutData>, spent_coins: Vec<TxOutId>, n_locktime: u32) -> Self {
+        let sequences = vec![0xffff_fffe; spent_coins.len()];
         Self {
             outputs,
             spent_coins,
+            spent_sequences: sequences,
             n_locktime,
+            block_height: None,
         }
     }
+
+    /// with confirmed block height.
+    pub fn new_confirmed(
+        outputs: Vec<DummyTxOutData>,
+        spent_coins: Vec<TxOutId>,
+        n_locktime: u32,
+        block_height: u64,
+    ) -> Self {
+        let sequences = vec![0xffff_fffe; spent_coins.len()];
+        Self {
+            outputs,
+            spent_coins,
+            spent_sequences: sequences,
+            n_locktime,
+            block_height: Some(block_height),
+        }
+    }
+
+    /// with explicit sequences.
+    pub fn new_with_sequences(
+        outputs: Vec<DummyTxOutData>,
+        spent_coins: Vec<TxOutId>,
+        sequences: Vec<u32>,
+        n_locktime: u32,
+        block_height: Option<u64>,
+    ) -> Self {
+        assert_eq!(
+            spent_coins.len(),
+            sequences.len(),
+            "spent_coins e sequences devem ter o mesmo tamanho"
+        );
+        Self {
+            outputs,
+            spent_coins,
+            spent_sequences: sequences,
+            n_locktime,
+            block_height,
+        }
+    }
+
     /// Tx with explicit outputs, no spent coins.
     pub fn new_with_outputs(outputs: Vec<DummyTxOutData>) -> Self {
         Self {
             outputs,
             spent_coins: vec![],
+            spent_sequences: vec![],
             n_locktime: 0,
+            block_height: None,
         }
     }
 
@@ -65,10 +111,17 @@ impl HasNLockTime for DummyTxData {
     }
 }
 
+impl HasBlockHeight for DummyTxData {
+    fn block_height(&self) -> Option<u64> {
+        self.block_height
+    }
+}
+
 // Wrapper types for implementing abstract traits on dummy types
 struct DummyTxInWrapper {
     prev_txid: TxId,
     prev_vout: u32,
+    sequence: u32,
 }
 
 impl AbstractTxIn for DummyTxInWrapper {
@@ -82,6 +135,10 @@ impl AbstractTxIn for DummyTxInWrapper {
 
     fn prev_txout_id(&self) -> Option<AnyOutId> {
         Some(AnyOutId::from(TxOutId::new(self.prev_txid, self.prev_vout)))
+    }
+
+    fn sequence(&self) -> u32 {
+        self.sequence
     }
 }
 
@@ -132,10 +189,12 @@ impl AbstractTransaction for DummyTxData {
         let inputs: Vec<Box<dyn AbstractTxIn>> = self
             .spent_coins
             .iter()
-            .map(|spent| {
+            .zip(self.spent_sequences.iter())
+            .map(|(spent, &seq)| {
                 Box::new(DummyTxInWrapper {
                     prev_txid: spent.txid(),
                     prev_vout: spent.vout(),
+                    sequence: seq,
                 }) as Box<dyn AbstractTxIn>
             })
             .collect();
