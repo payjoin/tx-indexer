@@ -35,6 +35,7 @@ pub trait TxIoIndex {
     fn input_sequence(&self, in_id: &AnyInId) -> u32;
     fn witness_items(&self, in_id: &AnyInId) -> Vec<Vec<u8>>;
     fn script_sig_bytes(&self, in_id: &AnyInId) -> Vec<u8>;
+    fn block_height(&self, txid: &AnyTxId) -> Option<u64>;
 }
 
 pub trait OutpointIndex {

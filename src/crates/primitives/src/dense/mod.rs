@@ -73,6 +73,7 @@ pub struct IndexPaths {
 
 pub struct DenseStorage {
     blocks_dir: PathBuf,
+    block_height_offset: u64,
     txptr_index: ConfirmedTxPtrIndex,
     block_tx_index: BlockTxIndex,
     in_prevout_index: InPrevoutIndex,
@@ -86,6 +87,7 @@ pub fn build_indices(
     paths: IndexPaths,
     mut spk_db: SledScriptPubkeyDb,
 ) -> Result<DenseStorage, BlockFileError> {
+    let block_height_offset = range.start;
     let mut parser = Parser::new(blocks_dir);
     let mut txptr_index = ConfirmedTxPtrIndex::create(&paths.txptr).map_err(BlockFileError::Io)?;
     let mut block_tx_index = BlockTxIndex::create(&paths.block_tx).map_err(BlockFileError::Io)?;
@@ -103,6 +105,7 @@ pub fn build_indices(
     )?;
     let storage = DenseStorage {
         blocks_dir: parser.blocks_dir().to_path_buf(),
+        block_height_offset,
         txptr_index,
         block_tx_index,
         in_prevout_index,
@@ -202,12 +205,13 @@ impl DenseStorage {
                 .unwrap_or_else(|| panic!("Corrupted data store: block height out of range: {}", i))
                 as u64
         };
-        Self::upper_bound(len, target, value_at).unwrap_or_else(|| {
+        let relative = Self::upper_bound(len, target, value_at).unwrap_or_else(|| {
             panic!(
                 "Corrupted data store: txid out of range for block index: {}",
                 target
             )
-        })
+        });
+        relative + self.block_height_offset
     }
 
     /// Return the range of TxInIds for the given transaction.

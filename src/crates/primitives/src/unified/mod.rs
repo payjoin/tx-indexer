@@ -512,6 +512,11 @@ impl TxIoIndex for UnifiedStorage {
         let vin = (did.index() - start) as usize;
         ds.get_tx(txid).input[vin].script_sig.to_bytes()
     }
+
+    fn block_height(&self, txid: &AnyTxId) -> Option<u64> {
+        txid.confirmed_txid()
+            .map(|did| self.dense().block_of_tx(did))
+    }
 }
 
 impl OutpointIndex for UnifiedStorage {

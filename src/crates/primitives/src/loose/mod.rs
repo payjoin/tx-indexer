@@ -296,6 +296,10 @@ impl TxIoIndex for InMemoryIndex {
     fn script_sig_bytes(&self, _in_id: &AnyInId) -> Vec<u8> {
         todo!()
     }
+
+    fn block_height(&self, _txid: &AnyTxId) -> Option<u64> {
+        None
+    }
 }
 
 impl OutpointIndex for InMemoryIndex {

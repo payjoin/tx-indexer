@@ -53,6 +53,10 @@ impl<'a> TxHandle<'a> {
                 index: self.index,
             })
     }
+
+    pub fn block_height(&self) -> Option<u64> {
+        self.index.block_height(&self.tx_id)
+    }
 }
 
 /// Handle for a transaction output in a unified index.
