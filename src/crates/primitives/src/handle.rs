@@ -3,8 +3,8 @@ use crate::{
     traits::{
         abstract_types::{
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateInputValueInArbitraryOrder,
-            EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts, HasNLockTime,
-            HasScriptPubkey, HasSequence, InputCount, OutputCount, TxConstituent,
+            EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts, HasBlockHeight,
+            HasNLockTime, HasScriptPubkey, HasSequence, InputCount, OutputCount, TxConstituent,
         },
         graph_index::IndexedGraph,
     },
@@ -249,6 +249,10 @@ impl<'a> AbstractTxIn for TxInHandle<'a> {
     fn prev_txout_id(&self) -> Option<AnyOutId> {
         self.index.prev_txout(&self.in_id)
     }
+
+    fn sequence(&self) -> u32 {
+        self.index.input_sequence(&self.in_id)
+    }
 }
 
 impl<'a> AbstractTxOut for TxOutHandle<'a> {
@@ -290,6 +294,12 @@ impl<'a> InputCount for TxHandle<'a> {
 impl<'a> HasNLockTime for TxHandle<'a> {
     fn n_locktime(&self) -> u32 {
         self.locktime()
+    }
+}
+
+impl<'a> HasBlockHeight for TxHandle<'a> {
+    fn block_height(&self) -> Option<u64> {
+        TxHandle::block_height(self)
     }
 }
 
