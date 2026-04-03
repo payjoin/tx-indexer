@@ -1,11 +1,8 @@
-use std::{
-    fs::File,
-    io::{Read, Seek, SeekFrom},
-    path::PathBuf,
-};
+use std::path::PathBuf;
 
 use crate::{
     ScriptPubkeyHash,
+    blk_file::BlkFileStore,
     indecies::{
         BlockTxIndex, ConfirmedTxPtrIndex, INID_NONE, InPrevoutIndex, OUTID_NONE, OutSpentByIndex,
         TxPtr,
@@ -72,7 +69,7 @@ pub struct IndexPaths {
 }
 
 pub struct DenseStorage {
-    blocks_dir: PathBuf,
+    store: BlkFileStore,
     block_height_offset: u64,
     txptr_index: ConfirmedTxPtrIndex,
     block_tx_index: BlockTxIndex,
@@ -84,11 +81,12 @@ pub struct DenseStorage {
 pub fn build_indices(
     blocks_dir: impl Into<PathBuf>,
     range: std::ops::Range<u64>,
+    file_hints: Vec<(u32, u32, u32)>,
     paths: IndexPaths,
     mut spk_db: SledScriptPubkeyDb,
 ) -> Result<DenseStorage, BlockFileError> {
     let block_height_offset = range.start;
-    let mut parser = Parser::new(blocks_dir);
+    let mut parser = Parser::new(blocks_dir).with_file_hints(file_hints);
     let mut txptr_index = ConfirmedTxPtrIndex::create(&paths.txptr).map_err(BlockFileError::Io)?;
     let mut block_tx_index = BlockTxIndex::create(&paths.block_tx).map_err(BlockFileError::Io)?;
     let mut in_prevout_index =
@@ -104,7 +102,7 @@ pub fn build_indices(
         &mut spk_db,
     )?;
     let storage = DenseStorage {
-        blocks_dir: parser.blocks_dir().to_path_buf(),
+        store: parser.into_blk_store(),
         block_height_offset,
         txptr_index,
         block_tx_index,
@@ -116,11 +114,6 @@ pub fn build_indices(
 }
 
 impl DenseStorage {
-    fn block_file_path(&self, block_file: BlockFileId) -> PathBuf {
-        let file_name = format!("blk{:05}.dat", block_file.0);
-        self.blocks_dir.join(file_name)
-    }
-
     pub fn tx_count(&self) -> u64 {
         self.txptr_index.len()
     }
@@ -322,13 +315,9 @@ impl DenseStorage {
         tx_offset: u32,
         tx_len: u32,
     ) -> Result<Vec<u8>, BlockFileError> {
-        let path = self.block_file_path(block_file);
-        let mut f = File::open(&path).map_err(BlockFileError::Io)?;
-        f.seek(SeekFrom::Start(tx_offset as u64))
-            .map_err(BlockFileError::Io)?;
-        let mut buf = vec![0u8; tx_len as usize];
-        f.read_exact(&mut buf).map_err(BlockFileError::Io)?;
-        Ok(buf)
+        self.store
+            .read_at(block_file.0, tx_offset, tx_len)
+            .map_err(BlockFileError::Io)
     }
 
     /// Return the transaction at the given dense TxId as a rust-bitcoin Transaction.

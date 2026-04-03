@@ -1,0 +1,4 @@
+Recovered manifest with next_file=5 manifest_num=4 log_num=3 prev_log_num=0 last_seq=0
+reusing manifest "/home/hash160/dev/privacy-metrics/tx-indexer/src/crates/primitives/fixtures/multiple_block_files/blocks/index/MANIFEST-000002"
+Recovering log file "/home/hash160/dev/privacy-metrics/tx-indexer/src/crates/primitives/fixtures/multiple_block_files/blocks/index/000003.log"
+reusing log file "/home/hash160/dev/privacy-metrics/tx-indexer/src/crates/primitives/fixtures/multiple_block_files/blocks/index/000003.log"

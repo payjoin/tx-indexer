@@ -7,6 +7,7 @@ edition = "2024"
 sled = "0.34"
 bitcoin_slices = { version = "0.10.0", features = ["bitcoin"] }
 bitcoin = { workspace = true }
+bitcoin-block-index = { path = "../block-index" }
 anyhow = { version = "1.0", optional = true }
 corepc-node = { version = "0.10", features = ["download", "23_2"], optional = true }
 

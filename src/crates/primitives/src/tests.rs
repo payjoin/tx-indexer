@@ -2,10 +2,59 @@
 mod tests {
     use anyhow::Result;
     use bitcoin::{Amount, hashes::Hash};
-    use std::sync::{Arc, Mutex};
+    use std::{
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    };
 
     use crate::dense::{TxId, TxOutId};
     use crate::integration::run_harness;
+    use crate::test_utils::temp_dir;
+    use crate::unified::sync_from_tip;
+
+    /// Path to the multi-blk-file fixture (acts as a Bitcoin Core datadir).
+    fn fixture_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/multiple_block_files")
+    }
+
+    #[test]
+    fn fixture_sync_from_tip_multiple_blk_files() -> Result<()> {
+        use bitcoin_block_index::BlockIndex;
+
+        let fixture = fixture_dir();
+        let index_path = fixture.join("blocks/index");
+
+        // Discover chain tip height and last blk file number from the block index.
+        // Drop the BlockIndex before calling sync_from_tip so the LevelDB lock is released.
+        let (tip_height, last_file) = {
+            let mut index = BlockIndex::open(&index_path)?;
+            let tip_hash = index.best_block()?;
+            let tip_height = index.block_location(&tip_hash)?.height;
+            let last_file = index.last_block_file()?;
+            (tip_height, last_file)
+        };
+
+        // The fixture was created with a 1 KiB blk file limit, so the chain
+        // must span at least 2 files.
+        assert!(last_file >= 1, "fixture must have at least 2 blk files");
+
+        // Index the whole chain forward using sync_from_tip.
+        let tmp = temp_dir("fixture_multi_blk");
+        let storage =
+            sync_from_tip(&fixture, &tmp, tip_height).expect("sync_from_tip should succeed");
+
+        // This is a regtest chain with only coinbase transactions (one per block),
+        // so total tx count == number of blocks == tip_height + 1.
+        let total_txs = storage.dense_txids_len();
+        assert_eq!(total_txs, (tip_height + 1) as usize);
+
+        let txids = storage.dense_txids_from(0);
+        assert_eq!(txids.len(), total_txs);
+
+        // TODO: parse from genesis to tip and repeat assertions
+
+        Ok(())
+    }
 
     #[test]
     fn integration_mine_empty_block() -> Result<()> {

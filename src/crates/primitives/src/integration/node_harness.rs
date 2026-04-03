@@ -167,8 +167,14 @@ where
             .as_nanos()
     ));
     let spk_db = SledDBFactory::open(spk_db_path)?.spk_db()?;
-    let storage = build_indices(harness.blocks_dir.clone(), 0..block_count, paths, spk_db)
-        .map_err(|e| anyhow::anyhow!("parse_blocks: {:?}", e))?;
+    let storage = build_indices(
+        harness.blocks_dir.clone(),
+        0..block_count,
+        vec![],
+        paths,
+        spk_db,
+    )
+    .map_err(|e| anyhow::anyhow!("parse_blocks: {:?}", e))?;
 
     expected(&harness, &storage, &expected_txids)
 }

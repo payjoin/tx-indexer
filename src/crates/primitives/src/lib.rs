@@ -1,3 +1,4 @@
+pub(crate) mod blk_file;
 pub mod dense;
 pub mod handle;
 pub mod indecies;

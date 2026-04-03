@@ -182,6 +182,7 @@ mod tests {
             range: 0..1,
             paths,
             spk_db,
+            file_hints: vec![],
         })?;
 
         let ctx = Arc::new(PipelineContext::new());

@@ -7,7 +7,11 @@ use crate::traits::graph_index::{
     TxIndex, TxIoIndex, TxOutDataIndex,
 };
 use crate::{ScriptPubkeyHash, dense, loose, traits::abstract_types::AbstractTransaction};
-use crate::{dense::build_indices, loose::LooseIndexBuilder, sled::spk_db::SledScriptPubkeyDb};
+use crate::{
+    dense::build_indices,
+    loose::LooseIndexBuilder,
+    sled::{db::SledDBFactory, spk_db::SledScriptPubkeyDb},
+};
 use bitcoin::Amount;
 use std::{ops::Range, path::PathBuf};
 
@@ -188,6 +192,10 @@ pub struct DenseBuildSpec {
     pub range: Range<u64>,
     pub paths: dense::IndexPaths,
     pub spk_db: SledScriptPubkeyDb,
+    /// Blk file layout hints: `(file_no, height_first, height_last)`, sorted by `file_no`.
+    ///
+    /// If empty, assumes all blocks are in `blk00000.dat` starting at height 0.
+    pub file_hints: Vec<(u32, u32, u32)>,
 }
 
 pub struct UnifiedStorage {
@@ -209,12 +217,112 @@ impl TryFrom<DenseBuildSpec> for UnifiedStorage {
     type Error = BlockFileError;
 
     fn try_from(spec: DenseBuildSpec) -> Result<Self, Self::Error> {
-        let dense = build_indices(spec.blocks_dir, spec.range, spec.paths, spec.spk_db)?;
+        let dense = build_indices(
+            spec.blocks_dir,
+            spec.range,
+            spec.file_hints,
+            spec.paths,
+            spec.spk_db,
+        )?;
         Ok(Self {
             dense: Some(dense),
             loose: None,
         })
     }
+}
+
+/// Error returned by [`sync_from_tip`].
+#[derive(Debug)]
+pub enum SyncError {
+    BlockIndex(bitcoin_block_index::Error),
+    Parse(BlockFileError),
+    Sled(sled::Error),
+}
+
+impl std::fmt::Display for SyncError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SyncError::BlockIndex(e) => write!(f, "block index: {e}"),
+            SyncError::Parse(e) => write!(f, "parse: {e}"),
+            SyncError::Sled(e) => write!(f, "sled: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for SyncError {}
+
+/// Build a [`UnifiedStorage`] for the `depth + 1` blocks ending at the chain tip.
+///
+/// `bitcoind_datadir` is Bitcoin Core's data directory (e.g. `~/.bitcoin/` or
+/// `~/.bitcoin/regtest/`); `blocks/` and `blocks/index/` are derived from it automatically.
+///
+/// `index_dir` is the output directory where all dense index files and the sled database
+/// will be written. The caller is responsible for creating this directory before calling.
+pub fn sync_from_tip(
+    bitcoind_datadir: impl Into<PathBuf>,
+    index_dir: impl Into<PathBuf>,
+    depth: u32,
+) -> Result<UnifiedStorage, SyncError> {
+    use bitcoin_block_index::BlockIndex;
+
+    let datadir = bitcoind_datadir.into();
+    let blocks_dir = datadir.join("blocks");
+    let index_path = datadir.join("blocks").join("index");
+    let index_dir = index_dir.into();
+
+    let paths = dense::IndexPaths {
+        txptr: index_dir.join("txptr.bin"),
+        block_tx: index_dir.join("block_tx.bin"),
+        in_prevout: index_dir.join("in_prevout.bin"),
+        out_spent: index_dir.join("out_spent.bin"),
+    };
+    let spk_db = SledDBFactory::open(index_dir.join("spk_db"))
+        .map_err(SyncError::Sled)?
+        .spk_db()
+        .map_err(SyncError::Sled)?;
+
+    let mut index = BlockIndex::open(&index_path).map_err(SyncError::BlockIndex)?;
+
+    let tip_hash = index.best_block().map_err(SyncError::BlockIndex)?;
+    let chain = index
+        .walk_back(&tip_hash, depth)
+        .map_err(SyncError::BlockIndex)?;
+
+    let start_height = chain
+        .first()
+        .expect("walk_back returns depth+1 items")
+        .height as u64;
+    let end_height = chain
+        .last()
+        .expect("walk_back returns depth+1 items")
+        .height as u64;
+
+    // Collect file layout hints from BlockIndex so the parser can locate the right blk files.
+    let last_file = index.last_block_file().map_err(SyncError::BlockIndex)?;
+    let mut file_hints: Vec<(u32, u32, u32)> = Vec::new();
+    for file_no in 0..=last_file {
+        match index.block_file_info(file_no) {
+            Ok(info) => {
+                if (info.height_last as u64) < start_height {
+                    continue;
+                }
+                if (info.height_first as u64) > end_height {
+                    break;
+                }
+                file_hints.push((file_no, info.height_first, info.height_last));
+            }
+            Err(_) => continue,
+        }
+    }
+
+    let spec = DenseBuildSpec {
+        blocks_dir,
+        range: start_height..end_height + 1,
+        paths,
+        spk_db,
+        file_hints,
+    };
+    UnifiedStorage::try_from(spec).map_err(SyncError::Parse)
 }
 
 impl UnifiedStorage {
@@ -327,10 +435,12 @@ impl UnifiedStorage {
 
     pub fn dense_txids_from(&self, start: usize) -> Vec<AnyTxId> {
         let Some(dense) = self.dense.as_ref() else {
+            // TODO: should panic or this should just be exposed on dense traits
             return Vec::new();
         };
         let total = usize::try_from(dense.tx_count()).expect("dense tx count should fit in usize");
         if start >= total {
+            // TODO: return error
             return Vec::new();
         }
         (start..total)
