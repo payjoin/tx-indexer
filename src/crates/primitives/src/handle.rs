@@ -107,17 +107,23 @@ impl<'a> TxOutHandle<'a> {
     }
 
     pub fn value(&self) -> bitcoin::Amount {
-        self.index.value(&self.out_id)
+        self.index
+            .value(&self.out_id)
+            .expect("txout data not accessible, index corrupted or data missing")
     }
 
     pub fn script_pubkey_hash(&self) -> crate::ScriptPubkeyHash {
-        self.index.script_pubkey_hash(&self.out_id)
+        self.index
+            .script_pubkey_hash(&self.out_id)
+            .expect("txout data not accessible, index corrupted or data missing")
     }
 }
 
 impl<'a> HasScriptPubkey for TxOutHandle<'a> {
     fn script_pubkey_bytes(&self) -> Vec<u8> {
-        self.index.script_pubkey_bytes(&self.out_id)
+        self.index
+            .script_pubkey_bytes(&self.out_id)
+            .expect("txout data not accessible, index corrupted or data missing")
     }
 }
 
@@ -146,17 +152,17 @@ impl<'a> TxInHandle<'a> {
 
 impl<'a> HasSequence for TxInHandle<'a> {
     fn sequence(&self) -> u32 {
-        self.index.input_sequence(&self.in_id)
+        self.index.input_sequence(&self.in_id).unwrap_or(0xFFFFFFFF)
     }
 }
 
 impl<'a> HasWitnessData for TxInHandle<'a> {
     fn witness_items(&self) -> Vec<Vec<u8>> {
-        self.index.witness_items(&self.in_id)
+        self.index.witness_items(&self.in_id).unwrap_or_default()
     }
 
     fn script_sig_bytes(&self) -> Vec<u8> {
-        self.index.script_sig_bytes(&self.in_id)
+        self.index.script_sig_bytes(&self.in_id).unwrap_or_default()
     }
 }
 
@@ -220,7 +226,9 @@ impl<'a> AbstractTransaction for TxHandle<'a> {
     }
 
     fn locktime(&self) -> u32 {
-        self.index.locktime(&self.tx_id)
+        self.index
+            .locktime(&self.tx_id)
+            .expect("tx data not accessible, index corrupted or data missing")
     }
 
     fn is_coinbase(&self) -> bool {

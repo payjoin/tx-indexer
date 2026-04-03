@@ -164,10 +164,10 @@ impl InMemoryIndex {
             let prev_vout = txin.prev_vout();
             let prev_txid = txin.prev_txid();
             if let (Some(prev_vout), Some(prev_txid)) = (prev_vout, prev_txid) {
-                let prev_outid = TxOutId::new(
-                    prev_txid.loose_txid().expect("prev_txid should be loose"),
-                    prev_vout,
-                );
+                let Some(prev_loose_txid) = prev_txid.loose_txid() else {
+                    continue;
+                };
+                let prev_outid = TxOutId::new(prev_loose_txid, prev_vout);
                 self.spending_txins.insert(prev_outid, vin_id);
                 self.prev_txouts.insert(vin_id, prev_outid);
             }
@@ -279,22 +279,22 @@ impl TxIoIndex for InMemoryIndex {
             .collect()
     }
 
-    fn locktime(&self, txid: &AnyTxId) -> u32 {
-        let tx = self.tx(txid).expect("loose txid not found in storage");
-        tx.locktime()
+    fn locktime(&self, txid: &AnyTxId) -> Option<u32> {
+        let tx = self.tx(txid)?;
+        Some(tx.locktime())
     }
 
-    fn input_sequence(&self, _in_id: &AnyInId) -> u32 {
-        // TODO: loose transactions don't carry sequence data in the abstract model yet.
-        panic!("input_sequence not supported for loose transactions");
+    // TODO: loose transactions don't carry sequence data in the abstract model yet.
+    fn input_sequence(&self, _in_id: &AnyInId) -> Option<u32> {
+        None
     }
 
-    fn witness_items(&self, _in_id: &AnyInId) -> Vec<Vec<u8>> {
-        todo!()
+    fn witness_items(&self, _in_id: &AnyInId) -> Option<Vec<Vec<u8>>> {
+        None
     }
 
-    fn script_sig_bytes(&self, _in_id: &AnyInId) -> Vec<u8> {
-        todo!()
+    fn script_sig_bytes(&self, _in_id: &AnyInId) -> Option<Vec<u8>> {
+        None
     }
 
     fn block_height(&self, _txid: &AnyTxId) -> Option<u64> {
@@ -312,45 +312,24 @@ impl OutpointIndex for InMemoryIndex {
 }
 
 impl TxOutDataIndex for InMemoryIndex {
-    fn value(&self, out_id: &AnyOutId) -> Amount {
-        let loose_out = out_id
-            .loose_id()
-            .expect("loose storage only supports loose outids");
-        let tx = self
-            .txs
-            .get(&loose_out.txid())
-            .expect("loose txid not found in storage");
-        let output = tx
-            .output_at(loose_out.vout() as usize)
-            .expect("txout should be present if index is built correctly");
-        output.value()
+    fn value(&self, out_id: &AnyOutId) -> Option<Amount> {
+        let loose_out = out_id.loose_id()?;
+        let tx = self.txs.get(&loose_out.txid())?;
+        let output = tx.output_at(loose_out.vout() as usize)?;
+        Some(output.value())
     }
 
-    fn script_pubkey_hash(&self, out_id: &AnyOutId) -> ScriptPubkeyHash {
-        let loose_out = out_id
-            .loose_id()
-            .expect("loose storage only supports loose outids");
-        let tx = self
-            .txs
-            .get(&loose_out.txid())
-            .expect("loose txid not found in storage");
-        let output = tx
-            .output_at(loose_out.vout() as usize)
-            .expect("txout should be present if index is built correctly");
-        output.script_pubkey_hash()
+    fn script_pubkey_hash(&self, out_id: &AnyOutId) -> Option<ScriptPubkeyHash> {
+        let loose_out = out_id.loose_id()?;
+        let tx = self.txs.get(&loose_out.txid())?;
+        let output = tx.output_at(loose_out.vout() as usize)?;
+        Some(output.script_pubkey_hash())
     }
 
-    fn script_pubkey_bytes(&self, out_id: &AnyOutId) -> Vec<u8> {
-        let loose_out = out_id
-            .loose_id()
-            .expect("loose storage only supports loose outids");
-        let tx = self
-            .txs
-            .get(&loose_out.txid())
-            .expect("loose txid not found in storage");
-        let output = tx
-            .output_at(loose_out.vout() as usize)
-            .expect("txout should be present if index is built correctly");
-        output.script_pubkey_bytes()
+    fn script_pubkey_bytes(&self, out_id: &AnyOutId) -> Option<Vec<u8>> {
+        let loose_out = out_id.loose_id()?;
+        let tx = self.txs.get(&loose_out.txid())?;
+        let output = tx.output_at(loose_out.vout() as usize)?;
+        Some(output.script_pubkey_bytes())
     }
 }

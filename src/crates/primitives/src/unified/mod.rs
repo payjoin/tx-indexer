@@ -224,8 +224,8 @@ impl UnifiedStorage {
     }
 
     #[inline(always)]
-    fn loose(&self) -> &InMemoryIndex {
-        self.loose.as_ref().expect("loose storage not initialized")
+    fn loose(&self) -> Option<&InMemoryIndex> {
+        self.loose.as_ref()
     }
 
     #[inline(always)]
@@ -241,13 +241,15 @@ impl UnifiedStorage {
         dense_fn: impl FnOnce(&DenseStorage, dense::TxId) -> T,
     ) -> T {
         if let Some(lid) = id.loose_txid() {
-            loose_fn(self.loose(), lid)
-        } else {
-            dense_fn(
-                self.dense(),
-                id.confirmed_txid().expect("must be dense or loose"),
-            )
+            let ls = self
+                .loose()
+                .expect("loose txid referenced but loose storage not initialized");
+            return loose_fn(ls, lid);
         }
+        dense_fn(
+            self.dense(),
+            id.confirmed_txid().expect("must be dense or loose"),
+        )
     }
 
     #[inline]
@@ -258,13 +260,15 @@ impl UnifiedStorage {
         dense_fn: impl FnOnce(&DenseStorage, dense::TxOutId) -> T,
     ) -> T {
         if let Some(lid) = id.loose_id() {
-            loose_fn(self.loose(), lid)
-        } else {
-            dense_fn(
-                self.dense(),
-                id.confirmed_id().expect("must be dense or loose"),
-            )
+            let ls = self
+                .loose()
+                .expect("loose outid referenced but loose storage not initialized");
+            return loose_fn(ls, lid);
         }
+        dense_fn(
+            self.dense(),
+            id.confirmed_id().expect("must be dense or loose"),
+        )
     }
 
     #[inline]
@@ -275,29 +279,29 @@ impl UnifiedStorage {
         dense_fn: impl FnOnce(&DenseStorage, dense::TxInId) -> T,
     ) -> T {
         if let Some(lid) = id.loose_id() {
-            loose_fn(self.loose(), lid)
-        } else {
-            dense_fn(
-                self.dense(),
-                id.confirmed_id().expect("must be dense or loose"),
-            )
+            let ls = self
+                .loose()
+                .expect("loose inid referenced but loose storage not initialized");
+            return loose_fn(ls, lid);
         }
+        dense_fn(
+            self.dense(),
+            id.confirmed_id().expect("must be dense or loose"),
+        )
     }
 
     #[inline]
-    fn loose_tx(&self, id: loose::TxId) -> &std::sync::Arc<dyn AbstractTransaction + Send + Sync> {
-        self.loose()
-            .txs
-            .get(&id)
-            .expect("loose txid not found in storage")
+    fn loose_tx(
+        &self,
+        id: loose::TxId,
+    ) -> Option<&std::sync::Arc<dyn AbstractTransaction + Send + Sync>> {
+        self.loose.as_ref()?.txs.get(&id)
     }
 
     pub fn loose_txids(&self) -> Vec<AnyTxId> {
-        let loose = self
-            .loose
-            .as_ref()
-            .expect("loose storage missing when requesting loose txids");
-        loose.tx_order.iter().copied().map(AnyTxId::from).collect()
+        self.loose.as_ref().map_or(Vec::new(), |loose| {
+            loose.tx_order.iter().copied().map(AnyTxId::from).collect()
+        })
     }
 
     pub fn loose_txids_len(&self) -> usize {
@@ -311,18 +315,16 @@ impl UnifiedStorage {
     }
 
     pub fn loose_txids_from(&self, start: usize) -> Vec<AnyTxId> {
-        let loose = self
-            .loose
-            .as_ref()
-            .expect("loose storage missing when requesting loose txids");
-        if start >= loose.tx_order.len() {
-            return Vec::new();
-        }
-        loose.tx_order[start..]
-            .iter()
-            .copied()
-            .map(AnyTxId::from)
-            .collect()
+        self.loose.as_ref().map_or(Vec::new(), |loose| {
+            if start >= loose.tx_order.len() {
+                return Vec::new();
+            }
+            loose.tx_order[start..]
+                .iter()
+                .copied()
+                .map(AnyTxId::from)
+                .collect()
+        })
     }
 
     pub fn dense_txids_from(&self, start: usize) -> Vec<AnyTxId> {
@@ -381,12 +383,13 @@ impl UnifiedStorage {
         )
     }
 
-    pub fn tx(&self, txid: AnyTxId) -> std::sync::Arc<dyn AbstractTransaction> {
-        if let Some(loose_txid) = txid.loose_txid() {
-            return self.loose_tx(loose_txid).clone();
-        }
-        // TODO: support confirmed tx access
-        panic!("confirmed tx access not supported yet");
+    // TODO: support confirmed tx access
+    pub fn tx(
+        &self,
+        txid: AnyTxId,
+    ) -> Option<std::sync::Arc<dyn AbstractTransaction + Send + Sync>> {
+        let loose_txid = txid.loose_txid()?;
+        self.loose_tx(loose_txid).cloned()
     }
 
     pub fn script_pubkey_to_txout_id(&self, script_pubkey: &ScriptPubkeyHash) -> Option<AnyOutId> {
@@ -461,31 +464,31 @@ impl TxIoIndex for UnifiedStorage {
         UnifiedStorage::tx_out_ids(self, *txid)
     }
 
-    fn locktime(&self, txid: &AnyTxId) -> u32 {
+    fn locktime(&self, txid: &AnyTxId) -> Option<u32> {
         self.resolve_tx(
             *txid,
-            |ls, lid| ls.txs[&lid].locktime(),
-            |ds, did| ds.get_tx(did).lock_time.to_consensus_u32(),
+            |ls, lid| ls.txs.get(&lid).map(|tx| tx.locktime()),
+            |ds, did| Some(ds.get_tx(did).lock_time.to_consensus_u32()),
         )
     }
 
-    fn input_sequence(&self, in_id: &AnyInId) -> u32 {
+    fn input_sequence(&self, in_id: &AnyInId) -> Option<u32> {
         if in_id.is_loose() {
             // TODO: loose transactions don't carry sequence data in the abstract model yet.
-            panic!("input_sequence not supported for loose transactions");
+            return None;
         }
         let did = in_id.confirmed_id().expect("must be dense");
         let ds = self.dense();
         let txid = ds.txid_for_in(did);
         let (start, _) = ds.tx_in_range(txid);
         let vin = (did.index() - start) as usize;
-        ds.get_tx(txid).input[vin].sequence.0
+        Some(ds.get_tx(txid).input[vin].sequence.0)
     }
 
-    fn witness_items(&self, in_id: &AnyInId) -> Vec<Vec<u8>> {
+    fn witness_items(&self, in_id: &AnyInId) -> Option<Vec<Vec<u8>>> {
         if in_id.is_loose() {
             // TODO: loose transactions don't carry witness data in the abstract model yet.
-            panic!("witness_items not supported for loose transactions");
+            return None;
         }
         let did = in_id.confirmed_id().expect("must be dense");
         let ds = self.dense();
@@ -493,24 +496,26 @@ impl TxIoIndex for UnifiedStorage {
         let (start, _) = ds.tx_in_range(txid);
         let vin = (did.index() - start) as usize;
         let tx = ds.get_tx(txid);
-        tx.input[vin]
-            .witness
-            .iter()
-            .map(|item| item.to_vec())
-            .collect()
+        Some(
+            tx.input[vin]
+                .witness
+                .iter()
+                .map(|item| item.to_vec())
+                .collect(),
+        )
     }
 
-    fn script_sig_bytes(&self, in_id: &AnyInId) -> Vec<u8> {
+    fn script_sig_bytes(&self, in_id: &AnyInId) -> Option<Vec<u8>> {
         if in_id.is_loose() {
             // TODO: loose transactions don't carry script sig data in the abstract model yet.
-            panic!("script_sig_bytes not supported for loose transactions");
+            return None;
         }
         let did = in_id.confirmed_id().expect("must be dense");
         let ds = self.dense();
         let txid = ds.txid_for_in(did);
         let (start, _) = ds.tx_in_range(txid);
         let vin = (did.index() - start) as usize;
-        ds.get_tx(txid).input[vin].script_sig.to_bytes()
+        Some(ds.get_tx(txid).input[vin].script_sig.to_bytes())
     }
 
     fn block_height(&self, txid: &AnyTxId) -> Option<u64> {
@@ -535,42 +540,39 @@ impl OutpointIndex for UnifiedStorage {
 }
 
 impl TxOutDataIndex for UnifiedStorage {
-    fn value(&self, out_id: &AnyOutId) -> Amount {
+    fn value(&self, out_id: &AnyOutId) -> Option<Amount> {
         self.resolve_out(
             *out_id,
             |ls, lid| {
-                ls.txs[&lid.txid()]
-                    .output_at(lid.vout() as usize)
-                    .expect("txout should be present if index is built correctly")
-                    .value()
+                let tx = ls.txs.get(&lid.txid())?;
+                let output = tx.output_at(lid.vout() as usize)?;
+                Some(output.value())
             },
-            |ds, did| ds.get_txout(did).value,
+            |ds, did| Some(ds.get_txout(did).value),
         )
     }
 
-    fn script_pubkey_hash(&self, out_id: &AnyOutId) -> ScriptPubkeyHash {
+    fn script_pubkey_hash(&self, out_id: &AnyOutId) -> Option<ScriptPubkeyHash> {
         self.resolve_out(
             *out_id,
             |ls, lid| {
-                ls.txs[&lid.txid()]
-                    .output_at(lid.vout() as usize)
-                    .expect("txout should be present if index is built correctly")
-                    .script_pubkey_hash()
+                let tx = ls.txs.get(&lid.txid())?;
+                let output = tx.output_at(lid.vout() as usize)?;
+                Some(output.script_pubkey_hash())
             },
-            |ds, did| script_pubkey_hash(&ds.get_txout(did).script_pubkey),
+            |ds, did| Some(script_pubkey_hash(&ds.get_txout(did).script_pubkey)),
         )
     }
 
-    fn script_pubkey_bytes(&self, out_id: &AnyOutId) -> Vec<u8> {
+    fn script_pubkey_bytes(&self, out_id: &AnyOutId) -> Option<Vec<u8>> {
         self.resolve_out(
             *out_id,
             |ls, lid| {
-                ls.txs[&lid.txid()]
-                    .output_at(lid.vout() as usize)
-                    .expect("txout should be present if index is built correctly")
-                    .script_pubkey_bytes()
+                let tx = ls.txs.get(&lid.txid())?;
+                let output = tx.output_at(lid.vout() as usize)?;
+                Some(output.script_pubkey_bytes())
             },
-            |ds, did| ds.get_txout(did).script_pubkey.to_bytes(),
+            |ds, did| Some(ds.get_txout(did).script_pubkey.to_bytes()),
         )
     }
 }
