@@ -39,6 +39,8 @@ pub trait AbstractTxIn {
     fn prev_vout(&self) -> Option<u32>;
     /// Returns the previous output ID
     fn prev_txout_id(&self) -> Option<AnyOutId>;
+    /// Returns the sequence number
+    fn sequence(&self) -> u32;
 }
 
 /// Trait for transaction outputs
@@ -106,6 +108,10 @@ pub trait HasPrevOutput {
     /// Txid bytes in internal (wire) order
     fn prev_outpoint_txid_bytes(&self) -> [u8; 32];
     fn prev_outpoint_vout(&self) -> u32;
+}
+
+pub trait HasBlockHeight {
+    fn block_height(&self) -> Option<u64>;
 }
 
 // --- bitcoin type impls ---
