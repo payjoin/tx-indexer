@@ -23,10 +23,10 @@ pub fn has_uncompressed_pubkey(
     let script = Script::from_bytes(&spk_bytes);
 
     // P2PK: pubkey is in the prevout
-    if let Some(pk) = script.p2pk_public_key()
-        && !pk.compressed
-    {
-        return true;
+    if let Some(pk) = script.p2pk_public_key() {
+        if !pk.compressed {
+            return true;
+        }
     }
 
     // P2PKH: pubkey is pushed in script_sig — look for a 65-byte push starting with 0x04

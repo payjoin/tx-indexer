@@ -50,7 +50,6 @@ impl Parser {
         self.blocks_dir.join(file_name)
     }
 
-
     /// Parse blocks from block files, starting from blk00000.dat and continuing
     /// through subsequent files as needed.
     /// Returns the dense TxIds of all transactions in those blocks and writes
@@ -143,7 +142,8 @@ impl Parser {
                         spk_db,
                         txids: &mut txids,
                     };
-                    bsl::Block::visit(block_slice, &mut collector).map_err(BlockFileError::Parse)?;
+                    bsl::Block::visit(block_slice, &mut collector)
+                        .map_err(BlockFileError::Parse)?;
                     if let Some(error) = collector.error.take() {
                         return Err(error);
                     }
@@ -208,11 +208,11 @@ impl Visitor for TxIdCollector<'_> {
             self.error = Some(BlockFileError::Io(err));
             return ControlFlow::Break(());
         }
-        if out_id != OUTID_NONE
-            && let Err(err) = self.out_spent_index.set(out_id, in_id)
-        {
-            self.error = Some(BlockFileError::Io(err));
-            return ControlFlow::Break(());
+        if out_id != OUTID_NONE {
+            if let Err(err) = self.out_spent_index.set(out_id, in_id) {
+                self.error = Some(BlockFileError::Io(err));
+                return ControlFlow::Break(());
+            }
         }
         self.current_in += 1;
         ControlFlow::Continue(())
