@@ -17,7 +17,7 @@ fn main() {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--blocks-dir" => {
+            "--blocks-dir" | "--datadir" => {
                 i += 1;
                 blocks_dir = Some(PathBuf::from(&args[i]));
             }
@@ -26,6 +26,16 @@ fn main() {
                 let (start, end) = parse_range(&args[i]);
                 range_start = start;
                 range_end = end;
+            }
+            "--depth" => {
+                i += 1;
+                // For now, --depth just sets the range from 0 to depth value
+                let depth: u64 = args[i].parse().unwrap_or_else(|_| {
+                    eprintln!("Error: invalid depth: {}", args[i]);
+                    std::process::exit(1);
+                });
+                range_start = 0;
+                range_end = depth;
             }
             other => {
                 eprintln!("Unknown argument: {other}");
@@ -37,7 +47,7 @@ fn main() {
     }
 
     let blocks_dir = blocks_dir.unwrap_or_else(|| {
-        eprintln!("Error: --blocks-dir is required");
+        eprintln!("Error: --blocks-dir or --datadir is required");
         print_usage();
         std::process::exit(1);
     });
@@ -140,8 +150,10 @@ fn parse_range(s: &str) -> (u64, u64) {
 }
 
 fn print_usage() {
-    eprintln!("Usage: indexer --blocks-dir <path> [--range START..END]");
+    eprintln!("Usage: indexer --blocks-dir <path> [--range START..END | --depth N]");
     eprintln!();
     eprintln!("  --blocks-dir <path>   Directory containing blk*.dat files");
+    eprintln!("  --datadir <path>      Alias for --blocks-dir");
     eprintln!("  --range START..END    Block range to index (default: 0..10)");
+    eprintln!("  --depth N             Index N blocks from genesis");
 }
