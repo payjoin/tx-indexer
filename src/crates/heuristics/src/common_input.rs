@@ -22,7 +22,7 @@ mod tests {
     use tx_indexer_disjoint_set::DisJointSet;
     use tx_indexer_primitives::{
         loose::{TxId, TxOutId},
-        test_utils::{DummyTxData, DummyTxOutData},
+        test_utils::DummyTxData,
         unified::AnyOutId,
     };
 
