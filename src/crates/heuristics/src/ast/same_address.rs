@@ -202,7 +202,7 @@ mod tests {
         println!(
             "same-address clustering: clusters={}, largest={:?}",
             cluster_sizes.len(),
-            cluster_sizes.get(0)
+            cluster_sizes.first()
         );
 
         Ok(())

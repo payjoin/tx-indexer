@@ -216,7 +216,7 @@ fn test_address_reuse() {
     let output2 = make_txout(addr2.script_pubkey());
 
     // Reuse detected
-    assert!(address_reuse(&[output1], &[prevout1.clone()]));
+    assert!(address_reuse(&[output1], std::slice::from_ref(&prevout1)));
 
     // No reuse
     assert!(!address_reuse(&[output2], &[prevout1]));
