@@ -55,8 +55,10 @@ impl BlockIndex {
     ///
     /// `index_path` is typically `~/.bitcoin/blocks/index/`.
     pub fn open(index_path: &Path) -> Result<Self, Error> {
-        let mut opts = Options::default();
-        opts.create_if_missing = false;
+        let opts = Options {
+            create_if_missing: false,
+            ..Default::default()
+        };
 
         let mut db = DB::open(index_path, opts)?;
 
