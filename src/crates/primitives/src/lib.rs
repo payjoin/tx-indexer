@@ -1,5 +1,6 @@
 pub(crate) mod blk_file;
 pub mod dense;
+pub mod hamming_weight;
 pub mod handle;
 pub mod indecies;
 pub mod loose;
