@@ -1,6 +1,6 @@
 //! Integration tests for the AST-based pipeline DSL.
 #[cfg(test)]
-pub(crate) mod tests {
+pub(crate) mod ast_tests {
     use std::sync::Arc;
 
     use tx_indexer_disjoint_set::DisJointSet;

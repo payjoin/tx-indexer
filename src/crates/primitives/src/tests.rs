@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod primitive_tests {
     use anyhow::Result;
     use bitcoin::{Amount, hashes::Hash};
     use std::sync::{Arc, Mutex};
