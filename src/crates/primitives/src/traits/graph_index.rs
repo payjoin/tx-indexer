@@ -35,6 +35,7 @@ pub trait TxIoIndex {
     fn input_sequence(&self, in_id: &AnyInId) -> u32;
     fn witness_items(&self, in_id: &AnyInId) -> Vec<Vec<u8>>;
     fn script_sig_bytes(&self, in_id: &AnyInId) -> Vec<u8>;
+    // block_height is optional because loose transactions are not confirmed.
     fn block_height(&self, txid: &AnyTxId) -> Option<u64>;
 }
 
@@ -42,6 +43,8 @@ pub trait OutpointIndex {
     fn outpoint_for_out(&self, out_id: &AnyOutId) -> (AnyTxId, u32);
 }
 
+/// Concrete types because every indexed txout has these fields.
+/// A missing value means index corruption or an internal bug, not legitimately absent data.
 pub trait TxOutDataIndex {
     fn value(&self, out_id: &AnyOutId) -> Amount;
     fn script_pubkey_hash(&self, out_id: &AnyOutId) -> ScriptPubkeyHash;

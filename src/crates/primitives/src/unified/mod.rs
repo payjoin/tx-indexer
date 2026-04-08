@@ -292,12 +292,11 @@ impl UnifiedStorage {
             .expect("loose txid not found in storage")
     }
 
+    // Returns empty Vec when loose storage is absent
     pub fn loose_txids(&self) -> Vec<AnyTxId> {
-        let loose = self
-            .loose
-            .as_ref()
-            .expect("loose storage missing when requesting loose txids");
-        loose.tx_order.iter().copied().map(AnyTxId::from).collect()
+        self.loose.as_ref().map_or(Vec::new(), |loose| {
+            loose.tx_order.iter().copied().map(AnyTxId::from).collect()
+        })
     }
 
     pub fn loose_txids_len(&self) -> usize {
@@ -311,18 +310,16 @@ impl UnifiedStorage {
     }
 
     pub fn loose_txids_from(&self, start: usize) -> Vec<AnyTxId> {
-        let loose = self
-            .loose
-            .as_ref()
-            .expect("loose storage missing when requesting loose txids");
-        if start >= loose.tx_order.len() {
-            return Vec::new();
-        }
-        loose.tx_order[start..]
-            .iter()
-            .copied()
-            .map(AnyTxId::from)
-            .collect()
+        self.loose.as_ref().map_or(Vec::new(), |loose| {
+            if start >= loose.tx_order.len() {
+                return Vec::new();
+            }
+            loose.tx_order[start..]
+                .iter()
+                .copied()
+                .map(AnyTxId::from)
+                .collect()
+        })
     }
 
     pub fn dense_txids_from(&self, start: usize) -> Vec<AnyTxId> {
@@ -381,12 +378,12 @@ impl UnifiedStorage {
         )
     }
 
-    pub fn tx(&self, txid: AnyTxId) -> std::sync::Arc<dyn AbstractTransaction> {
+    // TODO: support confirmed tx access
+    pub fn tx(&self, txid: AnyTxId) -> std::sync::Arc<dyn AbstractTransaction + Send + Sync> {
         if let Some(loose_txid) = txid.loose_txid() {
             return self.loose_tx(loose_txid).clone();
         }
-        // TODO: support confirmed tx access
-        panic!("confirmed tx access not supported yet");
+        todo!("confirmed tx access not supported yet")
     }
 
     pub fn script_pubkey_to_txout_id(&self, script_pubkey: &ScriptPubkeyHash) -> Option<AnyOutId> {

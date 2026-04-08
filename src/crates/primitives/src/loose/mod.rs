@@ -164,10 +164,10 @@ impl InMemoryIndex {
             let prev_vout = txin.prev_vout();
             let prev_txid = txin.prev_txid();
             if let (Some(prev_vout), Some(prev_txid)) = (prev_vout, prev_txid) {
-                let prev_outid = TxOutId::new(
-                    prev_txid.loose_txid().expect("prev_txid should be loose"),
-                    prev_vout,
-                );
+                let Some(prev_loose_txid) = prev_txid.loose_txid() else {
+                    todo!("link loose tx input to confirmed (dense) prevout");
+                };
+                let prev_outid = TxOutId::new(prev_loose_txid, prev_vout);
                 self.spending_txins.insert(prev_outid, vin_id);
                 self.prev_txouts.insert(vin_id, prev_outid);
             }
