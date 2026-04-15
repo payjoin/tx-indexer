@@ -16,6 +16,16 @@ pub struct MappingBlock {
 /// sub-transactions where each block's input sum equals its output sum.
 pub type Mapping = Vec<MappingBlock>;
 
+/// A subset of value indices together with their sum.
+type IndexBlock = (Vec<usize>, u64);
+
+/// A partition of all indices into disjoint `IndexBlock`s.
+type Partition = Vec<IndexBlock>;
+
+/// A grouping of coin values (as opposed to indices), used in JSON fixtures.
+#[allow(dead_code)]
+type ValuePartition = Vec<Vec<u64>>;
+
 /// Compute all non-empty subset sums of `values` using DP.
 /// This is the precomputation used as the `sums` filter in `find_partitions`.
 fn all_subsums(values: &[u64]) -> HashSet<u64> {
@@ -39,8 +49,8 @@ fn find_partitions_dfs(
     remaining: &[usize],
     values: &[u64],
     valid_sums: &HashSet<u64>,
-    current: &mut Vec<(Vec<usize>, u64)>,
-    results: &mut Vec<Vec<(Vec<usize>, u64)>>,
+    current: &mut Partition,
+    results: &mut Vec<Partition>,
 ) {
     if remaining.is_empty() {
         results.push(current.clone());
@@ -78,8 +88,8 @@ fn find_partitions_dfs(
 /// blocks) that pair blocks of equal sum. Multiple bijections arise when
 /// several blocks share the same sum.
 fn build_bijections(
-    ip: &[(Vec<usize>, u64)],
-    op: &[(Vec<usize>, u64)],
+    ip: &[IndexBlock],
+    op: &[IndexBlock],
     op_used: &mut Vec<bool>,
     current: &mut Vec<MappingBlock>,
     results: &mut Vec<Mapping>,
@@ -142,7 +152,7 @@ fn compute_all_mappings(input_values: &[u64], output_values: &[u64]) -> Vec<Mapp
     let output_subsums = all_subsums(output_values);
     let input_subsums = all_subsums(input_values);
 
-    let mut input_partitions: Vec<Vec<(Vec<usize>, u64)>> = vec![];
+    let mut input_partitions: Vec<Partition> = vec![];
     find_partitions_dfs(
         &input_indices,
         input_values,
@@ -151,7 +161,7 @@ fn compute_all_mappings(input_values: &[u64], output_values: &[u64]) -> Vec<Mapp
         &mut input_partitions,
     );
 
-    let mut output_partitions: Vec<Vec<(Vec<usize>, u64)>> = vec![];
+    let mut output_partitions: Vec<Partition> = vec![];
     find_partitions_dfs(
         &output_indices,
         output_values,
@@ -161,7 +171,7 @@ fn compute_all_mappings(input_values: &[u64], output_values: &[u64]) -> Vec<Mapp
     );
 
     // Group output partitions by sorted sum multiset for O(1) lookup.
-    let mut output_by_sums: HashMap<Vec<u64>, Vec<Vec<(Vec<usize>, u64)>>> = HashMap::new();
+    let mut output_by_sums: HashMap<Vec<u64>, Vec<Partition>> = HashMap::new();
     for op in output_partitions {
         let mut key: Vec<u64> = op.iter().map(|(_, s)| *s).collect();
         key.sort_unstable();
@@ -277,9 +287,8 @@ mod tests {
     struct Run {
         in_coins: Vec<u64>,
         out_coins: Vec<u64>,
-        /// Each entry is (input_partition, output_partition) where a partition
-        /// is a list of sets of coin values.
-        partition_tuples: Vec<(Vec<Vec<u64>>, Vec<Vec<u64>>)>,
+        /// Each entry is (input_partition, output_partition).
+        partition_tuples: Vec<(ValuePartition, ValuePartition)>,
     }
 
     fn set_eq(a: &[u64], b: &[u64]) -> bool {
@@ -290,7 +299,7 @@ mod tests {
         sa == sb
     }
 
-    fn partition_eq(pa: &[Vec<u64>], pb: &[Vec<u64>]) -> bool {
+    fn partition_eq(pa: &ValuePartition, pb: &ValuePartition) -> bool {
         pa.len() == pb.len() && pa.iter().all(|sa| pb.iter().any(|sb| set_eq(sa, sb)))
     }
 
@@ -298,7 +307,7 @@ mod tests {
         mapping: &Mapping,
         in_vals: &[u64],
         out_vals: &[u64],
-    ) -> (Vec<Vec<u64>>, Vec<Vec<u64>>) {
+    ) -> (ValuePartition, ValuePartition) {
         let in_part = mapping
             .iter()
             .map(|b| b.inputs.iter().map(|&i| in_vals[i]).collect())
@@ -356,7 +365,7 @@ mod tests {
         let valid_sums = all_subsums(&filter_values);
         let indices: Vec<usize> = (0..values.len()).collect();
 
-        let mut partitions: Vec<Vec<(Vec<usize>, u64)>> = vec![];
+        let mut partitions: Vec<Partition> = vec![];
         find_partitions_dfs(&indices, &values, &valid_sums, &mut vec![], &mut partitions);
 
         // Normalise to sorted value sets for order-independent comparison.
@@ -405,7 +414,7 @@ mod tests {
                 tx: DummyTxData::new_with_amounts(run.out_coins.clone()),
             };
             let mappings = get_all_mappings(&tx);
-            let computed: Vec<(Vec<Vec<u64>>, Vec<Vec<u64>>)> = mappings
+            let computed: Vec<(ValuePartition, ValuePartition)> = mappings
                 .iter()
                 .map(|m| mapping_to_value_tuple(m, &run.in_coins, &run.out_coins))
                 .collect();
