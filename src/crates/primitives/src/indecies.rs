@@ -15,6 +15,7 @@ pub const INID_NONE: u64 = u64::MAX;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TxPtr {
+    // TODO: this can be abstracted out. Just using file off set you can index into the logical block file.
     blk_file_no: u32,
     blk_file_off: u32,
     tx_len: u32,
@@ -141,6 +142,7 @@ impl<const N: usize> FixedWidthIndex<N> {
         }
         let offset = index * (N as u64);
         let mut buf = [0u8; N];
+        // TODO: random access reads should minimize sys call overhead. Depending on hardware, mmap or io_uring may be concrectely more efficient.
         self.file.read_exact_at(&mut buf, offset)?;
         Ok(Some(buf))
     }

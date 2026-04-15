@@ -1197,6 +1197,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tx-indexer-partitions"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "serde",
+ "serde_json",
+ "tx-indexer-primitives",
+]
+
+[[package]]
 name = "tx-indexer-pipeline"
 version = "0.1.0"
 dependencies = [
