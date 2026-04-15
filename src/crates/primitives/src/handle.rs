@@ -142,6 +142,13 @@ impl<'a> TxInHandle<'a> {
             index: self.index,
         }
     }
+
+    pub fn prev_txout(&self) -> Option<TxOutHandle<'a>> {
+        self.prev_txout_id().map(|out_id| TxOutHandle {
+            out_id,
+            index: self.index,
+        })
+    }
 }
 
 impl<'a> HasSequence for TxInHandle<'a> {
