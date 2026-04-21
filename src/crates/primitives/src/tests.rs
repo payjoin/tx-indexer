@@ -3,11 +3,13 @@ mod primitive_tests {
     use anyhow::Result;
     use bitcoin::{Amount, hashes::Hash};
     use std::{
+        fs,
         path::PathBuf,
         sync::{Arc, Mutex},
     };
 
     use crate::integration::run_harness;
+    use crate::parser::BlkFileHint;
     use crate::test_utils::temp_dir;
     use crate::{
         UnifiedStorage,
@@ -56,6 +58,67 @@ mod primitive_tests {
 
         // TODO: parse from genesis to tip and repeat assertions
 
+        Ok(())
+    }
+
+    #[test]
+    fn build_indices_stops_at_logical_blk_size() -> Result<()> {
+        let fixture_blocks = fixture_dir().join("blocks");
+        let plaintext = fs::read(fixture_blocks.join("blk00000.dat"))?;
+        let logical_size = plaintext.len();
+
+        let mut xor_key = [0u8; 8];
+        let phase = logical_size % xor_key.len();
+        // Make the zero-padded tail look like a plausible block header after XOR
+        // decoding, so parsing past `data_len` would fail.
+        let fake_tail_header = [0x11, 0x22, 0x33, 0x44, 0xff, 0xff, 0xff, 0xff];
+        for (i, byte) in fake_tail_header.iter().enumerate() {
+            xor_key[(phase + i) % xor_key.len()] = *byte;
+        }
+
+        let mut encrypted = plaintext.clone();
+        for (i, byte) in encrypted.iter_mut().enumerate() {
+            *byte ^= xor_key[i % xor_key.len()];
+        }
+
+        let tx_count_for = |dir_prefix: &str, blk_bytes: &[u8]| -> Result<u64> {
+            let datadir = temp_dir(dir_prefix);
+            let blocks_dir = datadir.join("blocks");
+            fs::create_dir_all(&blocks_dir)?;
+            fs::write(blocks_dir.join("xor.dat"), xor_key)?;
+            fs::write(blocks_dir.join("blk00000.dat"), blk_bytes)?;
+
+            let storage = DenseStorageBuilder::new(
+                datadir,
+                temp_dir("preallocated_blk_index"),
+                0..100,
+                vec![BlkFileHint {
+                    file_no: 0,
+                    height_first: 0,
+                    height_last: u32::MAX,
+                    data_len: Some(logical_size),
+                }],
+            )
+            .build()?;
+
+            Ok(storage.tx_count())
+        };
+
+        let baseline_tx_count = tx_count_for("preallocated_blk_fixture_baseline", &encrypted)?;
+
+        let mut disk_bytes = encrypted.clone();
+        // Appending zeros simulates the preallocated tail of the active blk file.
+        disk_bytes.extend(std::iter::repeat_n(0u8, 4096));
+        let tailed_tx_count = tx_count_for("preallocated_blk_fixture_tailed", &disk_bytes)?;
+
+        assert!(
+            baseline_tx_count > 0,
+            "fixture should contribute at least one tx"
+        );
+        assert_eq!(
+            tailed_tx_count, baseline_tx_count,
+            "bytes past data_len must not change the parsed result"
+        );
         Ok(())
     }
 

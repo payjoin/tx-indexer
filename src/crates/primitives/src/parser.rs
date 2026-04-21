@@ -24,16 +24,40 @@ const BLOCK_START_LEN: usize = 8;
 
 // TODO: provide option to memory map the block files
 
+/// Parser-side blk file metadata used to locate and bound parsing within a file.
+///
+/// `file_no` selects the `blkNNNNN.dat` file, `height_first`/`height_last`
+/// describe the expected height range in that file, and `data_len` is the
+/// logical used byte length when known.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlkFileHint {
+    pub file_no: u32,
+    pub height_first: u32,
+    pub height_last: u32,
+    pub data_len: Option<usize>,
+}
+
+impl Default for BlkFileHint {
+    fn default() -> Self {
+        Self {
+            file_no: 0,
+            height_first: 0,
+            height_last: u32::MAX,
+            data_len: None,
+        }
+    }
+}
+
 /// Storage for dense IDs backed by Bitcoin Core block files.
 ///
 /// Parses blocks via bitcoin_slices (Visitor pattern).
 pub struct Parser {
     store: BlkFileStore,
-    /// Blk file layout: each entry is `(file_no, height_first, height_last)`.
+    /// Blk file layout hints for the files this parser should scan.
     ///
     /// If empty, all blocks are assumed to be in `blk00000.dat` starting at height 0
     /// (suitable for regtest or small test chains).
-    file_hints: Vec<(u32, u32, u32)>,
+    file_hints: Vec<BlkFileHint>,
 }
 
 impl Parser {
@@ -45,9 +69,7 @@ impl Parser {
     }
 
     /// Set blk file layout hints so the parser can locate blocks in multi-file chains.
-    ///
-    /// Each hint is `(file_no, height_first, height_last)`, sorted by `file_no`.
-    pub fn with_file_hints(mut self, hints: Vec<(u32, u32, u32)>) -> Self {
+    pub fn with_file_hints(mut self, hints: Vec<BlkFileHint>) -> Self {
         self.file_hints = hints;
         self
     }
@@ -75,8 +97,8 @@ impl Parser {
         spk_db: &mut SledScriptPubkeyDb,
     ) -> Result<(), BlockFileError> {
         // Default: single file starting at height 0.
-        let default_hint = [(0u32, 0u32, u32::MAX)];
-        let hints: &[(u32, u32, u32)] = if self.file_hints.is_empty() {
+        let default_hint = [BlkFileHint::default()];
+        let hints: &[BlkFileHint] = if self.file_hints.is_empty() {
             &default_hint
         } else {
             &self.file_hints
@@ -89,7 +111,9 @@ impl Parser {
             .unwrap_or(0) as u64;
         let mut txids = HashMap::new();
 
-        'files: for &(file_no, height_first, _height_last) in hints {
+        'files: for hint in hints {
+            let file_no = hint.file_no;
+            let height_first = hint.height_first;
             let file_first = height_first as u64;
             // Skip files entirely before range.
             if file_first > range.end.saturating_sub(1) {
@@ -98,6 +122,22 @@ impl Parser {
 
             let file_id = BlockFileId(file_no);
             let bytes = self.store.read_file(file_no).map_err(BlockFileError::Io)?;
+            let used_len = match hint.data_len {
+                Some(data_len) => {
+                    let used_len = data_len;
+                    if used_len > bytes.len() {
+                        return Err(BlockFileError::UnexpectedEof {
+                            offset: used_len,
+                            len: bytes.len(),
+                        });
+                    }
+                    used_len
+                }
+                None => bytes.len(),
+            };
+            // Only parse the logical bytes Bitcoin Core says are used. This avoids
+            // interpreting the preallocated tail of the active blk file as block data.
+            let bytes = &bytes[..used_len];
 
             let mut global_height = file_first;
             let mut offset = 0usize;

@@ -7,7 +7,7 @@ use crate::{
         BlockTxIndex, ConfirmedTxPtrIndex, INID_NONE, InPrevoutIndex, OUTID_NONE, OutSpentByIndex,
         TxPtr,
     },
-    parser::{BlockFileError, Parser},
+    parser::{BlkFileHint, BlockFileError, Parser},
     sled::{db::SledDBFactory, spk_db::SledScriptPubkeyDb},
     traits::ScriptPubkeyDb,
     unified::SyncError,
@@ -75,7 +75,7 @@ pub struct DenseStorageBuilder {
     data_dir: PathBuf,
     index_dir: PathBuf,
     range: std::ops::Range<u64>,
-    file_hints: Vec<(u32, u32, u32)>,
+    file_hints: Vec<BlkFileHint>,
 }
 
 impl DenseStorageBuilder {
@@ -83,7 +83,7 @@ impl DenseStorageBuilder {
         data_dir: PathBuf,
         index_dir: PathBuf,
         range: std::ops::Range<u64>,
-        file_hints: Vec<(u32, u32, u32)>,
+        file_hints: Vec<BlkFileHint>,
     ) -> Self {
         Self {
             data_dir,
@@ -169,18 +169,18 @@ impl DenseStorageBuilder {
         Ok(builder)
     }
 
-    /// Collect `(file_no, height_first, height_last)` hints for every blk file that
+    /// Collect [`BlkFileHint`] entries for every blk file that
     /// overlaps the inclusive height range `[start_height, end_height]`, so the parser
     /// can skip blk files outside the requested range.
     fn collect_file_hints(
         index: &mut bitcoin_block_index::BlockIndex,
         start_height: u64,
         end_height: u64,
-    ) -> Result<Vec<(u32, u32, u32)>, BlockFileError> {
+    ) -> Result<Vec<BlkFileHint>, BlockFileError> {
         let last_file = index
             .last_block_file()
             .map_err(BlockFileError::BlockIndex)?;
-        let mut file_hints: Vec<(u32, u32, u32)> = Vec::new();
+        let mut file_hints: Vec<BlkFileHint> = Vec::new();
 
         for file_no in 0..=last_file {
             let info = index
@@ -194,7 +194,12 @@ impl DenseStorageBuilder {
             if (info.height_first as u64) > end_height {
                 break;
             }
-            file_hints.push((file_no, info.height_first, info.height_last));
+            file_hints.push(BlkFileHint {
+                file_no,
+                height_first: info.height_first,
+                height_last: info.height_last,
+                data_len: Some(info.size as usize),
+            });
         }
 
         Ok(file_hints)
