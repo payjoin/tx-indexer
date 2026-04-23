@@ -245,6 +245,18 @@ pub(crate) fn build_indices(builder: DenseStorageBuilder) -> Result<DenseStorage
             &mut spk_db,
         )
         .map_err(SyncError::Parse)?;
+    txptr_index
+        .remap()
+        .map_err(|e| SyncError::Parse(BlockFileError::Io(e)))?;
+    block_tx_index
+        .remap()
+        .map_err(|e| SyncError::Parse(BlockFileError::Io(e)))?;
+    in_prevout_index
+        .remap()
+        .map_err(|e| SyncError::Parse(BlockFileError::Io(e)))?;
+    out_spent_index
+        .remap()
+        .map_err(|e| SyncError::Parse(BlockFileError::Io(e)))?;
     let storage = DenseStorage {
         store: parser.into_blk_store(),
         block_height_offset,
