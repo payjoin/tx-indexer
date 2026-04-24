@@ -126,6 +126,26 @@ impl<const N: usize> FixedWidthIndex<N> {
         Ok(Self { file, len, mmap })
     }
 
+    // TODO: why are these options suspicious? specifically the create option?
+    #[allow(clippy::suspicious_open_options)]
+    /// Open an existing file or create a new one without truncating existing content.
+    fn open_or_create(path: impl AsRef<Path>, len_error: &'static str) -> io::Result<Self> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(path)?;
+        let len_bytes = file.metadata()?.len();
+        if len_bytes % (N as u64) != 0 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, len_error));
+        }
+        Ok(Self {
+            file,
+            len: len_bytes / (N as u64),
+            mmap: None,
+        })
+    }
+
     /// Remap the file for read access after all writes are complete.
     ///
     /// Must not be called while any concurrent writes to this file are in flight.
@@ -212,6 +232,15 @@ impl ConfirmedTxPtrIndex {
         })
     }
 
+    fn open_or_create(path: impl AsRef<Path>) -> io::Result<Self> {
+        Ok(Self {
+            inner: FixedWidthIndex::open_or_create(
+                path,
+                "confirmed tx ptr file length is not a multiple of 28 bytes",
+            )?,
+        })
+    }
+
     pub fn len(&self) -> u64 {
         self.inner.len()
     }
@@ -252,6 +281,15 @@ impl BlockTxIndex {
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
         Ok(Self {
             inner: FixedWidthIndex::open(
+                path,
+                "block tx end file length is not a multiple of 4 bytes",
+            )?,
+        })
+    }
+
+    fn open_or_create(path: impl AsRef<Path>) -> io::Result<Self> {
+        Ok(Self {
+            inner: FixedWidthIndex::open_or_create(
                 path,
                 "block tx end file length is not a multiple of 4 bytes",
             )?,
@@ -303,6 +341,15 @@ impl InPrevoutIndex {
         })
     }
 
+    fn open_or_create(path: impl AsRef<Path>) -> io::Result<Self> {
+        Ok(Self {
+            inner: FixedWidthIndex::open_or_create(
+                path,
+                "in_prevout_outid file length is not a multiple of 8 bytes",
+            )?,
+        })
+    }
+
     pub fn len(&self) -> u64 {
         self.inner.len()
     }
@@ -340,6 +387,15 @@ impl OutSpentByIndex {
         })
     }
 
+    fn open_or_create(path: impl AsRef<Path>) -> io::Result<Self> {
+        Ok(Self {
+            inner: FixedWidthIndex::open_or_create(
+                path,
+                "out_spent_by_inid file length is not a multiple of 8 bytes",
+            )?,
+        })
+    }
+
     pub fn len(&self) -> u64 {
         self.inner.len()
     }
@@ -362,6 +418,38 @@ impl OutSpentByIndex {
 
     pub fn remap(&mut self) -> io::Result<()> {
         self.inner.remap()
+    }
+}
+
+/// All four dense index files grouped under a single directory.
+#[derive(Debug)]
+pub struct DenseIndexSet {
+    pub txptr: ConfirmedTxPtrIndex,
+    pub block_tx: BlockTxIndex,
+    pub in_prevout: InPrevoutIndex,
+    pub out_spent: OutSpentByIndex,
+}
+
+impl DenseIndexSet {
+    /// Open existing index files or create them if absent. Existing content is never truncated.
+    pub fn new(dir: impl AsRef<Path>) -> io::Result<Self> {
+        let dir = dir.as_ref();
+        Ok(Self {
+            txptr: ConfirmedTxPtrIndex::open_or_create(dir.join("txptr.bin"))?,
+            block_tx: BlockTxIndex::open_or_create(dir.join("block_tx.bin"))?,
+            in_prevout: InPrevoutIndex::open_or_create(dir.join("in_prevout.bin"))?,
+            out_spent: OutSpentByIndex::open_or_create(dir.join("out_spent.bin"))?,
+        })
+    }
+
+    /// Map all four index files into memory for zero-syscall reads.
+    ///
+    /// Call once after all writes are complete.
+    pub fn remap(&mut self) -> io::Result<()> {
+        self.txptr.remap()?;
+        self.block_tx.remap()?;
+        self.in_prevout.remap()?;
+        self.out_spent.remap()
     }
 }
 
