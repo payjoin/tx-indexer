@@ -10,10 +10,7 @@ use crate::{
     ScriptPubkeyHash,
     blk_file::BlkFileStore,
     dense::{BlockFileId, TxId, TxOutId},
-    indecies::{
-        BlockTxIndex, ConfirmedTxPtrIndex, INID_NONE, InPrevoutIndex, OUTID_NONE, OutSpentByIndex,
-        TxPtr,
-    },
+    indecies::{ConfirmedTxPtrIndex, DenseIndexSet, INID_NONE, OUTID_NONE, TxPtr},
     sled::spk_db::{SledScriptPubkeyDb, SledScriptPubkeyDbError},
     traits::ScriptPubkeyDb,
 };
@@ -90,10 +87,7 @@ impl Parser {
     pub fn parse_blocks(
         &mut self,
         range: std::ops::Range<u64>,
-        txptr_index: &mut ConfirmedTxPtrIndex,
-        block_tx_index: &mut BlockTxIndex,
-        in_prevout_index: &mut InPrevoutIndex,
-        out_spent_index: &mut OutSpentByIndex,
+        indices: &mut DenseIndexSet,
         spk_db: &mut SledScriptPubkeyDb,
     ) -> Result<(), BlockFileError> {
         // Default: single file starting at height 0.
@@ -106,8 +100,9 @@ impl Parser {
         log::debug!("Starting to parse blocks in range: {:?}", range);
         let parse_start = std::time::Instant::now();
 
-        let (mut tx_in_total, mut tx_out_total) = tx_io_totals(txptr_index);
-        let mut tx_total = block_tx_index
+        let (mut tx_in_total, mut tx_out_total) = tx_io_totals(&indices.txptr);
+        let mut tx_total = indices
+            .block_tx
             .last()
             .map_err(BlockFileError::Io)?
             .unwrap_or(0) as u64;
@@ -172,15 +167,13 @@ impl Parser {
                         block_file: file_id,
                         block_start_in_file,
                         block_slice,
-                        txptr_index,
+                        indices,
                         error: None,
                         tx_in_total: &mut tx_in_total,
                         tx_out_total: &mut tx_out_total,
                         tx_count: 0,
                         current_in: 0,
                         current_out: 0,
-                        in_prevout_index,
-                        out_spent_index,
                         spk_db,
                         txids: &mut txids,
                     };
@@ -193,7 +186,8 @@ impl Parser {
                     if tx_total > u32::MAX as u64 {
                         return Err(BlockFileError::CorruptId());
                     }
-                    block_tx_index
+                    indices
+                        .block_tx
                         .append(tx_total as u32)
                         .map_err(BlockFileError::Io)?;
                 }
@@ -219,15 +213,13 @@ struct TxIdCollector<'a> {
     block_start_in_file: u64,
     block_slice: &'a [u8],
     txids: &'a mut HashMap<[u8; 32], TxId>,
-    txptr_index: &'a mut ConfirmedTxPtrIndex,
+    indices: &'a mut DenseIndexSet,
     error: Option<BlockFileError>,
     tx_in_total: &'a mut u64,
     tx_out_total: &'a mut u64,
     tx_count: u64,
     current_in: u64,
     current_out: u64,
-    in_prevout_index: &'a mut InPrevoutIndex,
-    out_spent_index: &'a mut OutSpentByIndex,
     spk_db: &'a mut SledScriptPubkeyDb,
 }
 
@@ -241,7 +233,7 @@ impl Visitor for TxIdCollector<'_> {
             let mut bytes = [0u8; 32];
             bytes.copy_from_slice(prevout.txid());
             if let Some(prev_dense) = self.txids.get(&bytes).copied() {
-                let (start, end) = tx_out_range_for(prev_dense, self.txptr_index);
+                let (start, end) = tx_out_range_for(prev_dense, &self.indices.txptr);
                 let vout = prevout.vout() as u64;
                 let out_id = start + vout;
                 if out_id >= end { OUTID_NONE } else { out_id }
@@ -249,12 +241,12 @@ impl Visitor for TxIdCollector<'_> {
                 OUTID_NONE
             }
         };
-        if let Err(err) = self.in_prevout_index.append(out_id) {
+        if let Err(err) = self.indices.in_prevout.append(out_id) {
             self.error = Some(BlockFileError::Io(err));
             return ControlFlow::Break(());
         }
         if out_id != OUTID_NONE
-            && let Err(err) = self.out_spent_index.set(out_id, in_id)
+            && let Err(err) = self.indices.out_spent.set(out_id, in_id)
         {
             self.error = Some(BlockFileError::Io(err));
             return ControlFlow::Break(());
@@ -265,11 +257,11 @@ impl Visitor for TxIdCollector<'_> {
 
     fn visit_tx_out(&mut self, _vout: usize, tx_out: &bsl::TxOut<'_>) -> ControlFlow<()> {
         let out_id = *self.tx_out_total + self.current_out;
-        if let Err(err) = self.out_spent_index.append(INID_NONE) {
+        if let Err(err) = self.indices.out_spent.append(INID_NONE) {
             self.error = Some(BlockFileError::Io(err));
             return ControlFlow::Break(());
         }
-        if out_id != self.out_spent_index.len() - 1 {
+        if out_id != self.indices.out_spent.len() - 1 {
             self.error = Some(BlockFileError::CorruptId());
             return ControlFlow::Break(());
         }
@@ -303,7 +295,7 @@ impl Visitor for TxIdCollector<'_> {
             *self.tx_in_total,
             *self.tx_out_total,
         );
-        match self.txptr_index.append(ptr) {
+        match self.indices.txptr.append(ptr) {
             Ok(txid) => {
                 self.txids.insert(tx.txid().to_byte_array(), txid);
             }
