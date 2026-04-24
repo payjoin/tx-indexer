@@ -212,6 +212,8 @@ struct TxIdCollector<'a> {
     block_file: BlockFileId,
     block_start_in_file: u64,
     block_slice: &'a [u8],
+    // TODO: This is an unbounded map and will consume many GBs for mainnet.
+    // The problem is we need to resolve txids to dense ids.
     txids: &'a mut HashMap<[u8; 32], TxId>,
     indices: &'a mut DenseIndexSet,
     error: Option<BlockFileError>,
@@ -230,9 +232,8 @@ impl Visitor for TxIdCollector<'_> {
         let out_id = if is_null_prevout(prevout) {
             OUTID_NONE
         } else {
-            let mut bytes = [0u8; 32];
-            bytes.copy_from_slice(prevout.txid());
-            if let Some(prev_dense) = self.txids.get(&bytes).copied() {
+            let bytes = <&[u8; 32]>::try_from(prevout.txid()).expect("prevout txid is 32 bytes");
+            if let Some(prev_dense) = self.txids.get(bytes).copied() {
                 let (start, end) = tx_out_range_for(prev_dense, &self.indices.txptr);
                 let vout = prevout.vout() as u64;
                 let out_id = start + vout;
