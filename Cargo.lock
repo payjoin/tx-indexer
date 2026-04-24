@@ -1234,6 +1234,7 @@ dependencies = [
  "bitcoin_slices",
  "corepc-node",
  "criterion",
+ "log",
  "memmap2",
  "sled",
  "tempfile",

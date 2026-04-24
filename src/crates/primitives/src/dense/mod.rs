@@ -213,7 +213,9 @@ impl DenseStorageBuilder {
 pub(crate) fn build_indices(builder: DenseStorageBuilder) -> Result<DenseStorage, SyncError> {
     let datadir = builder.data_dir;
     let blocks_dir = datadir.join("blocks");
+    log::debug!("blocks_dir: {}", blocks_dir.display());
     let index_dir = builder.index_dir;
+    log::debug!("index_dir: {}", index_dir.display());
     let paths = IndexPaths {
         txptr: index_dir.join("txptr.bin"),
         block_tx: index_dir.join("block_tx.bin"),
@@ -225,6 +227,7 @@ pub(crate) fn build_indices(builder: DenseStorageBuilder) -> Result<DenseStorage
         .spk_db()
         .map_err(SyncError::Sled)?;
 
+    log::debug!("spk_db: {}", index_dir.join("spk_db").display());
     let block_height_offset = builder.range.start;
     let mut parser = Parser::new(blocks_dir).with_file_hints(builder.file_hints);
     let mut txptr_index = ConfirmedTxPtrIndex::create(&paths.txptr)

@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 sled = "0.34"
 memmap2 = "0.9"
+log = "0.4"
 bitcoin_slices = { version = "0.10.0", features = ["bitcoin"] }
 bitcoin = { workspace = true }
 bitcoin-block-index = { path = "../block-index" }
