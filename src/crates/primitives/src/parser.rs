@@ -103,6 +103,8 @@ impl Parser {
         } else {
             &self.file_hints
         };
+        log::debug!("Starting to parse blocks in range: {:?}", range);
+        let parse_start = std::time::Instant::now();
 
         let (mut tx_in_total, mut tx_out_total) = tx_io_totals(txptr_index);
         let mut tx_total = block_tx_index
@@ -200,6 +202,12 @@ impl Parser {
                 global_height += 1;
             }
         }
+
+        let parse_duration = parse_start.elapsed();
+        log::debug!(
+            "Parsing blocks took {} seconds",
+            parse_duration.as_secs_f64()
+        );
 
         Ok(())
     }
