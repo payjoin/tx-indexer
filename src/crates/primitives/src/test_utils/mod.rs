@@ -247,3 +247,14 @@ impl TxConstituent for DummyTxOut {
         self.vout
     }
 }
+
+impl HasScriptPubkey for DummyTxOut {
+    fn script_pubkey_bytes(&self) -> Vec<u8> {
+        // Get the script pubkey from the corresponding output in the containing transaction
+        self.containing_tx
+            .outputs()
+            .nth(self.vout)
+            .map(|output| output.script_pubkey_bytes())
+            .unwrap_or_default()
+    }
+}

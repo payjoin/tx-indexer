@@ -1,5 +1,6 @@
 use tx_indexer_primitives::{
     handle::TxHandle,
+    output_type::OutputType,
     traits::abstract_types::{HasNLockTime, HasScriptPubkey, OutputCount, TxConstituent},
 };
 
@@ -13,7 +14,15 @@ pub struct NaiveChangeIdentificationHueristic;
 
 impl NaiveChangeIdentificationHueristic {
     /// Check if a txout is change based on its containing transaction.
-    pub fn is_change(txout: impl TxConstituent<Handle: OutputCount>) -> TxOutChangeAnnotation {
+    /// OP_RETURN outputs are never considered change.
+    pub fn is_change<T>(txout: T) -> TxOutChangeAnnotation
+    where
+        T: TxConstituent<Handle: OutputCount> + HasScriptPubkey,
+    {
+        if txout.is_op_return() {
+            return TxOutChangeAnnotation::NotChange;
+        }
+
         let tx = txout.containing_tx();
         if tx.output_count() > 0 && txout.vout() == tx.output_count() - 1 {
             TxOutChangeAnnotation::Change
@@ -26,10 +35,16 @@ impl NaiveChangeIdentificationHueristic {
 pub struct NLockTimeChangeIdentification;
 
 impl NLockTimeChangeIdentification {
-    pub fn is_change(
-        tx_out: impl TxConstituent<Handle: HasNLockTime>,
-        spending_tx: impl HasNLockTime,
-    ) -> TxOutChangeAnnotation {
+    /// Check if a txout is change based on nLockTime comparison.
+    /// OP_RETURN outputs are never considered change.
+    pub fn is_change<T>(tx_out: T, spending_tx: impl HasNLockTime) -> TxOutChangeAnnotation
+    where
+        T: TxConstituent<Handle: HasNLockTime> + HasScriptPubkey,
+    {
+        if tx_out.is_op_return() {
+            return TxOutChangeAnnotation::NotChange;
+        }
+
         let containing_tx_n_locktime = tx_out.containing_tx().n_locktime();
         let child_tx_n_locktime = spending_tx.n_locktime();
         if containing_tx_n_locktime == 0 && child_tx_n_locktime == 0 {
@@ -55,9 +70,16 @@ impl ScriptTypesMatchingChangeIdentification {
     /// This applies the address-type heuristic conservatively: mixed input
     /// types, unresolved prevouts, or multiple matching outputs are all treated
     /// as inconclusive and return `NotChange`.
-    pub fn is_change<'a>(
-        tx_out: impl TxConstituent<Handle = TxHandle<'a>>,
-    ) -> TxOutChangeAnnotation {
+    ///
+    /// OP_RETURN outputs are never considered change.
+    pub fn is_change<'a, T>(tx_out: T) -> TxOutChangeAnnotation
+    where
+        T: TxConstituent<Handle = TxHandle<'a>> + HasScriptPubkey,
+    {
+        if tx_out.is_op_return() {
+            return TxOutChangeAnnotation::NotChange;
+        }
+
         let tx = tx_out.containing_tx();
         let mut input_types = tx.inputs().map(|input| input.output_type());
 
@@ -77,7 +99,11 @@ impl ScriptTypesMatchingChangeIdentification {
         let matching_outputs: Vec<usize> = tx
             .outputs()
             .enumerate()
-            .filter_map(|(index, output)| (output.output_type() == input_type).then_some(index))
+            .filter_map(|(index, output)| {
+                let out_type = output.output_type();
+                // Skip OP_RETURN outputs when looking for change candidates
+                (out_type == input_type && out_type != OutputType::OpReturn).then_some(index)
+            })
             .collect();
 
         if matching_outputs.len() == 1 && matching_outputs[0] == tx_out.vout() {
@@ -249,6 +275,104 @@ mod tests {
         );
         assert_eq!(
             ScriptTypesMatchingChangeIdentification::is_change(change),
+            TxOutChangeAnnotation::NotChange
+        );
+    }
+
+    #[test]
+    fn test_script_types_matching_excludes_op_return() {
+        let storage = storage_from_loose_txs(vec![
+            // inputs: P2PKH
+            DummyTxData::new_with_outputs(vec![DummyTxOutData::new_with_script(
+                100,
+                0,
+                script_from_address("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"),
+            )]),
+            DummyTxData::new_with_outputs(vec![DummyTxOutData::new_with_script(
+                150,
+                0,
+                script_from_address("1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2"),
+            )]),
+            DummyTxData::new(
+                vec![
+                    // OP_RETURN output - should never be considered change
+                    DummyTxOutData::new_with_script(
+                        0,
+                        0,
+                        vec![0x6a, 0x04, 0x48, 0x65, 0x6c, 0x6c], // OP_RETURN "Hell"
+                    ),
+                    // P2PKH output - should be considered change since it's the only spendable P2PKH
+                    DummyTxOutData::new_with_script(
+                        249,
+                        1,
+                        script_from_address("1BoatSLRHtKNngkdXEeobR76b53LETtpyT"),
+                    ),
+                ],
+                vec![TxOutId::new(TxId(1), 0), TxOutId::new(TxId(2), 0)],
+                0,
+            ),
+        ]);
+
+        let op_return_output = AnyOutId::from(TxOutId::new(TxId(3), 0)).with(&storage);
+        let p2pkh_output = AnyOutId::from(TxOutId::new(TxId(3), 1)).with(&storage);
+
+        // OP_RETURN should never be classified as change
+        assert_eq!(
+            ScriptTypesMatchingChangeIdentification::is_change(op_return_output),
+            TxOutChangeAnnotation::NotChange
+        );
+
+        // P2PKH output should be change since it's the only spendable output matching input type
+        assert_eq!(
+            ScriptTypesMatchingChangeIdentification::is_change(p2pkh_output),
+            TxOutChangeAnnotation::Change
+        );
+    }
+
+    #[test]
+    fn test_all_heuristics_filter_op_return() {
+        // Create an OP_RETURN output to test that all heuristics filter it out
+        let op_return_script = vec![0x6a, 0x04, 0x48, 0x65, 0x6c, 0x6c]; // OP_RETURN "Hell"
+
+        // Test NaiveChangeIdentificationHueristic with OP_RETURN as last output
+        let txout_op_return = DummyTxOut {
+            vout: 1, // Last output in a 2-output tx
+            containing_tx: DummyTxData::new(
+                vec![
+                    DummyTxOutData::new_with_script(
+                        100,
+                        0,
+                        script_from_address("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"),
+                    ),
+                    DummyTxOutData::new_with_script(0, 1, op_return_script.clone()),
+                ],
+                vec![],
+                0,
+            ),
+        };
+        // Even though it's the last output, OP_RETURN should not be change
+        assert_eq!(
+            NaiveChangeIdentificationHueristic::is_change(txout_op_return),
+            TxOutChangeAnnotation::NotChange
+        );
+
+        // Test NLockTimeChangeIdentification with OP_RETURN
+        let tx_out_op_return = DummyTxOut {
+            vout: 0,
+            containing_tx: DummyTxData::new(
+                vec![DummyTxOutData::new_with_script(
+                    0,
+                    0,
+                    op_return_script.clone(),
+                )],
+                vec![],
+                1, // Non-zero locktime
+            ),
+        };
+        let spending_tx = DummyTxData::new(vec![], vec![], 1); // Same locktime
+        // Even with matching locktimes, OP_RETURN should not be change
+        assert_eq!(
+            NLockTimeChangeIdentification::is_change(tx_out_op_return, spending_tx),
             TxOutChangeAnnotation::NotChange
         );
     }

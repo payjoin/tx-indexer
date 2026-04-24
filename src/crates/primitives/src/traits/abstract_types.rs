@@ -92,6 +92,10 @@ pub trait HasScriptPubkey {
     fn output_type(&self) -> OutputType {
         classify_script_pubkey(&self.script_pubkey_bytes())
     }
+
+    fn is_op_return(&self) -> bool {
+        self.output_type() == OutputType::OpReturn
+    }
 }
 
 /// Transaction version
