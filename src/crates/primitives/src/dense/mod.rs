@@ -1,4 +1,8 @@
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use lru::LruCache;
 
 use crate::{
     ScriptPubkeyHash,
@@ -58,6 +62,11 @@ impl TxInId {
         self.0
     }
 }
+
+/// Target size of the in-memory transaction cache, in entries.
+const TX_CACHE_CAP: usize = 1024;
+/// Number of transactions to read ahead when caching a transaction.
+const TX_READ_AHEAD: u32 = 64;
 
 pub struct DenseStorageBuilder {
     data_dir: PathBuf,
@@ -228,6 +237,7 @@ pub(crate) fn build_indices(builder: DenseStorageBuilder) -> Result<DenseStorage
         block_height_offset,
         indices,
         spk_db,
+        tx_cache: Mutex::new(LruCache::new(NonZeroUsize::new(TX_CACHE_CAP).unwrap())),
     })
 }
 
@@ -236,6 +246,7 @@ pub struct DenseStorage {
     block_height_offset: u64,
     indices: DenseIndexSet,
     spk_db: SledScriptPubkeyDb,
+    tx_cache: Mutex<LruCache<TxId, Arc<bitcoin::Transaction>>>,
 }
 
 impl DenseStorage {
@@ -438,29 +449,82 @@ impl DenseStorage {
         }
     }
 
-    /// Read a transaction from disk into a buffer.
-    fn read_tx(
-        &self,
-        block_file: BlockFileId,
-        tx_offset: u32,
-        tx_len: u32,
-    ) -> Result<Vec<u8>, BlockFileError> {
-        self.store
-            .read_at(block_file.0, tx_offset, tx_len)
-            .map_err(BlockFileError::Io)
-    }
-
     /// Return the transaction at the given dense TxId as a rust-bitcoin Transaction.
+    ///
+    /// On a cache miss, reads a window of up to `TX_READ_AHEAD` neighboring transactions
+    /// with a single `read_at` call per blk file, then fills the LRU cache with all of them.
     pub fn get_tx(&self, txid: TxId) -> bitcoin::Transaction {
-        let ptr = self.tx_ptr(txid);
-        let block_file = BlockFileId(ptr.blk_file_no());
-        let tx_offset = ptr.blk_file_off();
-        let tx_bytes = self
-            .read_tx(block_file, tx_offset, ptr.tx_len())
-            .unwrap_or_else(|e| panic!("Corrupted data store: error reading tx: {:?}", e));
-        bitcoin::consensus::deserialize::<bitcoin::Transaction>(&tx_bytes).unwrap_or_else(|e| {
-            panic!("Corrupted data store: error parsing tx: {:?}", e);
-        })
+        // Fast path: cache hit
+        if let Some(tx) = self.tx_cache.lock().unwrap().get(&txid) {
+            return tx.as_ref().clone();
+        }
+
+        // Build look-ahead window [txid, txid + TX_READ_AHEAD)
+        let total = self.indices.txptr.len() as u32;
+        let lo = txid.index();
+        let hi = (txid.index() + TX_READ_AHEAD).min(total);
+
+        // Gather TxPtrs
+        let ptrs: Vec<(TxId, TxPtr)> = (lo..hi)
+            .map(|i| {
+                let id = TxId::new(i);
+                (id, self.tx_ptr(id))
+            })
+            .collect();
+
+        // Coalesce reads: one read_at per contiguous blk-file group
+        let mut fetched: Vec<(TxId, Arc<bitcoin::Transaction>)> = Vec::with_capacity(ptrs.len());
+        let mut group_start = 0usize;
+        while group_start < ptrs.len() {
+            let file_no = ptrs[group_start].1.blk_file_no();
+            let group_end = ptrs[group_start..]
+                .iter()
+                .position(|(_, p)| p.blk_file_no() != file_no)
+                .map(|rel| group_start + rel)
+                .unwrap_or(ptrs.len());
+
+            let group = &ptrs[group_start..group_end];
+            let win_off = group.iter().map(|(_, p)| p.blk_file_off()).min().unwrap();
+            let win_end = group
+                .iter()
+                .map(|(_, p)| p.blk_file_off() + p.tx_len())
+                .max()
+                .unwrap();
+            let buf = self
+                .store
+                .read_at(file_no, win_off, win_end - win_off)
+                .unwrap_or_else(|e| {
+                    panic!("Corrupted data store: error reading tx window: {:?}", e)
+                });
+
+            for (id, ptr) in group {
+                let s = (ptr.blk_file_off() - win_off) as usize;
+                let e = s + ptr.tx_len() as usize;
+                let tx = bitcoin::consensus::deserialize::<bitcoin::Transaction>(&buf[s..e])
+                    .unwrap_or_else(|err| {
+                        panic!("Corrupted data store: error parsing tx: {:?}", err)
+                    });
+                fetched.push((*id, Arc::new(tx)));
+            }
+
+
+            group_start = group_end;
+        }
+
+        // Extract the result before filling the cache — inserting more entries
+        // than TX_CACHE_CAP would evict txid from the LRU before we return it.
+        let result = fetched
+            .iter()
+            .find(|(id, _)| *id == txid)
+            .expect("txid should be in the fetched window")
+            .1
+            .as_ref()
+            .clone();
+        let mut cache = self.tx_cache.lock().unwrap();
+        for (id, tx) in fetched {
+            cache.put(id, tx);
+        }
+        result
     }
 
     /// Return the transaction output at the given dense TxOutId as a rust-bitcoin TxOut.
