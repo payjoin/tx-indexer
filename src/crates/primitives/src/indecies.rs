@@ -1,5 +1,5 @@
 use std::fs::{File, OpenOptions};
-use std::io::{self, Seek, SeekFrom, Write};
+use std::io;
 use std::os::unix::fs::FileExt;
 use std::path::Path;
 
@@ -10,6 +10,11 @@ use crate::dense::TxId;
 const TXPTR_LEN_BYTES: usize = 28;
 const BLOCK_TX_END_LEN_BYTES: usize = 4;
 const LINK_LEN_BYTES: usize = 8;
+
+/// Target size of the in-memory append buffer, in bytes. Chosen to amortize
+/// the per-write syscall cost without making tail reads (which must scan the
+/// buffer) expensive. Each index instance holds at most one such buffer.
+const APPEND_BUF_CAP_BYTES: usize = 64 * 1024;
 
 pub const OUTID_NONE: u64 = u64::MAX;
 pub const INID_NONE: u64 = u64::MAX;
@@ -88,9 +93,24 @@ impl TxPtr {
     }
 }
 
+/// Fixed-width append-mostly log of `N`-byte records.
+///
+/// Appends are staged in an in-memory buffer and flushed to disk in batches
+/// via positional writes (`pwrite`), avoiding the per-record `lseek + write`
+/// pair that dominates parser IO. Random-access `get`/`set` operations are
+/// served from the buffer when they target not-yet-flushed records, so callers
+/// that read the tail mid-build (e.g. the parser resolving prevouts against
+/// just-appended tx pointers) see a consistent view without explicit flushing.
 #[derive(Debug)]
 struct FixedWidthIndex<const N: usize> {
+    /// Handle used for all positional IO. The file cursor is never read nor
+    /// modified; we rely on `pread`/`pwrite` via `FileExt`.
     file: File,
+    /// Bytes appended since the last flush. Always a multiple of `N`.
+    buf: Vec<u8>,
+    /// Number of records currently persisted to disk.
+    flushed_len: u64,
+    /// Total number of records (persisted + buffered). `flushed_len <= len`.
     len: u64,
     mmap: Option<Mmap>,
 }
@@ -105,6 +125,8 @@ impl<const N: usize> FixedWidthIndex<N> {
             .open(path)?;
         Ok(Self {
             file,
+            buf: Vec::with_capacity(APPEND_BUF_CAP_BYTES),
+            flushed_len: 0,
             len: 0,
             mmap: None,
         })
@@ -123,7 +145,13 @@ impl<const N: usize> FixedWidthIndex<N> {
         } else {
             None
         };
-        Ok(Self { file, len, mmap })
+        Ok(Self {
+            file,
+            buf: Vec::with_capacity(APPEND_BUF_CAP_BYTES),
+            flushed_len: len,
+            len,
+            mmap,
+        })
     }
 
     /// Open an existing file or create a new one without truncating existing content.
@@ -138,17 +166,33 @@ impl<const N: usize> FixedWidthIndex<N> {
         if len_bytes % (N as u64) != 0 {
             return Err(io::Error::new(io::ErrorKind::InvalidData, len_error));
         }
+        let len = len_bytes / (N as u64);
         Ok(Self {
             file,
-            len: len_bytes / (N as u64),
+            buf: Vec::with_capacity(APPEND_BUF_CAP_BYTES),
+            flushed_len: len,
+            len,
             mmap: None,
         })
+    }
+
+    /// Flush the in-memory append buffer to disk via a single positional write.
+    fn flush(&mut self) -> io::Result<()> {
+        if self.buf.is_empty() {
+            return Ok(());
+        }
+        let offset = self.flushed_len * (N as u64);
+        self.file.write_all_at(&self.buf, offset)?;
+        self.flushed_len = self.len;
+        self.buf.clear();
+        Ok(())
     }
 
     /// Remap the file for read access after all writes are complete.
     ///
     /// Must not be called while any concurrent writes to this file are in flight.
     fn remap(&mut self) -> io::Result<()> {
+        self.flush()?;
         self.mmap = if self.len > 0 {
             // Safety: no more writes will occur on this handle after remap.
             Some(unsafe { Mmap::map(&self.file)? })
@@ -167,31 +211,59 @@ impl<const N: usize> FixedWidthIndex<N> {
     }
 
     fn append_bytes(&mut self, bytes: &[u8; N]) -> io::Result<u64> {
-        self.file.seek(SeekFrom::End(0))?;
-        self.file.write_all(bytes)?;
+        self.buf.extend_from_slice(bytes);
         self.len += 1;
+        if self.buf.len() >= APPEND_BUF_CAP_BYTES {
+            self.flush()?;
+        }
         Ok(self.len - 1)
     }
 
     fn set_bytes(&mut self, index: u64, bytes: &[u8; N]) -> io::Result<()> {
+        if index >= self.len {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "set_bytes index out of range",
+            ));
+        }
+        if index >= self.flushed_len {
+            let buf_offset = ((index - self.flushed_len) as usize) * N;
+            self.buf[buf_offset..buf_offset + N].copy_from_slice(bytes);
+            return Ok(());
+        }
         let offset = index * (N as u64);
-        self.file.seek(SeekFrom::Start(offset))?;
-        self.file.write_all(bytes)
+        self.file.write_all_at(bytes, offset)
     }
 
     fn get_bytes(&self, index: u64) -> io::Result<Option<[u8; N]>> {
         if index >= self.len {
             return Ok(None);
         }
-        let offset = (index * N as u64) as usize;
+        if index >= self.flushed_len {
+            let buf_offset = ((index - self.flushed_len) as usize) * N;
+            let mut out = [0u8; N];
+            out.copy_from_slice(&self.buf[buf_offset..buf_offset + N]);
+            return Ok(Some(out));
+        }
+        let offset = index * (N as u64);
         if let Some(mmap) = &self.mmap {
+            let offset = offset as usize;
             let mut buf = [0u8; N];
             buf.copy_from_slice(&mmap[offset..offset + N]);
             return Ok(Some(buf));
         }
         let mut buf = [0u8; N];
-        self.file.read_exact_at(&mut buf, offset as u64)?;
+        self.file.read_exact_at(&mut buf, offset)?;
         Ok(Some(buf))
+    }
+}
+
+impl<const N: usize> Drop for FixedWidthIndex<N> {
+    fn drop(&mut self) {
+        // Best-effort flush so that simply dropping an index persists all
+        // appended records, matching the previous unbuffered behaviour where
+        // every `append_bytes` landed on disk synchronously.
+        let _ = self.flush();
     }
 }
 
