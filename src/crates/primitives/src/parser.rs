@@ -107,6 +107,19 @@ impl Parser {
             .map_err(BlockFileError::Io)?
             .unwrap_or(0) as u64;
         let mut txids = HashMap::new();
+        // In-memory shadow of `tx_out_end` for txs appended during *this* parse
+        // session. Index 0 holds the pre-session base (= total outputs in all
+        // previously-confirmed txs), and slot `i + 1` holds the cumulative
+        // `tx_out_end` after the i-th tx of this session. Lets `visit_tx_in`
+        // resolve a prevout's `(out_start, out_end)` without re-reading the
+        // freshly appended `txptr` index.
+        let first_session_txid = u32::try_from(indices.txptr.len()).map_err(|_| {
+            BlockFileError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "txptr index exceeds u32::MAX entries",
+            ))
+        })?;
+        let mut tx_out_ends: Vec<u64> = vec![tx_out_total];
 
         'files: for hint in hints {
             let file_no = hint.file_no;
@@ -176,6 +189,8 @@ impl Parser {
                         current_out: 0,
                         spk_db,
                         txids: &mut txids,
+                        tx_out_ends: &mut tx_out_ends,
+                        first_session_txid,
                     };
                     bsl::Block::visit(block_slice, &mut collector)
                         .map_err(BlockFileError::Parse)?;
@@ -223,6 +238,11 @@ struct TxIdCollector<'a> {
     current_in: u64,
     current_out: u64,
     spk_db: &'a mut SledScriptPubkeyDb,
+    /// Session-local shadow of `tx_out_end`. See `parse_blocks` for layout.
+    tx_out_ends: &'a mut Vec<u64>,
+    /// First TxId appended in this parse session; used to translate dense
+    /// TxIds into indices into `tx_out_ends`.
+    first_session_txid: u32,
 }
 
 impl Visitor for TxIdCollector<'_> {
@@ -234,7 +254,14 @@ impl Visitor for TxIdCollector<'_> {
         } else {
             let bytes = <&[u8; 32]>::try_from(prevout.txid()).expect("prevout txid is 32 bytes");
             if let Some(prev_dense) = self.txids.get(bytes).copied() {
-                let (start, end) = tx_out_range_for(prev_dense, &self.indices.txptr);
+                // `prev_dense` was inserted by `visit_transaction` earlier in
+                // this same session, so it lives in `tx_out_ends`. Slot 0 is
+                // the pre-session base; slot `local + 1` holds prev's
+                // `tx_out_end`, slot `local` holds the previous tx's end
+                // (== prev's `out_start`).
+                let local = (prev_dense.index() - self.first_session_txid) as usize;
+                let start = self.tx_out_ends[local];
+                let end = self.tx_out_ends[local + 1];
                 let vout = prevout.vout() as u64;
                 let out_id = start + vout;
                 if out_id >= end { OUTID_NONE } else { out_id }
@@ -299,6 +326,7 @@ impl Visitor for TxIdCollector<'_> {
         match self.indices.txptr.append(ptr) {
             Ok(txid) => {
                 self.txids.insert(tx.txid().to_byte_array(), txid);
+                self.tx_out_ends.push(*self.tx_out_total);
             }
             Err(err) => {
                 self.error = Some(BlockFileError::Io(err));
@@ -332,29 +360,6 @@ fn tx_io_totals(txptr_index: &ConfirmedTxPtrIndex) -> (u64, u64) {
 
 fn is_null_prevout(prevout: &bsl::OutPoint<'_>) -> bool {
     prevout.vout() == u32::MAX && prevout.txid().iter().all(|b| *b == 0)
-}
-
-fn tx_out_range_for(txid: TxId, txptr_index: &ConfirmedTxPtrIndex) -> (u64, u64) {
-    let end = txptr_index
-        .get(txid)
-        .unwrap_or_else(|e| panic!("Corrupted data store: error reading txptr index: {:?}", e))
-        .unwrap_or_else(|| panic!("Corrupted data store: txid out of range: {:?}", txid))
-        .tx_out_end();
-    if txid.index() == 0 {
-        (0, end)
-    } else {
-        let prev = txptr_index
-            .get(TxId::new(txid.index() - 1))
-            .unwrap_or_else(|e| panic!("Corrupted data store: error reading txptr index: {:?}", e))
-            .unwrap_or_else(|| {
-                panic!(
-                    "Corrupted data store: txid out of range: {:?}",
-                    txid.index() - 1
-                )
-            })
-            .tx_out_end();
-        (prev, end)
-    }
 }
 
 fn script_pubkey_hash(script_pubkey: &[u8]) -> ScriptPubkeyHash {
