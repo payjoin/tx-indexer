@@ -453,10 +453,13 @@ impl DenseStorage {
     ///
     /// On a cache miss, reads a window of up to `TX_READ_AHEAD` neighboring transactions
     /// with a single `read_at` call per blk file, then fills the LRU cache with all of them.
-    pub fn get_tx(&self, txid: TxId) -> bitcoin::Transaction {
+    ///
+    /// Returns an `Arc` so that cache hits and read-ahead siblings cost only a refcount
+    /// bump rather than a full deep clone of the parsed `bitcoin::Transaction`.
+    pub fn get_tx(&self, txid: TxId) -> Arc<bitcoin::Transaction> {
         // Fast path: cache hit
         if let Some(tx) = self.tx_cache.lock().unwrap().get(&txid) {
-            return tx.as_ref().clone();
+            return Arc::clone(tx);
         }
 
         // Build look-ahead window [txid, txid + TX_READ_AHEAD)
@@ -507,19 +510,18 @@ impl DenseStorage {
                 fetched.push((*id, Arc::new(tx)));
             }
 
-
             group_start = group_end;
         }
 
-        // Extract the result before filling the cache — inserting more entries
-        // than TX_CACHE_CAP would evict txid from the LRU before we return it.
-        let result = fetched
-            .iter()
-            .find(|(id, _)| *id == txid)
-            .expect("txid should be in the fetched window")
-            .1
-            .as_ref()
-            .clone();
+        // Grab the requested tx as an `Arc` clone before populating the cache so
+        // we don't lose it when the LRU evicts on insert.
+        let result = Arc::clone(
+            &fetched
+                .iter()
+                .find(|(id, _)| *id == txid)
+                .expect("txid should be in the fetched window")
+                .1,
+        );
         let mut cache = self.tx_cache.lock().unwrap();
         for (id, tx) in fetched {
             cache.put(id, tx);
