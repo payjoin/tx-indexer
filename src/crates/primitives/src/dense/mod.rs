@@ -3,10 +3,7 @@ use std::path::PathBuf;
 use crate::{
     ScriptPubkeyHash,
     blk_file::BlkFileStore,
-    indecies::{
-        BlockTxIndex, ConfirmedTxPtrIndex, INID_NONE, InPrevoutIndex, OUTID_NONE, OutSpentByIndex,
-        TxPtr,
-    },
+    indecies::{DenseIndexSet, INID_NONE, OUTID_NONE, TxPtr},
     parser::{BlkFileHint, BlockFileError, Parser},
     sled::{db::SledDBFactory, spk_db::SledScriptPubkeyDb},
     traits::ScriptPubkeyDb,
@@ -61,15 +58,6 @@ impl TxInId {
         self.0
     }
 }
-
-pub struct IndexPaths {
-    pub txptr: PathBuf,
-    pub block_tx: PathBuf,
-    pub in_prevout: PathBuf,
-    pub out_spent: PathBuf,
-}
-
-// TODO: new method for above
 
 pub struct DenseStorageBuilder {
     data_dir: PathBuf,
@@ -213,66 +201,50 @@ impl DenseStorageBuilder {
 pub(crate) fn build_indices(builder: DenseStorageBuilder) -> Result<DenseStorage, SyncError> {
     let datadir = builder.data_dir;
     let blocks_dir = datadir.join("blocks");
+    log::debug!("blocks_dir: {}", blocks_dir.display());
     let index_dir = builder.index_dir;
-    let paths = IndexPaths {
-        txptr: index_dir.join("txptr.bin"),
-        block_tx: index_dir.join("block_tx.bin"),
-        in_prevout: index_dir.join("in_prevout.bin"),
-        out_spent: index_dir.join("out_spent.bin"),
-    };
+    log::debug!("index_dir: {}", index_dir.display());
     let mut spk_db = SledDBFactory::open(index_dir.join("spk_db"))
         .map_err(SyncError::Sled)?
         .spk_db()
         .map_err(SyncError::Sled)?;
+    log::debug!("spk_db: {}", index_dir.join("spk_db").display());
 
     let block_height_offset = builder.range.start;
     let mut parser = Parser::new(blocks_dir).with_file_hints(builder.file_hints);
-    let mut txptr_index = ConfirmedTxPtrIndex::create(&paths.txptr)
-        .map_err(|e| SyncError::Parse(BlockFileError::Io(e)))?;
-    let mut block_tx_index = BlockTxIndex::create(&paths.block_tx)
-        .map_err(|e| SyncError::Parse(BlockFileError::Io(e)))?;
-    let mut in_prevout_index = InPrevoutIndex::create(&paths.in_prevout)
-        .map_err(|e| SyncError::Parse(BlockFileError::Io(e)))?;
-    let mut out_spent_index = OutSpentByIndex::create(&paths.out_spent)
-        .map_err(|e| SyncError::Parse(BlockFileError::Io(e)))?;
+    let mut indices =
+        DenseIndexSet::new(&index_dir).map_err(|e| SyncError::Parse(BlockFileError::Io(e)))?;
+
     parser
-        .parse_blocks(
-            builder.range,
-            &mut txptr_index,
-            &mut block_tx_index,
-            &mut in_prevout_index,
-            &mut out_spent_index,
-            &mut spk_db,
-        )
+        .parse_blocks(builder.range, &mut indices, &mut spk_db)
         .map_err(SyncError::Parse)?;
-    let storage = DenseStorage {
+
+    indices
+        .remap()
+        .map_err(|e| SyncError::Parse(BlockFileError::Io(e)))?;
+
+    Ok(DenseStorage {
         store: parser.into_blk_store(),
         block_height_offset,
-        txptr_index,
-        block_tx_index,
-        in_prevout_index,
-        out_spent_index,
+        indices,
         spk_db,
-    };
-    Ok(storage)
+    })
 }
+
 pub struct DenseStorage {
     store: BlkFileStore,
     block_height_offset: u64,
-    txptr_index: ConfirmedTxPtrIndex,
-    block_tx_index: BlockTxIndex,
-    in_prevout_index: InPrevoutIndex,
-    out_spent_index: OutSpentByIndex,
+    indices: DenseIndexSet,
     spk_db: SledScriptPubkeyDb,
 }
 
 impl DenseStorage {
     pub fn tx_count(&self) -> u64 {
-        self.txptr_index.len()
+        self.indices.txptr.len()
     }
 
     fn tx_ptr(&self, txid: TxId) -> TxPtr {
-        match self.txptr_index.get(txid) {
+        match self.indices.txptr.get(txid) {
             Ok(Some(ptr)) => ptr,
             Ok(None) => panic!(
                 "Corrupted data store: transaction not found for txid: {:?}",
@@ -285,7 +257,8 @@ impl DenseStorage {
     /// Return the range of TxIds for the given block height.
     pub fn tx_range_for_block(&self, height: u64) -> (u32, u32) {
         let end = self
-            .block_tx_index
+            .indices
+            .block_tx
             .get(height)
             .unwrap_or_else(|e| {
                 panic!(
@@ -303,7 +276,8 @@ impl DenseStorage {
             (0, end)
         } else {
             let start = self
-                .block_tx_index
+                .indices
+                .block_tx
                 .get(height - 1)
                 .unwrap_or_else(|e| {
                     panic!(
@@ -338,9 +312,10 @@ impl DenseStorage {
 
     pub fn block_of_tx(&self, txid: TxId) -> u64 {
         let target = txid.index() as u64;
-        let len = self.block_tx_index.len();
+        let len = self.indices.block_tx.len();
         let value_at = |i: u64| {
-            self.block_tx_index
+            self.indices
+                .block_tx
                 .get(i)
                 .unwrap_or_else(|e| {
                     panic!(
@@ -384,7 +359,7 @@ impl DenseStorage {
 
     /// Return the transaction id for the given TxOutId.
     pub fn txid_for_out(&self, out_id: TxOutId) -> TxId {
-        let len = self.txptr_index.len();
+        let len = self.indices.txptr.len();
         let value_at = |i: u64| self.tx_ptr(TxId::new(i as u32)).tx_out_end();
         let lo = Self::upper_bound(len, out_id.index(), value_at).unwrap_or_else(|| {
             panic!("Corrupted data store: output id out of range: {:?}", out_id)
@@ -394,7 +369,7 @@ impl DenseStorage {
 
     /// Return the transaction id for the given TxInId.
     pub fn txid_for_in(&self, in_id: TxInId) -> TxId {
-        let len = self.txptr_index.len();
+        let len = self.indices.txptr.len();
         let value_at = |i: u64| self.tx_ptr(TxId::new(i as u32)).tx_in_end();
         let lo = Self::upper_bound(len, in_id.index(), value_at)
             .unwrap_or_else(|| panic!("Corrupted data store: input id out of range: {:?}", in_id));
@@ -417,7 +392,8 @@ impl DenseStorage {
 
     pub fn prevout_for_in(&self, in_id: TxInId) -> Option<TxOutId> {
         let out_id = self
-            .in_prevout_index
+            .indices
+            .in_prevout
             .get(in_id.index())
             .unwrap_or_else(|e| {
                 panic!(
@@ -440,7 +416,8 @@ impl DenseStorage {
 
     pub fn spender_for_out(&self, out_id: TxOutId) -> Option<TxInId> {
         let in_id = self
-            .out_spent_index
+            .indices
+            .out_spent
             .get(out_id.index())
             .unwrap_or_else(|e| {
                 panic!(
