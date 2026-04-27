@@ -14,16 +14,15 @@ fn bench_parse_mainnet_702861(c: &mut Criterion) {
     let blocks_dir = temp_dir("tx_indexer_bench_blocks");
     write_single_block_file(&blocks_dir, block_bytes).expect("write block file");
 
+    let sled_dir = temp_dir("tx_indexer_bench_sled");
+
     c.bench_function("dense_parse_mainnet_702861", |b| {
         b.iter_batched(
             || temp_dir("tx_indexer_bench_idx"),
             |index_dir| {
                 let mut parser = Parser::new(&blocks_dir);
                 let mut indices = DenseIndexSet::new(&index_dir).unwrap();
-                let mut spk_db = SledDBFactory::open(std::env::temp_dir())
-                    .unwrap()
-                    .spk_db()
-                    .unwrap();
+                let mut spk_db = SledDBFactory::open(&sled_dir).unwrap().spk_db().unwrap();
 
                 parser
                     .parse_blocks(0..1, &mut indices, &mut spk_db)
@@ -34,6 +33,9 @@ fn bench_parse_mainnet_702861(c: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
+
+    let _ = fs::remove_dir_all(&blocks_dir);
+    let _ = fs::remove_dir_all(&sled_dir);
 }
 
 criterion_group!(benches, bench_parse_mainnet_702861);
