@@ -1,3 +1,4 @@
+use tx_indexer_primitives::hamming_weight::decimal_hamming_weight;
 use tx_indexer_primitives::{
     handle::TxHandle,
     traits::abstract_types::{HasNLockTime, HasScriptPubkey, OutputCount, TxConstituent},
@@ -7,6 +8,12 @@ use tx_indexer_primitives::{
 pub enum TxOutChangeAnnotation {
     Change,
     NotChange,
+}
+
+#[derive(Debug, PartialEq,Eq)]
+pub enum RoundNumberAnnotation {
+    Round,
+    NotRound,
 }
 
 pub struct NaiveChangeIdentificationHueristic;
@@ -43,6 +50,24 @@ impl NLockTimeChangeIdentification {
             TxOutChangeAnnotation::NotChange
         }
     }
+}
+
+pub struct  RoundNumberAnnotator;
+
+impl RoundNumberAnnotator {
+    /// Maximum decimal Hamming weight for an amount to be considered round.
+    pub const ROUNDNESS_THRESHOLD: u32 = 2;
+
+    /// judge how round an amount is via it's hamming weight
+    pub fn annontate(satoshi: u64) -> RoundNumberAnnotation {
+        if decimal_hamming_weight(satoshi) <= Self::ROUNDNESS_THRESHOLD {
+            RoundNumberAnnotation::Round
+        } else {
+            RoundNumberAnnotation::NotRound
+        }
+
+    }
+
 }
 
 pub struct ScriptTypesMatchingChangeIdentification;
