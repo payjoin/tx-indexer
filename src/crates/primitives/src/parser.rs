@@ -12,7 +12,6 @@ use crate::{
     dense::{BlockFileId, TxId, TxOutId},
     indecies::{ConfirmedTxPtrIndex, DenseIndexSet, INID_NONE, OUTID_NONE, TxPtr},
     sled::spk_db::{SledScriptPubkeyDb, SledScriptPubkeyDbError},
-    traits::ScriptPubkeyDb,
 };
 
 /// Block file layout: 4-byte magic + 4-byte block size (LE) + block payload.
@@ -100,7 +99,6 @@ impl Parser {
         log::debug!("Starting to parse blocks in range: {:?}", range);
         let parse_start = std::time::Instant::now();
 
-        let (mut tx_in_total, mut tx_out_total) = tx_io_totals(&indices.txptr);
         let mut tx_total = indices
             .block_tx
             .last()
@@ -163,26 +161,66 @@ impl Parser {
                 if global_height >= range.start {
                     let block_slice = &bytes[block_start..block_end];
                     let block_start_in_file = block_start as u64;
-                    let mut collector = TxIdCollector {
-                        block_file: file_id,
-                        block_start_in_file,
-                        block_slice,
-                        indices,
-                        error: None,
-                        tx_in_total: &mut tx_in_total,
-                        tx_out_total: &mut tx_out_total,
-                        tx_count: 0,
-                        current_in: 0,
-                        current_out: 0,
-                        spk_db,
-                        txids: &mut txids,
+
+                    // Collect all per-block writes into a batch. The collector is
+                    // scoped here so its &ConfirmedTxPtrIndex borrow drops before
+                    // the bulk flush below mutates indices.
+                    let batch = {
+                        let txptr_base = indices.txptr.len() as u32;
+                        let tx_in_base = indices.in_prevout.len();
+                        let tx_out_base = indices.out_spent.len();
+                        let mut collector = TxIdCollector {
+                            block_file: file_id,
+                            block_start_in_file,
+                            block_slice,
+                            txids: &mut txids,
+                            committed_txptr: &indices.txptr,
+                            txptr_base,
+                            batch: BlockBatch::default(),
+                            tx_in_running: tx_in_base,
+                            tx_out_running: tx_out_base,
+                            tx_out_base,
+                            current_in: 0,
+                            current_out: 0,
+                            error: None,
+                        };
+                        bsl::Block::visit(block_slice, &mut collector)
+                            .map_err(BlockFileError::Parse)?;
+                        if let Some(error) = collector.error.take() {
+                            return Err(error);
+                        }
+                        collector.batch
                     };
-                    bsl::Block::visit(block_slice, &mut collector)
-                        .map_err(BlockFileError::Parse)?;
-                    if let Some(error) = collector.error.take() {
-                        return Err(error);
+
+                    // Bulk-append all records from the block, then flush so the
+                    // subsequent set() calls target on-disk data.
+                    for ptr in &batch.txptrs {
+                        indices.txptr.append(*ptr).map_err(BlockFileError::Io)?;
                     }
-                    tx_total += collector.tx_count;
+                    for out_id in &batch.in_prevouts {
+                        indices
+                            .in_prevout
+                            .append(*out_id)
+                            .map_err(BlockFileError::Io)?;
+                    }
+                    for in_id in &batch.out_spents {
+                        indices
+                            .out_spent
+                            .append(*in_id)
+                            .map_err(BlockFileError::Io)?;
+                    }
+                    indices.flush().map_err(BlockFileError::Io)?;
+                    for (out_id, in_id) in &batch.out_spent_updates {
+                        indices
+                            .out_spent
+                            .set(*out_id, *in_id)
+                            .map_err(BlockFileError::Io)?;
+                    }
+                    spk_db
+                        .insert_batch_if_absent(&batch.spk_inserts)
+                        .map_err(BlockFileError::SpkDb)?;
+
+                    tx_total += batch.txptrs.len() as u64;
                     if tx_total > u32::MAX as u64 {
                         return Err(BlockFileError::CorruptId());
                     }
@@ -207,6 +245,19 @@ impl Parser {
     }
 }
 
+/// Writes staged for a single block before being bulk-applied to the indices.
+#[derive(Default)]
+struct BlockBatch {
+    txptrs: Vec<TxPtr>,
+    in_prevouts: Vec<u64>,
+    /// One entry per output, all initialised to `INID_NONE`.
+    out_spents: Vec<u64>,
+    /// `(out_id, in_id)` pairs for outputs spent within or before this block.
+    out_spent_updates: Vec<(u64, u64)>,
+    /// Script-pubkey index inserts; first-seen per hash wins.
+    spk_inserts: Vec<(ScriptPubkeyHash, TxOutId)>,
+}
+
 /// Visitor that collects TxIds (file + byte offset) for each transaction in a block.
 struct TxIdCollector<'a> {
     block_file: BlockFileId,
@@ -215,26 +266,57 @@ struct TxIdCollector<'a> {
     // TODO: This is an unbounded map and will consume many GBs for mainnet.
     // The problem is we need to resolve txids to dense ids.
     txids: &'a mut HashMap<[u8; 32], TxId>,
-    indices: &'a mut DenseIndexSet,
-    error: Option<BlockFileError>,
-    tx_in_total: &'a mut u64,
-    tx_out_total: &'a mut u64,
-    tx_count: u64,
+    /// Read-only view of txptrs committed before this block.
+    committed_txptr: &'a ConfirmedTxPtrIndex,
+    /// `committed_txptr.len()` at the start of this block, used to distinguish
+    /// same-block txptrs (staged in `batch`) from committed ones.
+    txptr_base: u32,
+    batch: BlockBatch,
+    /// Running total of inputs through the end of the last completed tx.
+    tx_in_running: u64,
+    /// Running total of outputs through the end of the last completed tx.
+    tx_out_running: u64,
+    /// `out_spent.len()` at block start, used for the sequential-id sanity check.
+    tx_out_base: u64,
     current_in: u64,
     current_out: u64,
-    spk_db: &'a mut SledScriptPubkeyDb,
+    error: Option<BlockFileError>,
+}
+
+impl TxIdCollector<'_> {
+    fn tx_out_range_for(&self, txid: TxId) -> (u64, u64) {
+        let idx = txid.index();
+        if idx >= self.txptr_base {
+            let i = (idx - self.txptr_base) as usize;
+            let end = self.batch.txptrs[i].tx_out_end();
+            let start = if i > 0 {
+                self.batch.txptrs[i - 1].tx_out_end()
+            } else if self.txptr_base > 0 {
+                self.committed_txptr
+                    .get(TxId::new(self.txptr_base - 1))
+                    .unwrap_or_else(|e| panic!("Corrupted data store: error reading txptr index: {:?}", e))
+                    .unwrap_or_else(|| panic!("Corrupted data store: txid out of range: {}", self.txptr_base - 1))
+                    .tx_out_end()
+            } else {
+                0
+            };
+            (start, end)
+        } else {
+            tx_out_range_for(txid, self.committed_txptr)
+        }
+    }
 }
 
 impl Visitor for TxIdCollector<'_> {
     fn visit_tx_in(&mut self, _vin: usize, tx_in: &bsl::TxIn<'_>) -> ControlFlow<()> {
-        let in_id = *self.tx_in_total + self.current_in;
+        let in_id = self.tx_in_running + self.current_in;
         let prevout = tx_in.prevout();
         let out_id = if is_null_prevout(prevout) {
             OUTID_NONE
         } else {
             let bytes = <&[u8; 32]>::try_from(prevout.txid()).expect("prevout txid is 32 bytes");
             if let Some(prev_dense) = self.txids.get(bytes).copied() {
-                let (start, end) = tx_out_range_for(prev_dense, &self.indices.txptr);
+                let (start, end) = self.tx_out_range_for(prev_dense);
                 let vout = prevout.vout() as u64;
                 let out_id = start + vout;
                 if out_id >= end { OUTID_NONE } else { out_id }
@@ -242,35 +324,24 @@ impl Visitor for TxIdCollector<'_> {
                 OUTID_NONE
             }
         };
-        if let Err(err) = self.indices.in_prevout.append(out_id) {
-            self.error = Some(BlockFileError::Io(err));
-            return ControlFlow::Break(());
-        }
-        if out_id != OUTID_NONE
-            && let Err(err) = self.indices.out_spent.set(out_id, in_id)
-        {
-            self.error = Some(BlockFileError::Io(err));
-            return ControlFlow::Break(());
+        self.batch.in_prevouts.push(out_id);
+        if out_id != OUTID_NONE {
+            self.batch.out_spent_updates.push((out_id, in_id));
         }
         self.current_in += 1;
         ControlFlow::Continue(())
     }
 
     fn visit_tx_out(&mut self, _vout: usize, tx_out: &bsl::TxOut<'_>) -> ControlFlow<()> {
-        let out_id = *self.tx_out_total + self.current_out;
-        if let Err(err) = self.indices.out_spent.append(INID_NONE) {
-            self.error = Some(BlockFileError::Io(err));
-            return ControlFlow::Break(());
-        }
-        if out_id != self.indices.out_spent.len() - 1 {
+        let out_id = self.tx_out_running + self.current_out;
+        let expected_out_id = self.tx_out_base + self.batch.out_spents.len() as u64;
+        if out_id != expected_out_id {
             self.error = Some(BlockFileError::CorruptId());
             return ControlFlow::Break(());
         }
         let spk_hash = script_pubkey_hash(tx_out.script_pubkey());
-        if let Err(err) = self.spk_db.insert_if_absent(spk_hash, TxOutId::new(out_id)) {
-            self.error = Some(BlockFileError::SpkDb(err));
-            return ControlFlow::Break(());
-        }
+        self.batch.spk_inserts.push((spk_hash, TxOutId::new(out_id)));
+        self.batch.out_spents.push(INID_NONE);
         self.current_out += 1;
         ControlFlow::Continue(())
     }
@@ -287,51 +358,22 @@ impl Visitor for TxIdCollector<'_> {
         }
         let offset_in_block = tx_slice.as_ptr() as usize - self.block_slice.as_ptr() as usize;
         let file_offset = self.block_start_in_file + offset_in_block as u64;
-        *self.tx_in_total += self.current_in;
-        *self.tx_out_total += self.current_out;
+        self.tx_in_running += self.current_in;
+        self.tx_out_running += self.current_out;
         let ptr = TxPtr::new(
             self.block_file.0,
             file_offset as u32,
             tx_len as u32,
-            *self.tx_in_total,
-            *self.tx_out_total,
+            self.tx_in_running,
+            self.tx_out_running,
         );
-        match self.indices.txptr.append(ptr) {
-            Ok(txid) => {
-                self.txids.insert(tx.txid().to_byte_array(), txid);
-            }
-            Err(err) => {
-                self.error = Some(BlockFileError::Io(err));
-                return ControlFlow::Break(());
-            }
-        }
-        self.tx_count += 1;
+        let txid = TxId::new(self.txptr_base + self.batch.txptrs.len() as u32);
+        self.batch.txptrs.push(ptr);
+        self.txids.insert(tx.txid().to_byte_array(), txid);
         self.current_in = 0;
         self.current_out = 0;
         ControlFlow::Continue(())
     }
-}
-
-fn tx_io_totals(txptr_index: &ConfirmedTxPtrIndex) -> (u64, u64) {
-    let len = txptr_index.len();
-    if txptr_index.is_empty() {
-        return (0, 0);
-    }
-    let last = TxId::new((len - 1) as u32);
-    let ptr = txptr_index
-        .get(last)
-        .unwrap_or_else(|e| panic!("Corrupted data store: error reading txptr: {:?}", e))
-        .unwrap_or_else(|| {
-            panic!(
-                "Corrupted data store: transaction not found for txid: {:?}",
-                last
-            )
-        });
-    (ptr.tx_in_end(), ptr.tx_out_end())
-}
-
-fn is_null_prevout(prevout: &bsl::OutPoint<'_>) -> bool {
-    prevout.vout() == u32::MAX && prevout.txid().iter().all(|b| *b == 0)
 }
 
 fn tx_out_range_for(txid: TxId, txptr_index: &ConfirmedTxPtrIndex) -> (u64, u64) {
@@ -355,6 +397,10 @@ fn tx_out_range_for(txid: TxId, txptr_index: &ConfirmedTxPtrIndex) -> (u64, u64)
             .tx_out_end();
         (prev, end)
     }
+}
+
+fn is_null_prevout(prevout: &bsl::OutPoint<'_>) -> bool {
+    prevout.vout() == u32::MAX && prevout.txid().iter().all(|b| *b == 0)
 }
 
 fn script_pubkey_hash(script_pubkey: &[u8]) -> ScriptPubkeyHash {
