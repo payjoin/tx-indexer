@@ -12,7 +12,6 @@ use crate::{
     dense::{BlockFileId, TxId, TxOutId},
     indecies::{ConfirmedTxPtrIndex, DenseIndexSet, INID_NONE, OUTID_NONE, TxPtr},
     sled::spk_db::{SledScriptPubkeyDb, SledScriptPubkeyDbError},
-    traits::ScriptPubkeyDb,
 };
 
 /// Block file layout: 4-byte magic + 4-byte block size (LE) + block payload.
@@ -183,7 +182,6 @@ impl Parser {
                             tx_out_base,
                             current_in: 0,
                             current_out: 0,
-                            spk_db,
                             error: None,
                         };
                         bsl::Block::visit(block_slice, &mut collector)
@@ -218,6 +216,9 @@ impl Parser {
                             .set(*out_id, *in_id)
                             .map_err(BlockFileError::Io)?;
                     }
+                    spk_db
+                        .insert_batch_if_absent(&batch.spk_inserts)
+                        .map_err(BlockFileError::SpkDb)?;
 
                     tx_total += batch.txptrs.len() as u64;
                     if tx_total > u32::MAX as u64 {
@@ -253,6 +254,8 @@ struct BlockBatch {
     out_spents: Vec<u64>,
     /// `(out_id, in_id)` pairs for outputs spent within or before this block.
     out_spent_updates: Vec<(u64, u64)>,
+    /// Script-pubkey index inserts; first-seen per hash wins.
+    spk_inserts: Vec<(ScriptPubkeyHash, TxOutId)>,
 }
 
 /// Visitor that collects TxIds (file + byte offset) for each transaction in a block.
@@ -277,7 +280,6 @@ struct TxIdCollector<'a> {
     tx_out_base: u64,
     current_in: u64,
     current_out: u64,
-    spk_db: &'a mut SledScriptPubkeyDb,
     error: Option<BlockFileError>,
 }
 
@@ -338,10 +340,7 @@ impl Visitor for TxIdCollector<'_> {
             return ControlFlow::Break(());
         }
         let spk_hash = script_pubkey_hash(tx_out.script_pubkey());
-        if let Err(err) = self.spk_db.insert_if_absent(spk_hash, TxOutId::new(out_id)) {
-            self.error = Some(BlockFileError::SpkDb(err));
-            return ControlFlow::Break(());
-        }
+        self.batch.spk_inserts.push((spk_hash, TxOutId::new(out_id)));
         self.batch.out_spents.push(INID_NONE);
         self.current_out += 1;
         ControlFlow::Continue(())

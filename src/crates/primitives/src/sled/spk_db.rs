@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::traits::ScriptPubkeyDb;
 use crate::{ScriptPubkeyHash, dense::TxOutId};
 use sled::{IVec, Tree};
@@ -56,6 +58,34 @@ impl SledScriptPubkeyDb {
         let mut bytes = [0u8; OUT_ID_LEN];
         bytes.copy_from_slice(raw);
         Ok(TxOutId::new(u64::from_le_bytes(bytes)))
+    }
+}
+
+impl SledScriptPubkeyDb {
+    /// Insert all entries where the key is not already present, in a single
+    /// `sled::Batch` for crash-atomic application.
+    ///
+    /// Within `entries`, first-seen wins for duplicate keys. Keys already
+    /// present in the tree are skipped, matching `insert_if_absent` semantics.
+    pub fn insert_batch_if_absent(
+        &mut self,
+        entries: &[(ScriptPubkeyHash, TxOutId)],
+    ) -> Result<(), SledScriptPubkeyDbError> {
+        let mut seen = HashSet::new();
+        let mut batch = sled::Batch::default();
+        for (spk_hash, out_id) in entries {
+            if seen.insert(*spk_hash)
+                && !self
+                    .tree
+                    .contains_key(Self::key_bytes(spk_hash))
+                    .map_err(SledScriptPubkeyDbError::Backend)?
+            {
+                batch.insert(Self::key_bytes(spk_hash), Self::encode_out_id(*out_id));
+            }
+        }
+        self.tree
+            .apply_batch(batch)
+            .map_err(SledScriptPubkeyDbError::Backend)
     }
 }
 
