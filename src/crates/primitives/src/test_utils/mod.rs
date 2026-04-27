@@ -3,37 +3,59 @@ use bitcoin::hashes::Hash as _;
 use bitcoin::hashes::hash160::Hash as Hash160;
 
 use crate::{
-    AnyOutId, AnyTxId, ScriptPubkeyHash,
+    AnyOutId, AnyTxId, OutputType, ScriptPubkeyHash,
     loose::{TxId, TxOutId},
-    traits::HasNLockTime,
     traits::abstract_types::{
         AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
         EnumerateSpentTxOuts, HasScriptPubkey, InputCount, OutputCount, TxConstituent,
     },
+    traits::{HasBlockHeight, HasInputPrevOuts, HasNLockTime, HasSequence},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DummyTxData {
     outputs: Vec<DummyTxOutData>,
-    /// The outputs that are spent by this transaction
-    spent_coins: Vec<TxOutId>,
+    /// Inputs of this transaction; each carries its prev outpoint and sequence.
+    inputs: Vec<DummyTxInWrapper>,
     n_locktime: u32,
 }
 
+pub const SEQUENCE_FINAL: u32 = u32::MAX;
+
 impl DummyTxData {
     /// Base constructor.
-    pub fn new(outputs: Vec<DummyTxOutData>, spent_coins: Vec<TxOutId>, n_locktime: u32) -> Self {
+    pub fn new(
+        outputs: Vec<DummyTxOutData>,
+        spent_coins: Vec<TxOutId>,
+        sequences: Vec<u32>,
+        n_locktime: u32,
+    ) -> Self {
+        assert_eq!(
+            spent_coins.len(),
+            sequences.len(),
+            "spent_coins and sequences must have matching lengths"
+        );
+        let inputs = spent_coins
+            .into_iter()
+            .zip(sequences)
+            .map(|(coin, sequence)| DummyTxInWrapper {
+                prev_txid: coin.txid(),
+                prev_vout: coin.vout(),
+                sequence,
+            })
+            .collect();
         Self {
             outputs,
-            spent_coins,
+            inputs,
             n_locktime,
         }
     }
+
     /// Tx with explicit outputs, no spent coins.
     pub fn new_with_outputs(outputs: Vec<DummyTxOutData>) -> Self {
         Self {
             outputs,
-            spent_coins: vec![],
+            inputs: vec![],
             n_locktime: 0,
         }
     }
@@ -51,11 +73,15 @@ impl DummyTxData {
     /// Create spending tx from amounts and spent coins.
     pub fn new_with_spent(amounts: Vec<u64>, spent_coins: Vec<TxOutId>) -> Self {
         let base = Self::new_with_amounts(amounts);
-        Self::new(base.outputs, spent_coins, 0)
+        let n = spent_coins.len();
+        Self::new(base.outputs, spent_coins, vec![SEQUENCE_FINAL; n], 0)
     }
 
-    pub fn spent_coins(&self) -> &[TxOutId] {
-        &self.spent_coins
+    pub fn spent_coins(&self) -> Vec<TxOutId> {
+        self.inputs
+            .iter()
+            .map(|i| TxOutId::new(i.prev_txid, i.prev_vout))
+            .collect()
     }
 }
 
@@ -65,10 +91,33 @@ impl HasNLockTime for DummyTxData {
     }
 }
 
+impl HasBlockHeight for DummyTxData {
+    fn block_height(&self) -> Option<u64> {
+        None
+    }
+}
+
+impl HasInputPrevOuts for DummyTxData {
+    fn input_prev_types(&self) -> impl Iterator<Item = Option<OutputType>> {
+        std::iter::repeat_n(None, self.inputs.len())
+    }
+    fn input_prev_script_hashes(&self) -> impl Iterator<Item = Option<ScriptPubkeyHash>> {
+        std::iter::repeat_n(None, self.inputs.len())
+    }
+}
+
 // Wrapper types for implementing abstract traits on dummy types
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct DummyTxInWrapper {
     prev_txid: TxId,
     prev_vout: u32,
+    sequence: u32,
+}
+
+impl HasSequence for DummyTxInWrapper {
+    fn sequence(&self) -> u32 {
+        self.sequence
+    }
 }
 
 impl AbstractTxIn for DummyTxInWrapper {
@@ -132,14 +181,9 @@ impl AbstractTransaction for DummyTxData {
     fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn + '_>> + '_> {
         // Collect into a vector to avoid lifetime issues
         let inputs: Vec<Box<dyn AbstractTxIn>> = self
-            .spent_coins
+            .inputs
             .iter()
-            .map(|spent| {
-                Box::new(DummyTxInWrapper {
-                    prev_txid: spent.txid(),
-                    prev_vout: spent.vout(),
-                }) as Box<dyn AbstractTxIn>
-            })
+            .map(|input| Box::new(input.clone()) as Box<dyn AbstractTxIn>)
             .collect();
         Box::new(inputs.into_iter())
     }
@@ -155,7 +199,7 @@ impl AbstractTransaction for DummyTxData {
     }
 
     fn input_len(&self) -> usize {
-        self.spent_coins.len()
+        self.inputs.len()
     }
 
     fn output_len(&self) -> usize {
@@ -173,7 +217,7 @@ impl AbstractTransaction for DummyTxData {
     }
 
     fn is_coinbase(&self) -> bool {
-        self.spent_coins.is_empty()
+        self.inputs.is_empty()
     }
 }
 
@@ -185,7 +229,7 @@ impl OutputCount for DummyTxData {
 
 impl InputCount for DummyTxData {
     fn input_count(&self) -> usize {
-        self.spent_coins.len()
+        self.inputs.len()
     }
 }
 
@@ -222,7 +266,9 @@ pub fn write_single_block_file(dir: &std::path::Path, block: &[u8]) -> std::io::
 
 impl EnumerateSpentTxOuts for DummyTxData {
     fn spent_coins(&self) -> impl Iterator<Item = AnyOutId> {
-        self.spent_coins.iter().copied().map(AnyOutId::from)
+        self.inputs
+            .iter()
+            .map(|i| AnyOutId::from(TxOutId::new(i.prev_txid, i.prev_vout)))
     }
 }
 

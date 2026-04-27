@@ -96,7 +96,7 @@ mod tests {
         UnifiedStorage,
         loose::LooseIndexBuilder,
         loose::{TxId, TxOutId},
-        test_utils::{DummyTxData, DummyTxOut, DummyTxOutData},
+        test_utils::{DummyTxData, DummyTxOut, DummyTxOutData, SEQUENCE_FINAL},
         unified::AnyOutId,
     };
 
@@ -146,9 +146,9 @@ mod tests {
         // Same lock time
         let tx_out = DummyTxOut {
             vout: 0,
-            containing_tx: DummyTxData::new(vec![DummyTxOutData::new(100, 0)], vec![], 1),
+            containing_tx: DummyTxData::new(vec![DummyTxOutData::new(100, 0)], vec![], vec![], 1),
         };
-        let spending_tx = DummyTxData::new(vec![DummyTxOutData::new(100, 0)], vec![], 1);
+        let spending_tx = DummyTxData::new(vec![DummyTxOutData::new(100, 0)], vec![], vec![], 1);
         assert_eq!(
             NLockTimeChangeIdentification::is_change(tx_out, spending_tx),
             TxOutChangeAnnotation::Change
@@ -187,6 +187,7 @@ mod tests {
                     ),
                 ],
                 vec![TxOutId::new(TxId(1), 0), TxOutId::new(TxId(2), 0)],
+                vec![SEQUENCE_FINAL; 2],
                 0,
             ),
         ]);
@@ -236,6 +237,7 @@ mod tests {
                     ),
                 ],
                 vec![TxOutId::new(TxId(1), 0), TxOutId::new(TxId(2), 0)],
+                vec![SEQUENCE_FINAL; 2],
                 0,
             ),
         ]);
@@ -282,6 +284,7 @@ mod tests {
                     ),
                 ],
                 vec![TxOutId::new(TxId(1), 0), TxOutId::new(TxId(2), 0)],
+                vec![SEQUENCE_FINAL; 2],
                 0,
             ),
         ]);

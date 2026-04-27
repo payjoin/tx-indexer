@@ -1,10 +1,11 @@
 use crate::{
-    AnyInId, AnyOutId, AnyTxId, HasWitnessData, OutputType,
+    AnyInId, AnyOutId, AnyTxId, HasWitnessData, OutputType, ScriptPubkeyHash,
     traits::{
         abstract_types::{
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateInputValueInArbitraryOrder,
-            EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts, HasNLockTime,
-            HasScriptPubkey, HasSequence, InputCount, OutputCount, TxConstituent,
+            EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts, HasBlockHeight,
+            HasInputPrevOuts, HasNLockTime, HasScriptPubkey, HasSequence, InputCount, OutputCount,
+            TxConstituent,
         },
         graph_index::IndexedGraph,
     },
@@ -297,6 +298,36 @@ impl<'a> InputCount for TxHandle<'a> {
 impl<'a> HasNLockTime for TxHandle<'a> {
     fn n_locktime(&self) -> u32 {
         self.locktime()
+    }
+}
+
+impl<'a> HasBlockHeight for TxHandle<'a> {
+    fn block_height(&self) -> Option<u64> {
+        TxHandle::block_height(self)
+    }
+}
+
+impl<'a> TxHandle<'a> {
+    fn map_input_prev_outs<R: 'a>(
+        &self,
+        project: impl Fn(TxOutHandle<'a>) -> R + 'a,
+    ) -> impl Iterator<Item = Option<R>> + '_ {
+        let index = self.index;
+        self.inputs().map(move |i| {
+            let prev = i.prev_txout()?;
+            index.tx(&prev.txid())?;
+            Some(project(prev))
+        })
+    }
+}
+
+impl<'a> HasInputPrevOuts for TxHandle<'a> {
+    fn input_prev_types(&self) -> impl Iterator<Item = Option<OutputType>> {
+        self.map_input_prev_outs(|p| p.output_type())
+    }
+
+    fn input_prev_script_hashes(&self) -> impl Iterator<Item = Option<ScriptPubkeyHash>> {
+        self.map_input_prev_outs(|p| p.script_pubkey_hash())
     }
 }
 

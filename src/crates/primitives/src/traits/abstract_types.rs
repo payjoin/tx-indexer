@@ -32,7 +32,7 @@ pub trait EnumerateInputValueInArbitraryOrder: AbstractTransaction {
 }
 
 /// Trait for transaction inputs
-pub trait AbstractTxIn {
+pub trait AbstractTxIn: HasSequence {
     /// Returns the transaction ID of the previous output
     fn prev_txid(&self) -> Option<AnyTxId>;
     /// Returns the output index of the previous output
@@ -109,6 +109,22 @@ pub trait HasPrevOutput {
     /// Txid bytes in internal (wire) order
     fn prev_outpoint_txid_bytes(&self) -> [u8; 32];
     fn prev_outpoint_vout(&self) -> u32;
+}
+
+/// Confirmed block height of a transaction. `None` when unconfirmed
+/// (loose).
+pub trait HasBlockHeight {
+    fn block_height(&self) -> Option<u64>;
+}
+
+/// Per-input prev-out script type and script-pubkey hash, in input order.
+/// Each entry is `None` when the prev tx is unavailable (coinbase, missing
+/// from the index, or wrapper opted out of populating it).
+pub trait HasInputPrevOuts: AbstractTransaction {
+    /// Per-input prev-out script type, in input order.
+    fn input_prev_types(&self) -> impl Iterator<Item = Option<OutputType>>;
+    /// Per-input prev-out script-pubkey hash, in input order.
+    fn input_prev_script_hashes(&self) -> impl Iterator<Item = Option<ScriptPubkeyHash>>;
 }
 
 // --- bitcoin type impls ---

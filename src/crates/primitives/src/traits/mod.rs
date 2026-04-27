@@ -2,8 +2,8 @@ pub mod abstract_types;
 pub mod graph_index;
 
 pub use abstract_types::{
-    HasNLockTime, HasPrevOutput, HasScriptPubkey, HasSequence, HasValue, HasVersion,
-    HasWitnessData, InputCount,
+    HasBlockHeight, HasInputPrevOuts, HasNLockTime, HasPrevOutput, HasScriptPubkey, HasSequence,
+    HasValue, HasVersion, HasWitnessData, InputCount,
 };
 
 use crate::ScriptPubkeyHash;
