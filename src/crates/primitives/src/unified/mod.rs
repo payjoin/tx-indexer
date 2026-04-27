@@ -514,6 +514,47 @@ impl TxIoIndex for UnifiedStorage {
         txid.confirmed_txid()
             .map(|did| self.dense().block_of_tx(did))
     }
+
+    fn prev_outpoint_txid_bytes(&self, in_id: &AnyInId) -> [u8; 32] {
+        if in_id.is_loose() {
+            todo!()
+        }
+
+        let dense_inid = in_id
+            .confirmed_id()
+            .expect("confirmed inid must map to dense inid");
+        let dense = self
+            .dense
+            .as_ref()
+            .expect("dense storage missing for confirmed inid");
+        let txid = dense.txid_for_in(dense_inid);
+        let (start, _end) = dense.tx_in_range(txid);
+        let vin = (dense_inid.index() - start) as usize;
+        let tx = dense.get_tx(txid);
+        let txid_ref: &[u8] = tx.input[vin].previous_output.txid.as_ref();
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(txid_ref);
+        bytes
+    }
+
+    fn prev_outpoint_vout(&self, in_id: &AnyInId) -> u32 {
+        if in_id.is_loose() {
+            todo!()
+        }
+
+        let dense_inid = in_id
+            .confirmed_id()
+            .expect("confirmed inid must map to dense inid");
+        let dense = self
+            .dense
+            .as_ref()
+            .expect("dense storage missing for confirmed inid");
+        let txid = dense.txid_for_in(dense_inid);
+        let (start, _end) = dense.tx_in_range(txid);
+        let vin = (dense_inid.index() - start) as usize;
+        let tx = dense.get_tx(txid);
+        tx.input[vin].previous_output.vout
+    }
 }
 
 impl OutpointIndex for UnifiedStorage {

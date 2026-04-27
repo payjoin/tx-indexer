@@ -1,15 +1,20 @@
 use bitcoin::Script;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OutputType {
-    P2pkh,
-    P2sh,
-    P2wpkh,
-    P2wsh,
-    P2tr,
-    OpReturn,
-    NonStandard,
+    P2pkh = 0,
+    P2sh = 1,
+    P2wpkh = 2,
+    P2wsh = 3,
+    P2tr = 4,
+    OpReturn = 5,
+    NonStandard = 6,
     // TODO: pay2anchor
+}
+
+impl OutputType {
+    pub fn as_u32(self) -> u32 {
+        self as u32
+    }
 }
 
 /// Classify a scriptPubKey by type from raw bytes.
