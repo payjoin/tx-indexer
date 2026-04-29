@@ -9,7 +9,7 @@ pub(crate) mod ast_tests {
         UnifiedStorage,
         loose::LooseIndexBuilder,
         loose::{TxId, TxOutId},
-        test_utils::{DummyTxData, DummyTxOutData},
+        test_utils::{DummyTxData, DummyTxOutData, SEQUENCE_FINAL},
         traits::abstract_types::AbstractTransaction,
         unified::{AnyOutId, AnyTxId},
     };
@@ -291,6 +291,7 @@ pub(crate) mod ast_tests {
                     DummyTxOutData::new(300, 1), // change
                 ],
                 vec![TxOutId::new(TxId(1), 0)],
+                vec![SEQUENCE_FINAL; 1],
                 0,
             ),
             DummyTxData::new_with_amounts(vec![300]),

@@ -468,8 +468,7 @@ impl TxIoIndex for UnifiedStorage {
 
     fn input_sequence(&self, in_id: &AnyInId) -> u32 {
         if in_id.is_loose() {
-            // TODO: loose transactions don't carry sequence data in the abstract model yet.
-            panic!("input_sequence not supported for loose transactions");
+            return self.loose().input_sequence(in_id);
         }
         let did = in_id.confirmed_id().expect("must be dense");
         let ds = self.dense();

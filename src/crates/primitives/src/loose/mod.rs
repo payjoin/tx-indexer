@@ -284,9 +284,18 @@ impl TxIoIndex for InMemoryIndex {
         tx.locktime()
     }
 
-    fn input_sequence(&self, _in_id: &AnyInId) -> u32 {
-        // TODO: loose transactions don't carry sequence data in the abstract model yet.
-        panic!("input_sequence not supported for loose transactions");
+    fn input_sequence(&self, in_id: &AnyInId) -> u32 {
+        let loose_in = in_id
+            .loose_id()
+            .expect("loose storage only supports loose txin ids");
+        let tx = self
+            .txs
+            .get(&loose_in.txid())
+            .expect("loose txid not found in storage");
+        tx.inputs()
+            .nth(loose_in.vin() as usize)
+            .expect("vin out of range")
+            .sequence()
     }
 
     fn witness_items(&self, _in_id: &AnyInId) -> Vec<Vec<u8>> {

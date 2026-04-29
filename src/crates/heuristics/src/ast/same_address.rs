@@ -68,7 +68,9 @@ mod tests {
     use tx_indexer_primitives::loose::LooseIndexBuilder;
     use tx_indexer_primitives::{
         loose::{TxId, TxOutId},
-        test_utils::{DummyTxData, DummyTxOutData, temp_dir, write_single_block_file},
+        test_utils::{
+            DummyTxData, DummyTxOutData, SEQUENCE_FINAL, temp_dir, write_single_block_file,
+        },
         traits::abstract_types::AbstractTransaction,
         unified::AnyOutId,
     };
@@ -100,6 +102,7 @@ mod tests {
                 DummyTxOutData::new_with_script(5_000, 1, shared_spk), // change (shared with spend2)
             ],
             vec![TxOutId::new(TxId(1), 0)],
+            vec![SEQUENCE_FINAL; 1],
             0,
         );
 
@@ -110,6 +113,7 @@ mod tests {
                 DummyTxOutData::new_with_script(5_000, 1, shared_spk), // change (shared with spend1)
             ],
             vec![TxOutId::new(TxId(2), 0)],
+            vec![SEQUENCE_FINAL; 1],
             0,
         );
 
