@@ -6,6 +6,7 @@
 //! - Dependency resolution and topological ordering
 //! - Fixpoint iteration for recursive/cyclic definitions
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -154,9 +155,14 @@ impl Engine {
     /// Evaluate an expression to a single combined value.
     ///
     /// Fetches all facts for the expression from storage and combines them
-    /// using the value type's `combine_facts`. Returns `Default::default()`
-    /// if no facts have been produced (e.g. pipeline not yet run).
-    pub fn eval<T: ExprValue>(&mut self, expr: &Expr<T>) -> T::Output
+    /// using the value type's `combine_facts`. Returns
+    /// `Cow::Owned(Default::default())` if no facts have been produced
+    /// (e.g. pipeline not yet run).
+    ///
+    /// The result is a [`Cow`] so the common single-fact case borrows directly
+    /// from internal storage and avoids deep-cloning potentially huge maps /
+    /// sets / DSUs. Call [`Cow::into_owned`] if you need ownership.
+    pub fn eval<T: ExprValue>(&mut self, expr: &Expr<T>) -> Cow<'_, T::Output>
     where
         T::Output: Default,
     {
@@ -165,9 +171,6 @@ impl Engine {
             .storage
             .non_volatile_get::<T>(expr.id())
             .unwrap_or_default();
-        if facts.is_empty() {
-            return Default::default();
-        }
         T::combine_facts(&facts)
     }
 
