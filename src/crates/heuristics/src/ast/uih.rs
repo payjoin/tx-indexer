@@ -370,8 +370,10 @@ mod tests {
         let uih1 = UnnecessaryInputHeuristic1::new(source.txs());
         let uih2 = UnnecessaryInputHeuristic2::new(source.txs());
 
-        let uih1_result = engine.eval(&uih1);
-        let uih2_result = engine.eval(&uih2);
+        // `.into_owned()` because we hold both results simultaneously below;
+        // each `eval` borrows the engine, so we drop the borrows by cloning out.
+        let uih1_result = engine.eval(&uih1).into_owned();
+        let uih2_result = engine.eval(&uih2).into_owned();
 
         assert!(
             uih1_result.contains(&AnyOutId::from(TxOutId::new(TxId(5), 1))),
