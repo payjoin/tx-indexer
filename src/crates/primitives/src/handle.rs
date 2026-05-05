@@ -1,5 +1,5 @@
 use crate::{
-    AnyInId, AnyOutId, AnyTxId, HasWitnessData, OutputType,
+    AnyInId, AnyOutId, AnyTxId, HasPrevOutput, HasValue, HasWitnessData, OutputType,
     traits::{
         abstract_types::{
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateInputValueInArbitraryOrder,
@@ -121,6 +121,12 @@ impl<'a> HasScriptPubkey for TxOutHandle<'a> {
     }
 }
 
+impl<'a> HasValue for TxOutHandle<'a> {
+    fn value(&self) -> bitcoin::Amount {
+        self.value()
+    }
+}
+
 /// Handle for a transaction input in a unified index.
 pub struct TxInHandle<'a> {
     pub(crate) in_id: AnyInId,
@@ -152,6 +158,16 @@ impl<'a> TxInHandle<'a> {
 
     pub fn output_type(&self) -> Option<OutputType> {
         self.prev_txout().map(|prevout| prevout.output_type())
+    }
+}
+
+impl<'a> HasPrevOutput for TxInHandle<'a> {
+    fn prev_outpoint_txid_bytes(&self) -> [u8; 32] {
+        self.index.prev_outpoint_txid_bytes(&self.in_id)
+    }
+
+    fn prev_outpoint_vout(&self) -> u32 {
+        self.index.prev_outpoint_vout(&self.in_id)
     }
 }
 

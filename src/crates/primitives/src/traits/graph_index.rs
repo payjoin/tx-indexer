@@ -37,6 +37,8 @@ pub trait TxIoIndex {
     fn script_sig_bytes(&self, in_id: &AnyInId) -> Vec<u8>;
     // block_height is optional because loose transactions are not confirmed.
     fn block_height(&self, txid: &AnyTxId) -> Option<u64>;
+    fn prev_outpoint_txid_bytes(&self, in_id: &AnyInId) -> [u8; 32];
+    fn prev_outpoint_vout(&self, in_id: &AnyInId) -> u32;
 }
 
 pub trait OutpointIndex {
