@@ -142,15 +142,21 @@ where
 {
     type Output = Vec<T>;
 
-    fn combine_facts(facts: &[&Self::Output]) -> Self::Output {
+    fn combine_facts<'a>(facts: &[&'a Self::Output]) -> Cow<'a, Self::Output> {
         if facts.is_empty() {
-            return Default::default();
+            return Cow::Owned(Default::default());
         }
-        let mut acc = facts[0].clone();
-        for rest in &facts[1..] {
-            acc.extend(rest.iter().cloned());
+        match facts {
+            [] => Cow::Owned(Default::default()),
+            [single] => Cow::Borrowed(*single),
+            [first, rest @ ..] => {
+                let mut acc = (*first).clone();
+                for next in rest {
+                    acc.extend(next.iter().cloned());
+                }
+                Cow::Owned(acc)
+            }
         }
-        acc
     }
 }
 
