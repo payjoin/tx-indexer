@@ -316,11 +316,11 @@ impl UnifiedStorage {
         self.loose
             .as_ref()
             .into_iter()
-            .flat_map(|loose| loose.tx_order.iter().copied().map(AnyTxId::from))
+            .flat_map(|loose| loose.txs.keys().copied().map(AnyTxId::from))
     }
 
     pub fn loose_txids_len(&self) -> usize {
-        self.loose.as_ref().map_or(0, |loose| loose.tx_order.len())
+        self.loose.as_ref().map_or(0, |loose| loose.txs.len())
     }
 
     pub fn dense_txids_len(&self) -> usize {
@@ -331,8 +331,8 @@ impl UnifiedStorage {
 
     pub fn loose_txids_from(&self, start: usize) -> impl Iterator<Item = AnyTxId> + '_ {
         self.loose.as_ref().into_iter().flat_map(move |loose| {
-            let s = start.min(loose.tx_order.len());
-            loose.tx_order[s..].iter().copied().map(AnyTxId::from)
+            let s = start.min(loose.txs.len());
+            loose.txs.keys().skip(s).copied().map(AnyTxId::from)
         })
     }
 

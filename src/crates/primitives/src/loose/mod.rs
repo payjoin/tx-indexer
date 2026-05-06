@@ -87,7 +87,6 @@ pub struct InMemoryIndex {
     pub spending_txins: HashMap<TxOutId, TxInId>,
     // TODO: test that insertion order does not make a difference
     pub txs: HashMap<TxId, Arc<dyn AbstractTransaction + Send + Sync>>,
-    pub tx_order: Vec<TxId>,
     /// Index mapping script pubkey hash (20 bytes) and the first transaction output ID that uses it
     pub spk_to_txout_ids: HashMap<ScriptPubkeyHash, TxOutId>,
 }
@@ -127,7 +126,6 @@ impl std::fmt::Debug for InMemoryIndex {
             .field("prev_txouts", &self.prev_txouts)
             .field("spending_txins", &self.spending_txins)
             .field("txs", &format!("{} transactions", self.txs.len()))
-            .field("tx_order", &self.tx_order.len())
             .finish()
     }
 }
@@ -144,7 +142,6 @@ impl InMemoryIndex {
             prev_txouts: HashMap::new(),
             spending_txins: HashMap::new(),
             txs: HashMap::new(),
-            tx_order: Vec::new(),
             spk_to_txout_ids: HashMap::new(),
         }
     }
@@ -154,7 +151,7 @@ impl InMemoryIndex {
         &'a mut self,
         tx: Arc<dyn AbstractTransaction + Send + Sync>,
     ) -> TxHandle<'a> {
-        let loose_txid = TxId::new(self.tx_order.len() as u32 + 1);
+        let loose_txid = TxId::new(self.txs.len() as u32 + 1);
         let tx_id = AnyTxId::from(loose_txid);
 
         // Process inputs to build the index before storing
@@ -187,7 +184,6 @@ impl InMemoryIndex {
         if result.is_some() {
             panic!("Transaction with id {:?} already exists!", tx_id);
         }
-        self.tx_order.push(loose_txid);
 
         tx_id.with(self)
     }
