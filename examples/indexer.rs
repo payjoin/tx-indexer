@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::Arc, time::Instant};
 
-use tx_indexer_heuristics::ast::SignalsRbf;
+use tx_indexer_fingerprints::HasInputFingerprints;
 use tx_indexer_pipeline::{context::PipelineContext, engine::Engine, ops::AllDenseTxs};
 use tx_indexer_primitives::{UnifiedStorage, dense::DenseStorageBuilder, test_utils::temp_dir};
 
@@ -79,16 +79,21 @@ fn main() {
 
     let source = AllDenseTxs::new(&ctx);
     let all_txs = source.txs();
-    let rbf_mask = SignalsRbf::new(all_txs);
+    let rbf_mask = all_txs.filter(|tx_id, ctx| {
+        tx_id
+            .with(ctx.unified_storage())
+            .inputs()
+            .any(|input| input.signals_rbf())
+    });
 
     // 3. Evaluate
     let eval_start = Instant::now();
-    let result = engine.eval(&rbf_mask);
+    let result = engine.eval(&rbf_mask).into_owned();
     let eval_elapsed = eval_start.elapsed();
 
     // 4. Print results
-    let rbf_count = result.values().filter(|&&v| v).count();
-    let total = result.len();
+    let rbf_count = result.len();
+    let total = engine.eval(&all_txs).into_owned().len();
 
     println!();
     println!("--- RBF signaling analysis ({eval_elapsed:.2?}) ---");
