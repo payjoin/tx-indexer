@@ -1,3 +1,6 @@
+pub mod sink;
+pub use sink::DenseIndexSink;
+
 use std::path::PathBuf;
 
 use crate::{
@@ -214,9 +217,10 @@ pub(crate) fn build_indices(builder: DenseStorageBuilder) -> Result<DenseStorage
     let mut parser = Parser::new(blocks_dir).with_file_hints(builder.file_hints);
     let mut indices =
         DenseIndexSet::new(&index_dir).map_err(|e| SyncError::Parse(BlockFileError::Io(e)))?;
+    let mut sink = DenseIndexSink::new(&mut indices, &mut spk_db).map_err(SyncError::Parse)?;
 
     parser
-        .parse_blocks(builder.range, &mut indices, &mut spk_db)
+        .parse_blocks(builder.range, &mut sink)
         .map_err(SyncError::Parse)?;
 
     indices

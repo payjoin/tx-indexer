@@ -1,10 +1,13 @@
 pub mod abstract_types;
 pub mod graph_index;
+pub mod index_sink;
 
 pub use abstract_types::{
     HasNLockTime, HasPrevOutput, HasScriptPubkey, HasSequence, HasValue, HasVersion,
     HasWitnessData, InputCount,
 };
+
+pub use index_sink::IndexSink;
 
 use crate::ScriptPubkeyHash;
 use crate::dense::TxOutId;

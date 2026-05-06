@@ -1,3 +1,8 @@
+pub mod confirmed_tx;
+pub mod sink;
+pub use confirmed_tx::ConfirmedTx;
+pub use sink::LooseIndexSink;
+
 use crate::handle::TxHandle;
 use crate::traits::graph_index::{
     IndexedGraph, OutpointIndex, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxInOwnerIndex,
