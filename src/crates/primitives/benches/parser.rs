@@ -3,7 +3,11 @@ use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use std::fs;
 
 use tx_indexer_primitives::{
-    dense::DenseIndexSink, indecies::DenseIndexSet, parser::Parser, sled::db::SledDBFactory, test_utils::{temp_dir, write_single_block_file}
+    dense::DenseIndexSink,
+    indecies::DenseIndexSet,
+    parser::Parser,
+    sled::db::SledDBFactory,
+    test_utils::{temp_dir, write_single_block_file},
 };
 
 fn bench_parse_mainnet_702861(c: &mut Criterion) {
@@ -21,8 +25,7 @@ fn bench_parse_mainnet_702861(c: &mut Criterion) {
                 let mut indices = DenseIndexSet::new(&index_dir).unwrap();
                 let mut spk_db = SledDBFactory::open(&sled_dir).unwrap().spk_db().unwrap();
 
-                let mut sink = DenseIndexSink
-                ::new(&mut indices, &mut spk_db).unwrap();
+                let mut sink = DenseIndexSink::new(&mut indices, &mut spk_db).unwrap();
 
                 parser.parse_blocks(0..1, &mut sink).unwrap();
 

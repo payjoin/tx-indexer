@@ -196,6 +196,15 @@ impl From<LooseIndexBuilder> for UnifiedStorage {
     }
 }
 
+impl From<InMemoryIndex> for UnifiedStorage {
+    fn from(index: InMemoryIndex) -> Self {
+        Self {
+            dense: None,
+            loose: Some(index),
+        }
+    }
+}
+
 // TODO: specific error for unified storage
 impl TryFrom<DenseStorageBuilder> for UnifiedStorage {
     type Error = SyncError;

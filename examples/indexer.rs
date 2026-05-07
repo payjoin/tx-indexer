@@ -1,8 +1,8 @@
 use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use tx_indexer_fingerprints::HasInputFingerprints;
-use tx_indexer_pipeline::{context::PipelineContext, engine::Engine, ops::AllDenseTxs};
-use tx_indexer_primitives::{UnifiedStorage, dense::DenseStorageBuilder, test_utils::temp_dir};
+use tx_indexer_pipeline::{context::PipelineContext, engine::Engine, ops::AllLooseTxs};
+use tx_indexer_primitives::{UnifiedStorage, loose::LooseIndexBuilder};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -51,21 +51,21 @@ fn main() {
         datadir.display()
     );
 
-    // 1. Build indices into a temp directory
-    let out_dir = temp_dir("tx-indexer-example");
-
     let start = Instant::now();
-    let builder = DenseStorageBuilder::sync_from_tip(datadir, out_dir, depth).unwrap_or_else(|e| {
+    let loose_index = LooseIndexBuilder::sync_from_tip(datadir, depth).unwrap_or_else(|e| {
         eprintln!("Error: failed to sync block index: {e}");
         std::process::exit(1);
     });
-    let unified: UnifiedStorage = builder.try_into().unwrap_or_else(|e| {
-        eprintln!("Error: failed to build indices: {e}");
-        std::process::exit(1);
-    });
+
+    println!(
+        "Loose index built --- {} transactions",
+        loose_index.txs.len()
+    );
+    let unified: UnifiedStorage = loose_index.into();
+
     let index_elapsed = start.elapsed();
 
-    let tx_count = unified.dense_txids_len();
+    let tx_count = unified.loose_txids_len();
     println!(
         "Indexed {} transactions in {} blocks ({index_elapsed:.2?})",
         tx_count,
@@ -77,7 +77,7 @@ fn main() {
     let unified = Arc::new(unified);
     let mut engine = Engine::new(ctx.clone(), unified);
 
-    let source = AllDenseTxs::new(&ctx);
+    let source = AllLooseTxs::new(&ctx);
     let all_txs = source.txs();
     let rbf_mask = all_txs.filter(|tx_id, ctx| {
         tx_id

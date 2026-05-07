@@ -4,6 +4,7 @@ pub use confirmed_tx::ConfirmedTx;
 pub use sink::LooseIndexSink;
 
 use crate::handle::TxHandle;
+use crate::parser::{BlockFileError, Parser, collect_file_hints};
 use crate::traits::graph_index::{
     IndexedGraph, OutpointIndex, PrevOutIndex, ScriptPubkeyIndex, TxInIndex, TxInOwnerIndex,
     TxIndex, TxIoIndex, TxOutDataIndex,
@@ -13,6 +14,7 @@ use crate::{
 };
 use bitcoin::Amount;
 
+use std::path::PathBuf;
 use std::{
     collections::HashMap,
     hash::{DefaultHasher, Hasher},
@@ -103,6 +105,43 @@ pub struct LooseIndexBuilder {
 impl LooseIndexBuilder {
     pub fn new() -> Self {
         Self { txs: Vec::new() }
+    }
+
+    /// Build a [`DenseStorage`] for the `depth + 1` blocks ending at the chain tip.
+    ///
+    /// `bitcoind_datadir` is Bitcoin Core's data directory (e.g. `~/.bitcoin/` or
+    /// `~/.bitcoin/regtest/`); `blocks/` and `blocks/index/` are derived from it automatically.
+    ///
+    /// `index_dir` is the output directory where all dense index files and the sled database
+    /// will be written. The caller is responsible for creating this directory before calling.
+    pub fn sync_from_tip(data_dir: PathBuf, depth: u32) -> Result<InMemoryIndex, BlockFileError> {
+        // TODO: check if the indecies were built already past or before the depth
+        use bitcoin_block_index::BlockIndex;
+        let block_index_path = data_dir.join("blocks/index");
+
+        let mut index = BlockIndex::open(&block_index_path).map_err(BlockFileError::BlockIndex)?;
+
+        let tip_hash = index.best_block().map_err(BlockFileError::BlockIndex)?;
+        let chain = index
+            .walk_back(&tip_hash, depth)
+            .map_err(BlockFileError::BlockIndex)?;
+
+        let start_height = chain
+            .first()
+            .expect("walk_back returns depth+1 items")
+            .height as u64;
+        let end_height = chain
+            .last()
+            .expect("walk_back returns depth+1 items")
+            .height as u64;
+
+        let file_hints = collect_file_hints(&mut index, start_height, end_height)?;
+
+        let mut sink = LooseIndexSink::new();
+
+        let mut parser = Parser::new(data_dir.join("blocks")).with_file_hints(file_hints);
+        parser.parse_blocks(start_height..end_height + 1, &mut sink)?;
+        Ok(sink.finish())
     }
 
     pub fn add_tx(&mut self, tx: Arc<dyn AbstractTransaction + Send + Sync>) -> &mut Self {

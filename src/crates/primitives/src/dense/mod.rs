@@ -7,7 +7,7 @@ use crate::{
     ScriptPubkeyHash,
     blk_file::BlkFileStore,
     indecies::{DenseIndexSet, INID_NONE, OUTID_NONE, TxPtr},
-    parser::{BlkFileHint, BlockFileError, Parser},
+    parser::{BlkFileHint, BlockFileError, Parser, collect_file_hints},
     sled::{db::SledDBFactory, spk_db::SledScriptPubkeyDb},
     traits::ScriptPubkeyDb,
     unified::SyncError,
@@ -106,7 +106,7 @@ impl DenseStorageBuilder {
             .map_err(BlockFileError::BlockIndex)?;
         let end_height = tip_loc.height as u64;
 
-        let file_hints = Self::collect_file_hints(&mut index, 0, end_height)?;
+        let file_hints = collect_file_hints(&mut index, 0, end_height)?;
 
         let builder = DenseStorageBuilder {
             data_dir,
@@ -149,7 +149,7 @@ impl DenseStorageBuilder {
             .expect("walk_back returns depth+1 items")
             .height as u64;
 
-        let file_hints = Self::collect_file_hints(&mut index, start_height, end_height)?;
+        let file_hints = collect_file_hints(&mut index, start_height, end_height)?;
 
         let builder = DenseStorageBuilder {
             data_dir,
@@ -158,42 +158,6 @@ impl DenseStorageBuilder {
             file_hints,
         };
         Ok(builder)
-    }
-
-    /// Collect [`BlkFileHint`] entries for every blk file that
-    /// overlaps the inclusive height range `[start_height, end_height]`, so the parser
-    /// can skip blk files outside the requested range.
-    fn collect_file_hints(
-        index: &mut bitcoin_block_index::BlockIndex,
-        start_height: u64,
-        end_height: u64,
-    ) -> Result<Vec<BlkFileHint>, BlockFileError> {
-        let last_file = index
-            .last_block_file()
-            .map_err(BlockFileError::BlockIndex)?;
-        let mut file_hints: Vec<BlkFileHint> = Vec::new();
-
-        for file_no in 0..=last_file {
-            let info = index
-                .block_file_info(file_no)
-                .map_err(BlockFileError::BlockIndex)?;
-            if (info.height_last as u64) < start_height {
-                continue;
-            }
-            // TODO: This assumes block heights are monotonically increasing.
-            // Due to reorgs this may not always be the case
-            if (info.height_first as u64) > end_height {
-                break;
-            }
-            file_hints.push(BlkFileHint {
-                file_no,
-                height_first: info.height_first,
-                height_last: info.height_last,
-                data_len: Some(info.size as usize),
-            });
-        }
-
-        Ok(file_hints)
     }
 
     pub fn build(self) -> Result<DenseStorage, SyncError> {

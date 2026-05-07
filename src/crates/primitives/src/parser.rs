@@ -13,6 +13,42 @@ use crate::{
 /// Block file layout: 4-byte magic + 4-byte block size (LE) + block payload.
 const BLOCK_START_LEN: usize = 8;
 
+/// Collect [`BlkFileHint`] entries for every blk file that
+/// overlaps the inclusive height range `[start_height, end_height]`, so the parser
+/// can skip blk files outside the requested range.
+pub fn collect_file_hints(
+    index: &mut bitcoin_block_index::BlockIndex,
+    start_height: u64,
+    end_height: u64,
+) -> Result<Vec<BlkFileHint>, BlockFileError> {
+    let last_file = index
+        .last_block_file()
+        .map_err(BlockFileError::BlockIndex)?;
+    let mut file_hints: Vec<BlkFileHint> = Vec::new();
+
+    for file_no in 0..=last_file {
+        let info = index
+            .block_file_info(file_no)
+            .map_err(BlockFileError::BlockIndex)?;
+        if (info.height_last as u64) < start_height {
+            continue;
+        }
+        // TODO: This assumes block heights are monotonically increasing.
+        // Due to reorgs this may not always be the case
+        if (info.height_first as u64) > end_height {
+            break;
+        }
+        file_hints.push(BlkFileHint {
+            file_no,
+            height_first: info.height_first,
+            height_last: info.height_last,
+            data_len: Some(info.size as usize),
+        });
+    }
+
+    Ok(file_hints)
+}
+
 /// Parser-side blk file metadata used to locate and bound parsing within a file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlkFileHint {
