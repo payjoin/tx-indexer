@@ -1,3 +1,4 @@
+use crate::HasScriptPubkey;
 use crate::dense::{DenseStorage, DenseStorageBuilder, build_indices};
 use crate::handle::{TxHandle, TxInHandle, TxOutHandle};
 use crate::loose::InMemoryIndex;
@@ -620,7 +621,7 @@ impl TxOutDataIndex for UnifiedStorage {
                     .expect("txout should be present if index is built correctly")
                     .script_pubkey_hash()
             },
-            |ds, did| script_pubkey_hash(&ds.get_txout(did).script_pubkey),
+            |ds, did| ds.get_txout(did).script_pubkey_hash(),
         )
     }
 
@@ -639,13 +640,6 @@ impl TxOutDataIndex for UnifiedStorage {
 }
 
 impl IndexedGraph for UnifiedStorage {}
-
-fn script_pubkey_hash(script_pubkey: &bitcoin::ScriptBuf) -> ScriptPubkeyHash {
-    use bitcoin::hashes::Hash as _;
-    use bitcoin::hashes::hash160::Hash as Hash160;
-
-    Hash160::hash(script_pubkey.as_bytes()).to_byte_array()
-}
 
 #[cfg(test)]
 mod tests {

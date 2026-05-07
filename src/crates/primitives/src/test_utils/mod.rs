@@ -1,9 +1,7 @@
 use bitcoin::Amount;
-use bitcoin::hashes::Hash as _;
-use bitcoin::hashes::hash160::Hash as Hash160;
 
 use crate::{
-    AnyOutId, AnyTxId, HasSequence, HasValue, HasVersion, ScriptPubkeyHash,
+    AnyOutId, AnyTxId, HasSequence, HasValue, HasVersion,
     loose::{TxId, TxOutId},
     traits::{
         HasNLockTime,
@@ -129,11 +127,7 @@ impl HasScriptPubkey for DummyTxOutData {
     }
 }
 
-impl AbstractTxOut for DummyTxOutData {
-    fn script_pubkey_hash(&self) -> ScriptPubkeyHash {
-        Hash160::hash(&self.script_pubkey).to_byte_array()
-    }
-}
+impl AbstractTxOut for DummyTxOutData {}
 
 impl HasValue for DummyTxOutData {
     fn value(&self) -> Amount {

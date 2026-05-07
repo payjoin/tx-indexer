@@ -41,11 +41,7 @@ pub trait AbstractTxIn: HasSequence {
 }
 
 /// Trait for transaction outputs
-pub trait AbstractTxOut: HasScriptPubkey + HasValue {
-    /// Returns the script pubkey hash (20-byte hash) if available
-    /// Returns None if the script doesn't contain a standard hash or is not supported
-    fn script_pubkey_hash(&self) -> ScriptPubkeyHash;
-}
+pub trait AbstractTxOut: HasScriptPubkey + HasValue {}
 
 /// Trait for transaction looking things. Generic over the ids as they can be either loose or dense.
 pub trait AbstractTransaction: HasNLockTime + HasVersion {
@@ -87,6 +83,11 @@ pub trait HasWitnessData {
 /// Full scriptPubKey bytes for a transaction output
 pub trait HasScriptPubkey {
     fn script_pubkey_bytes(&self) -> Vec<u8>;
+
+    fn script_pubkey_hash(&self) -> ScriptPubkeyHash {
+        use bitcoin::hashes::{Hash, hash160};
+        hash160::Hash::hash(&self.script_pubkey_bytes()).to_byte_array()
+    }
 
     fn output_type(&self) -> OutputType {
         classify_script_pubkey(&self.script_pubkey_bytes())

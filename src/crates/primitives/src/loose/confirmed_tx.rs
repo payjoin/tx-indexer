@@ -5,7 +5,7 @@ use bitcoin_slices::{Visit, Visitor, bsl};
 use core::ops::ControlFlow;
 
 use crate::{
-    AnyTxId, HasSequence, HasValue, HasVersion, ScriptPubkeyHash,
+    AnyTxId, HasSequence, HasValue, HasVersion,
     traits::{
         HasNLockTime,
         abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut, HasScriptPubkey},
@@ -89,12 +89,7 @@ impl HasScriptPubkey for ConfirmedTxOut {
     }
 }
 
-impl AbstractTxOut for ConfirmedTxOut {
-    fn script_pubkey_hash(&self) -> ScriptPubkeyHash {
-        use bitcoin::hashes::{Hash, hash160};
-        hash160::Hash::hash(&self.script_pubkey).to_byte_array()
-    }
-}
+impl AbstractTxOut for ConfirmedTxOut {}
 
 impl HasValue for ConfirmedTxOut {
     fn value(&self) -> Amount {

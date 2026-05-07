@@ -286,11 +286,7 @@ impl<'a> AbstractTxIn for TxInHandle<'a> {
     }
 }
 
-impl<'a> AbstractTxOut for TxOutHandle<'a> {
-    fn script_pubkey_hash(&self) -> crate::ScriptPubkeyHash {
-        TxOutHandle::script_pubkey_hash(self)
-    }
-}
+impl<'a> AbstractTxOut for TxOutHandle<'a> {}
 
 impl<'a> EnumerateInputValueInArbitraryOrder for TxHandle<'a> {
     fn input_values(&self) -> impl Iterator<Item = bitcoin::Amount> {
