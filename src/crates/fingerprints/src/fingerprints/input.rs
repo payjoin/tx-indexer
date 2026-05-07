@@ -1,5 +1,5 @@
 use bitcoin::ecdsa::Signature as EcdsaSignature;
-use tx_indexer_primitives::{HasSequence, HasWitnessData};
+use tx_indexer_primitives::{HasScriptSig, HasSequence, HasWitness};
 
 use crate::classify::{
     extract_signatures_from_script_sig, extract_signatures_from_witness, has_low_r_signature,
@@ -11,7 +11,7 @@ pub fn signals_rbf(input: &(impl HasSequence + ?Sized)) -> bool {
 }
 
 /// Returns true if the input has at least one low-R ECDSA signature.
-pub fn low_r_grinding(input: &(impl HasWitnessData + ?Sized)) -> bool {
+pub fn low_r_grinding(input: &(impl HasWitness + HasScriptSig + ?Sized)) -> bool {
     let script_sig_bytes = input.script_sig_bytes();
     let witness_items = input.witness_items();
 
@@ -31,7 +31,7 @@ pub fn low_r_grinding(input: &(impl HasWitnessData + ?Sized)) -> bool {
 }
 
 /// Bundled trait for input-level fingerprints.
-pub trait HasInputFingerprints: HasSequence + HasWitnessData {
+pub trait HasInputFingerprints: HasSequence + HasWitness + HasScriptSig {
     fn signals_rbf(&self) -> bool {
         signals_rbf(self)
     }
@@ -40,4 +40,4 @@ pub trait HasInputFingerprints: HasSequence + HasWitnessData {
     }
 }
 
-impl<T: HasSequence + HasWitnessData> HasInputFingerprints for T {}
+impl<T: HasSequence + HasWitness + HasScriptSig> HasInputFingerprints for T {}

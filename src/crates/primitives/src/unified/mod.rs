@@ -506,34 +506,45 @@ impl TxIoIndex for UnifiedStorage {
     }
 
     fn witness_items(&self, in_id: &AnyInId) -> Vec<Vec<u8>> {
-        if in_id.is_loose() {
-            // TODO: loose transactions don't carry witness data in the abstract model yet.
-            panic!("witness_items not supported for loose transactions");
-        }
-        let did = in_id.confirmed_id().expect("must be dense");
-        let ds = self.dense();
-        let txid = ds.txid_for_in(did);
-        let (start, _) = ds.tx_in_range(txid);
-        let vin = (did.index() - start) as usize;
-        let tx = ds.get_tx(txid);
-        tx.input[vin]
-            .witness
-            .iter()
-            .map(|item| item.to_vec())
-            .collect()
+        self.resolve_in(
+            *in_id,
+            |ls, lid| {
+                ls.txs[&lid.txid()]
+                    .inputs()
+                    .nth(lid.vin() as usize)
+                    .expect("sane vin")
+                    .witness_items()
+            },
+            |ds, did| {
+                let txid = ds.txid_for_in(did);
+                let (start, _) = ds.tx_in_range(txid);
+                let vin = (did.index() - start) as usize;
+                ds.get_tx(txid).input[vin]
+                    .witness
+                    .iter()
+                    .map(|item| item.to_vec())
+                    .collect()
+            },
+        )
     }
 
     fn script_sig_bytes(&self, in_id: &AnyInId) -> Vec<u8> {
-        if in_id.is_loose() {
-            // TODO: loose transactions don't carry script sig data in the abstract model yet.
-            panic!("script_sig_bytes not supported for loose transactions");
-        }
-        let did = in_id.confirmed_id().expect("must be dense");
-        let ds = self.dense();
-        let txid = ds.txid_for_in(did);
-        let (start, _) = ds.tx_in_range(txid);
-        let vin = (did.index() - start) as usize;
-        ds.get_tx(txid).input[vin].script_sig.to_bytes()
+        self.resolve_in(
+            *in_id,
+            |ls, lid| {
+                ls.txs[&lid.txid()]
+                    .inputs()
+                    .nth(lid.vin() as usize)
+                    .expect("sane vin")
+                    .script_sig_bytes()
+            },
+            |ds, did| {
+                let txid = ds.txid_for_in(did);
+                let (start, _) = ds.tx_in_range(txid);
+                let vin = (did.index() - start) as usize;
+                ds.get_tx(txid).input[vin].script_sig.to_bytes()
+            },
+        )
     }
 
     fn block_height(&self, txid: &AnyTxId) -> Option<u64> {

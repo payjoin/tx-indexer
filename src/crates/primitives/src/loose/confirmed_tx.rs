@@ -5,10 +5,12 @@ use bitcoin_slices::{Visit, Visitor, bsl};
 use core::ops::ControlFlow;
 
 use crate::{
-    AnyTxId, HasSequence, HasValue, HasVersion,
+    AnyTxId, HasSequence, HasValue, HasVersion, HasWitness,
     traits::{
         HasNLockTime,
-        abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut, HasScriptPubkey},
+        abstract_types::{
+            AbstractTransaction, AbstractTxIn, AbstractTxOut, HasScriptPubkey, HasScriptSig,
+        },
     },
 };
 
@@ -53,6 +55,9 @@ impl Visitor for ParsedTx {
             prev_txid_bytes,
             prev_vout: prevout.vout(),
             sequence: tx_in.sequence(),
+            // TODO: upstream does not provide witness data in the bsl::TxIn struct. ?
+            witness_items: vec![],
+            script_sig_bytes: tx_in.script_sig().to_vec(),
         });
         ControlFlow::Continue(())
     }
@@ -76,6 +81,8 @@ struct ConfirmedTxIn {
     prev_txid_bytes: [u8; 32],
     prev_vout: u32,
     sequence: u32,
+    witness_items: Vec<Vec<u8>>,
+    script_sig_bytes: Vec<u8>,
 }
 
 struct ConfirmedTxOut {
@@ -116,6 +123,19 @@ impl AbstractTxIn for ConfirmedTxIn {
 impl HasSequence for ConfirmedTxIn {
     fn sequence(&self) -> u32 {
         self.sequence
+    }
+}
+
+// TODO: can we refactor these clones out?
+impl HasWitness for ConfirmedTxIn {
+    fn witness_items(&self) -> Vec<Vec<u8>> {
+        self.witness_items.clone()
+    }
+}
+
+impl HasScriptSig for ConfirmedTxIn {
+    fn script_sig_bytes(&self) -> Vec<u8> {
+        self.script_sig_bytes.clone()
     }
 }
 

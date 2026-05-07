@@ -33,7 +33,7 @@ pub trait EnumerateInputValueInArbitraryOrder: AbstractTransaction {
 
 /// Trait for transaction inputs
 // TODO: add other input elements: witness, scriptsig
-pub trait AbstractTxIn: HasSequence {
+pub trait AbstractTxIn: HasSequence + HasWitness + HasScriptSig {
     /// Returns the transaction ID of the previous output
     fn prev_txid(&self) -> Option<AnyTxId>;
     /// Returns the output index of the previous output
@@ -74,9 +74,11 @@ pub trait HasSequence {
 }
 
 /// Witness and scriptSig data for a transaction input
-pub trait HasWitnessData {
+pub trait HasWitness {
     fn witness_items(&self) -> Vec<Vec<u8>>;
-    // TODO should be in HasScriptSig trait
+}
+
+pub trait HasScriptSig {
     fn script_sig_bytes(&self) -> Vec<u8>;
 }
 
@@ -124,11 +126,13 @@ impl HasSequence for bitcoin::TxIn {
     }
 }
 
-impl HasWitnessData for bitcoin::TxIn {
+impl HasWitness for bitcoin::TxIn {
     fn witness_items(&self) -> Vec<Vec<u8>> {
         self.witness.iter().map(|item| item.to_vec()).collect()
     }
+}
 
+impl HasScriptSig for bitcoin::TxIn {
     fn script_sig_bytes(&self) -> Vec<u8> {
         self.script_sig.to_bytes()
     }

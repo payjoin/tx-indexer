@@ -1,13 +1,14 @@
 use bitcoin::Amount;
 
 use crate::{
-    AnyOutId, AnyTxId, HasSequence, HasValue, HasVersion,
+    AnyOutId, AnyTxId, HasSequence, HasValue, HasVersion, HasWitness,
     loose::{TxId, TxOutId},
     traits::{
         HasNLockTime,
         abstract_types::{
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
-            EnumerateSpentTxOuts, HasScriptPubkey, InputCount, OutputCount, TxConstituent,
+            EnumerateSpentTxOuts, HasScriptPubkey, HasScriptSig, InputCount, OutputCount,
+            TxConstituent,
         },
     },
 };
@@ -91,6 +92,18 @@ impl AbstractTxIn for DummyTxInWrapper {
 impl HasSequence for DummyTxInWrapper {
     fn sequence(&self) -> u32 {
         self.sequence
+    }
+}
+
+impl HasWitness for DummyTxInWrapper {
+    fn witness_items(&self) -> Vec<Vec<u8>> {
+        vec![]
+    }
+}
+
+impl HasScriptSig for DummyTxInWrapper {
+    fn script_sig_bytes(&self) -> Vec<u8> {
+        vec![]
     }
 }
 

@@ -1,6 +1,8 @@
 use bitcoin::Script;
 use bitcoin::script::Instruction;
-use tx_indexer_primitives::{HasScriptPubkey, HasWitnessData, OutputType};
+use tx_indexer_primitives::{
+    HasScriptPubkey, HasWitness, OutputType, traits::abstract_types::HasScriptSig,
+};
 
 /// Classify the input type by looking at its prevout's scriptPubKey.
 pub fn input_type(prevout: &impl HasScriptPubkey) -> OutputType {
@@ -13,7 +15,7 @@ pub fn input_type(prevout: &impl HasScriptPubkey) -> OutputType {
 /// - P2PK: the uncompressed pubkey is embedded directly in the prevout scriptPubKey.
 /// - P2PKH: the uncompressed pubkey is pushed in the spending script_sig.
 pub fn has_uncompressed_pubkey(
-    input: &(impl HasWitnessData + ?Sized),
+    input: &(impl HasWitness + HasScriptSig + ?Sized),
     prevout: &(impl HasScriptPubkey + ?Sized),
 ) -> bool {
     let spk_bytes = prevout.script_pubkey_bytes();
@@ -48,7 +50,7 @@ pub fn has_uncompressed_pubkey(
 /// where the second starts with 0x50 (an annex). A 65-byte signature means an
 /// explicit sighash type was encoded instead of the compact default form.
 pub fn taproot_keyspend_non_default_sighash(
-    input: &(impl HasWitnessData + ?Sized),
+    input: &(impl HasWitness + ?Sized),
     prevout: &(impl HasScriptPubkey + ?Sized),
 ) -> bool {
     let spk_bytes = prevout.script_pubkey_bytes();
@@ -69,7 +71,7 @@ pub fn taproot_keyspend_non_default_sighash(
     sig.len() == 65
 }
 
-pub trait HasInputWithPrevoutFingerprints: HasWitnessData + HasScriptPubkey {
+pub trait HasInputWithPrevoutFingerprints: HasWitness + HasScriptSig + HasScriptPubkey {
     fn has_uncompressed_pubkey(&self, prevout: &impl HasScriptPubkey) -> bool {
         has_uncompressed_pubkey(self, prevout)
     }

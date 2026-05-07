@@ -1,10 +1,10 @@
 use crate::{
-    AnyInId, AnyOutId, AnyTxId, HasPrevOutput, HasValue, HasVersion, HasWitnessData, OutputType,
+    AnyInId, AnyOutId, AnyTxId, HasPrevOutput, HasValue, HasVersion, HasWitness, OutputType,
     traits::{
         abstract_types::{
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateInputValueInArbitraryOrder,
             EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts, HasNLockTime,
-            HasScriptPubkey, HasSequence, InputCount, OutputCount, TxConstituent,
+            HasScriptPubkey, HasScriptSig, HasSequence, InputCount, OutputCount, TxConstituent,
         },
         graph_index::IndexedGraph,
     },
@@ -181,11 +181,13 @@ impl<'a> HasSequence for TxInHandle<'a> {
     }
 }
 
-impl<'a> HasWitnessData for TxInHandle<'a> {
+impl<'a> HasWitness for TxInHandle<'a> {
     fn witness_items(&self) -> Vec<Vec<u8>> {
         self.index.witness_items(&self.in_id)
     }
+}
 
+impl<'a> HasScriptSig for TxInHandle<'a> {
     fn script_sig_bytes(&self) -> Vec<u8> {
         self.index.script_sig_bytes(&self.in_id)
     }
