@@ -324,6 +324,11 @@ impl TxIoIndex for InMemoryIndex {
         tx.locktime()
     }
 
+    fn version(&self, txid: &AnyTxId) -> i32 {
+        let tx = self.tx(txid).expect("loose txid not found in storage");
+        tx.version()
+    }
+
     fn input_sequence(&self, in_id: &AnyInId) -> u32 {
         let loose_in = in_id
             .loose_id()

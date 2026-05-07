@@ -13,7 +13,7 @@ use tx_indexer_pipeline::{
     node::{Node, NodeId},
     value::{NormalizedFingerprints, TxSet},
 };
-use tx_indexer_primitives::{AbstractTransaction, HasScriptPubkey, handle::TxOutHandle};
+use tx_indexer_primitives::{HasScriptPubkey, handle::TxOutHandle, traits::HasNLockTime};
 
 fn sorted_deduped(vals: impl Iterator<Item = u32>) -> Vec<u32> {
     let mut v: Vec<u32> = vals.collect();

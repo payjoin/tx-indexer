@@ -3,12 +3,14 @@ use bitcoin::hashes::Hash as _;
 use bitcoin::hashes::hash160::Hash as Hash160;
 
 use crate::{
-    AnyOutId, AnyTxId, ScriptPubkeyHash,
+    AnyOutId, AnyTxId, HasSequence, HasValue, HasVersion, ScriptPubkeyHash,
     loose::{TxId, TxOutId},
-    traits::HasNLockTime,
-    traits::abstract_types::{
-        AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
-        EnumerateSpentTxOuts, HasScriptPubkey, InputCount, OutputCount, TxConstituent,
+    traits::{
+        HasNLockTime,
+        abstract_types::{
+            AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
+            EnumerateSpentTxOuts, HasScriptPubkey, InputCount, OutputCount, TxConstituent,
+        },
     },
 };
 
@@ -60,8 +62,14 @@ impl DummyTxData {
 }
 
 impl HasNLockTime for DummyTxData {
-    fn n_locktime(&self) -> u32 {
+    fn locktime(&self) -> u32 {
         self.n_locktime
+    }
+}
+
+impl HasVersion for DummyTxData {
+    fn version(&self) -> i32 {
+        0
     }
 }
 
@@ -80,7 +88,9 @@ impl AbstractTxIn for DummyTxInWrapper {
     fn prev_vout(&self) -> Option<u32> {
         Some(self.prev_vout)
     }
+}
 
+impl HasSequence for DummyTxInWrapper {
     fn sequence(&self) -> u32 {
         self.sequence
     }
@@ -120,12 +130,14 @@ impl HasScriptPubkey for DummyTxOutData {
 }
 
 impl AbstractTxOut for DummyTxOutData {
-    fn value(&self) -> Amount {
-        Amount::from_sat(self.value)
-    }
-
     fn script_pubkey_hash(&self) -> ScriptPubkeyHash {
         Hash160::hash(&self.script_pubkey).to_byte_array()
+    }
+}
+
+impl HasValue for DummyTxOutData {
+    fn value(&self) -> Amount {
+        Amount::from_sat(self.value)
     }
 }
 
@@ -170,10 +182,6 @@ impl AbstractTransaction for DummyTxData {
             .map(|output| Box::new(output.clone()) as Box<dyn AbstractTxOut>)
     }
 
-    fn locktime(&self) -> u32 {
-        self.n_locktime
-    }
-
     fn is_coinbase(&self) -> bool {
         self.spent_coins.is_empty()
     }
@@ -193,7 +201,9 @@ impl InputCount for DummyTxData {
 
 impl EnumerateOutputValueInArbitraryOrder for DummyTxData {
     fn output_values(&self) -> impl Iterator<Item = Amount> {
-        self.outputs.iter().map(|output| output.value())
+        self.outputs
+            .iter()
+            .map(|output| Amount::from_sat(output.value))
     }
 }
 

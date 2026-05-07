@@ -5,8 +5,11 @@ use bitcoin_slices::{Visit, Visitor, bsl};
 use core::ops::ControlFlow;
 
 use crate::{
-    AnyTxId, ScriptPubkeyHash,
-    traits::abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut, HasScriptPubkey},
+    AnyTxId, HasSequence, HasValue, HasVersion, ScriptPubkeyHash,
+    traits::{
+        HasNLockTime,
+        abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut, HasScriptPubkey},
+    },
 };
 
 /// A confirmed transaction stored as raw serialized bytes.
@@ -87,13 +90,15 @@ impl HasScriptPubkey for ConfirmedTxOut {
 }
 
 impl AbstractTxOut for ConfirmedTxOut {
-    fn value(&self) -> Amount {
-        self.value
-    }
-
     fn script_pubkey_hash(&self) -> ScriptPubkeyHash {
         use bitcoin::hashes::{Hash, hash160};
         hash160::Hash::hash(&self.script_pubkey).to_byte_array()
+    }
+}
+
+impl HasValue for ConfirmedTxOut {
+    fn value(&self) -> Amount {
+        self.value
     }
 }
 
@@ -111,7 +116,9 @@ impl AbstractTxIn for ConfirmedTxIn {
             Some(self.prev_vout)
         }
     }
+}
 
+impl HasSequence for ConfirmedTxIn {
     fn sequence(&self) -> u32 {
         self.sequence
     }
@@ -154,15 +161,23 @@ impl AbstractTransaction for ConfirmedTx {
             .map(|o| Box::new(o) as Box<dyn AbstractTxOut + '_>)
     }
 
-    fn locktime(&self) -> u32 {
-        self.parse_all().locktime
-    }
-
     fn is_coinbase(&self) -> bool {
         self.parse_all()
             .inputs
             .first()
             .map(|i| i.prev_vout().is_none())
             .unwrap_or(false)
+    }
+}
+
+impl HasNLockTime for ConfirmedTx {
+    fn locktime(&self) -> u32 {
+        self.parse_all().locktime
+    }
+}
+
+impl HasVersion for ConfirmedTx {
+    fn version(&self) -> i32 {
+        self.parse_all().version
     }
 }

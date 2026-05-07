@@ -1,5 +1,5 @@
 use crate::{
-    AnyInId, AnyOutId, AnyTxId, HasPrevOutput, HasValue, HasWitnessData, OutputType,
+    AnyInId, AnyOutId, AnyTxId, HasPrevOutput, HasValue, HasVersion, HasWitnessData, OutputType,
     traits::{
         abstract_types::{
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateInputValueInArbitraryOrder,
@@ -250,10 +250,6 @@ impl<'a> AbstractTransaction for TxHandle<'a> {
         })
     }
 
-    fn locktime(&self) -> u32 {
-        self.index.locktime(&self.tx_id)
-    }
-
     fn is_coinbase(&self) -> bool {
         let mut inputs = self.inputs();
         if let Some(first_input) = inputs.next() {
@@ -261,6 +257,18 @@ impl<'a> AbstractTransaction for TxHandle<'a> {
         }
 
         false
+    }
+}
+
+impl<'a> HasNLockTime for TxHandle<'a> {
+    fn locktime(&self) -> u32 {
+        self.index.locktime(&self.tx_id)
+    }
+}
+
+impl<'a> HasVersion for TxHandle<'a> {
+    fn version(&self) -> i32 {
+        self.index.version(&self.tx_id)
     }
 }
 
@@ -276,17 +284,9 @@ impl<'a> AbstractTxIn for TxInHandle<'a> {
             .prev_txout(&self.in_id)
             .map(|out_id| self.index.outpoint_for_out(&out_id).1)
     }
-
-    fn sequence(&self) -> u32 {
-        self.index.input_sequence(&self.in_id)
-    }
 }
 
 impl<'a> AbstractTxOut for TxOutHandle<'a> {
-    fn value(&self) -> bitcoin::Amount {
-        TxOutHandle::value(self)
-    }
-
     fn script_pubkey_hash(&self) -> crate::ScriptPubkeyHash {
         TxOutHandle::script_pubkey_hash(self)
     }
@@ -311,12 +311,6 @@ impl<'a> OutputCount for TxHandle<'a> {
 impl<'a> InputCount for TxHandle<'a> {
     fn input_count(&self) -> usize {
         self.input_len()
-    }
-}
-
-impl<'a> HasNLockTime for TxHandle<'a> {
-    fn n_locktime(&self) -> u32 {
-        self.locktime()
     }
 }
 

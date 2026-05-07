@@ -467,11 +467,20 @@ impl TxIoIndex for UnifiedStorage {
         UnifiedStorage::tx_out_ids(self, *txid)
     }
 
+    /// TODO: this trait is specific for inputs and outputs, Maybe move to another trait. Or generalize this trait
     fn locktime(&self, txid: &AnyTxId) -> u32 {
         self.resolve_tx(
             *txid,
             |ls, lid| ls.txs[&lid].locktime(),
             |ds, did| ds.get_tx(did).lock_time.to_consensus_u32(),
+        )
+    }
+
+    fn version(&self, txid: &AnyTxId) -> i32 {
+        self.resolve_tx(
+            *txid,
+            |ls, lid| ls.txs[&lid].version(),
+            |ds, did| ds.get_tx(did).version.0,
         )
     }
 

@@ -232,7 +232,9 @@ where
 mod tests {
     use bitcoin::Amount;
     use serde::Deserialize;
+    use tx_indexer_primitives::HasVersion;
     use tx_indexer_primitives::test_utils::DummyTxData;
+    use tx_indexer_primitives::traits::HasNLockTime;
     use tx_indexer_primitives::traits::abstract_types::{
         AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateInputValueInArbitraryOrder,
         EnumerateOutputValueInArbitraryOrder,
@@ -244,6 +246,18 @@ mod tests {
     struct MockTx {
         inputs: Vec<u64>,
         tx: DummyTxData,
+    }
+
+    impl HasNLockTime for MockTx {
+        fn locktime(&self) -> u32 {
+            self.tx.locktime()
+        }
+    }
+
+    impl HasVersion for MockTx {
+        fn version(&self) -> i32 {
+            0
+        }
     }
 
     impl AbstractTransaction for MockTx {
@@ -261,9 +275,6 @@ mod tests {
         }
         fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut + '_>> {
             self.tx.output_at(index)
-        }
-        fn locktime(&self) -> u32 {
-            self.tx.locktime()
         }
         fn is_coinbase(&self) -> bool {
             self.tx.is_coinbase()

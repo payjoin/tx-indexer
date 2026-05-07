@@ -32,26 +32,23 @@ pub trait EnumerateInputValueInArbitraryOrder: AbstractTransaction {
 }
 
 /// Trait for transaction inputs
-pub trait AbstractTxIn {
+// TODO: add other input elements: witness, scriptsig
+pub trait AbstractTxIn: HasSequence {
     /// Returns the transaction ID of the previous output
     fn prev_txid(&self) -> Option<AnyTxId>;
     /// Returns the output index of the previous output
     fn prev_vout(&self) -> Option<u32>;
-    /// Returns the sequence number of the input
-    fn sequence(&self) -> u32;
 }
 
 /// Trait for transaction outputs
-pub trait AbstractTxOut: HasScriptPubkey {
-    /// Returns the value of the output
-    fn value(&self) -> Amount;
+pub trait AbstractTxOut: HasScriptPubkey + HasValue {
     /// Returns the script pubkey hash (20-byte hash) if available
     /// Returns None if the script doesn't contain a standard hash or is not supported
     fn script_pubkey_hash(&self) -> ScriptPubkeyHash;
 }
 
 /// Trait for transaction looking things. Generic over the ids as they can be either loose or dense.
-pub trait AbstractTransaction {
+pub trait AbstractTransaction: HasNLockTime + HasVersion {
     /// Returns an iterator over transaction inputs
     fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn + '_>> + '_>;
     /// Returns an iterator over transaction outputs
@@ -62,12 +59,17 @@ pub trait AbstractTransaction {
     fn output_len(&self) -> usize;
     /// Returns the output at the given index, if it exists
     fn output_at(&self, index: usize) -> Option<Box<dyn AbstractTxOut + '_>>;
-    fn locktime(&self) -> u32;
     fn is_coinbase(&self) -> bool;
 }
 
-pub trait HasNLockTime: AbstractTransaction {
-    fn n_locktime(&self) -> u32;
+/// Transaction nlocktime value
+pub trait HasNLockTime {
+    fn locktime(&self) -> u32;
+}
+
+/// Transaction version
+pub trait HasVersion {
+    fn version(&self) -> i32;
 }
 
 /// Sequence number of a transaction input
@@ -91,11 +93,6 @@ pub trait HasScriptPubkey {
     }
 }
 
-/// Transaction version
-pub trait HasVersion {
-    fn version(&self) -> i32;
-}
-
 /// Value (amount) of a transaction output
 pub trait HasValue {
     fn value(&self) -> Amount;
@@ -117,10 +114,6 @@ impl AbstractTxIn for bitcoin::TxIn {
 
     fn prev_vout(&self) -> Option<u32> {
         todo!()
-    }
-
-    fn sequence(&self) -> u32 {
-        self.sequence.0
     }
 }
 

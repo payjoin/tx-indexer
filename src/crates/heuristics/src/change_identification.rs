@@ -30,8 +30,8 @@ impl NLockTimeChangeIdentification {
         tx_out: impl TxConstituent<Handle: HasNLockTime>,
         spending_tx: impl HasNLockTime,
     ) -> TxOutChangeAnnotation {
-        let containing_tx_n_locktime = tx_out.containing_tx().n_locktime();
-        let child_tx_n_locktime = spending_tx.n_locktime();
+        let containing_tx_n_locktime = tx_out.containing_tx().locktime();
+        let child_tx_n_locktime = spending_tx.locktime();
         if containing_tx_n_locktime == 0 && child_tx_n_locktime == 0 {
             // Probably not change
             TxOutChangeAnnotation::NotChange
