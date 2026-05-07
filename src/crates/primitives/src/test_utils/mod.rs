@@ -81,10 +81,6 @@ impl AbstractTxIn for DummyTxInWrapper {
         Some(self.prev_vout)
     }
 
-    fn prev_txout_id(&self) -> Option<AnyOutId> {
-        Some(AnyOutId::from(TxOutId::new(self.prev_txid, self.prev_vout)))
-    }
-
     fn sequence(&self) -> u32 {
         self.sequence
     }

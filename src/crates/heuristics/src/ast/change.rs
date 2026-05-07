@@ -7,10 +7,7 @@ use tx_indexer_pipeline::{
     node::{Node, NodeId},
     value::{TxMask, TxOutClustering, TxOutMask, TxOutSet, TxSet},
 };
-use tx_indexer_primitives::{
-    AbstractTxIn,
-    unified::{AnyOutId, AnyTxId},
-};
+use tx_indexer_primitives::unified::{AnyOutId, AnyTxId};
 
 use crate::change_identification::{
     NLockTimeChangeIdentification, NaiveChangeIdentificationHueristic, TxOutChangeAnnotation,
@@ -166,7 +163,7 @@ impl Node for IsUnilateralNode {
             let tx = tx_id.with(ctx.unified_storage());
             let inputs: Vec<AnyOutId> = tx
                 .inputs()
-                .filter_map(|input| input.prev_txout_id())
+                .filter_map(|input| input.prev_txout().map(|prevout| prevout.id()))
                 .collect();
 
             let is_unilateral = if inputs.is_empty() {
@@ -237,8 +234,10 @@ impl Node for ChangeClusteringNode {
         for tx_id in &tx_ids {
             let tx = tx_id.with(ctx.unified_storage());
 
-            let first_input: Option<AnyOutId> =
-                tx.inputs().next().and_then(|input| input.prev_txout_id());
+            let first_input: Option<AnyOutId> = tx
+                .inputs()
+                .next()
+                .and_then(|input| input.prev_txout().map(|prevout| prevout.id()));
 
             if let Some(root_input) = first_input {
                 for output in tx.outputs() {

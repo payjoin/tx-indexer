@@ -13,9 +13,7 @@ use tx_indexer_pipeline::{
     node::{Node, NodeId},
     value::{NormalizedFingerprints, TxSet},
 };
-use tx_indexer_primitives::{
-    AbstractTransaction, AbstractTxIn, HasScriptPubkey, handle::TxOutHandle,
-};
+use tx_indexer_primitives::{AbstractTransaction, HasScriptPubkey, handle::TxOutHandle};
 
 fn sorted_deduped(vals: impl Iterator<Item = u32>) -> Vec<u32> {
     let mut v: Vec<u32> = vals.collect();
@@ -84,10 +82,9 @@ impl Node for CollectFingerprintsNode {
             let prevouts: Vec<TxOutHandle<'_>> = inputs
                 .iter()
                 .map(|input| {
-                    let prevout_id = input
-                        .prev_txout_id()
-                        .expect("Prevout should always be present for non pruned setup");
-                    prevout_id.with(storage)
+                    input
+                        .prev_txout()
+                        .expect("Prevout should always be present for non pruned setup")
                 })
                 .collect();
 

@@ -37,9 +37,6 @@ pub trait AbstractTxIn {
     fn prev_txid(&self) -> Option<AnyTxId>;
     /// Returns the output index of the previous output
     fn prev_vout(&self) -> Option<u32>;
-    /// Returns the previous output ID
-    // TODO: this should be on the handler
-    fn prev_txout_id(&self) -> Option<AnyOutId>;
     /// Returns the sequence number of the input
     fn sequence(&self) -> u32;
 }
@@ -119,10 +116,6 @@ impl AbstractTxIn for bitcoin::TxIn {
     }
 
     fn prev_vout(&self) -> Option<u32> {
-        todo!()
-    }
-
-    fn prev_txout_id(&self) -> Option<AnyOutId> {
         todo!()
     }
 

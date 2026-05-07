@@ -149,6 +149,10 @@ impl<'a> TxInHandle<'a> {
         }
     }
 
+    fn prev_txout_id(&self) -> Option<AnyOutId> {
+        self.index.prev_txout(&self.in_id)
+    }
+
     pub fn prev_txout(&self) -> Option<TxOutHandle<'a>> {
         self.prev_txout_id().map(|out_id| TxOutHandle {
             out_id,
@@ -271,10 +275,6 @@ impl<'a> AbstractTxIn for TxInHandle<'a> {
         self.index
             .prev_txout(&self.in_id)
             .map(|out_id| self.index.outpoint_for_out(&out_id).1)
-    }
-
-    fn prev_txout_id(&self) -> Option<AnyOutId> {
-        self.index.prev_txout(&self.in_id)
     }
 
     fn sequence(&self) -> u32 {

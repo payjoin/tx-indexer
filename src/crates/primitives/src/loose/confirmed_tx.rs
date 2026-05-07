@@ -5,7 +5,7 @@ use bitcoin_slices::{Visit, Visitor, bsl};
 use core::ops::ControlFlow;
 
 use crate::{
-    AnyOutId, AnyTxId, ScriptPubkeyHash,
+    AnyTxId, ScriptPubkeyHash,
     traits::abstract_types::{AbstractTransaction, AbstractTxIn, AbstractTxOut, HasScriptPubkey},
 };
 
@@ -110,10 +110,6 @@ impl AbstractTxIn for ConfirmedTxIn {
         } else {
             Some(self.prev_vout)
         }
-    }
-
-    fn prev_txout_id(&self) -> Option<AnyOutId> {
-        None
     }
 
     fn sequence(&self) -> u32 {
