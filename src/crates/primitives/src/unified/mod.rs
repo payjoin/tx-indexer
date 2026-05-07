@@ -476,16 +476,23 @@ impl TxIoIndex for UnifiedStorage {
     }
 
     fn input_sequence(&self, in_id: &AnyInId) -> u32 {
-        if in_id.is_loose() {
-            // TODO: loose transactions don't carry sequence data in the abstract model yet.
-            panic!("input_sequence not supported for loose transactions");
-        }
-        let did = in_id.confirmed_id().expect("must be dense");
-        let ds = self.dense();
-        let txid = ds.txid_for_in(did);
-        let (start, _) = ds.tx_in_range(txid);
-        let vin = (did.index() - start) as usize;
-        ds.get_tx(txid).input[vin].sequence.0
+        self.resolve_in(
+            *in_id,
+            |ls, lid| {
+                ls.txs[&lid.txid()]
+                    .inputs()
+                    .nth(lid.vin() as usize)
+                    .expect("sane vin")
+                    .sequence()
+            },
+            |ds, did| {
+                // TODO: util for getting input from dense storage
+                let txid = ds.txid_for_in(did);
+                let (start, _) = ds.tx_in_range(txid);
+                let vin = (did.index() - start) as usize;
+                ds.get_tx(txid).input[vin].sequence.0
+            },
+        )
     }
 
     fn witness_items(&self, in_id: &AnyInId) -> Vec<Vec<u8>> {

@@ -49,6 +49,7 @@ pub trait OutpointIndex {
 /// A missing value means index corruption or an internal bug, not legitimately absent data.
 pub trait TxOutDataIndex {
     fn value(&self, out_id: &AnyOutId) -> Amount;
+    // TODO: this is redundant with the script_pubkey_bytes method. Should always be able to get the hash from the spk
     fn script_pubkey_hash(&self, out_id: &AnyOutId) -> ScriptPubkeyHash;
     fn script_pubkey_bytes(&self, out_id: &AnyOutId) -> Vec<u8>;
 }

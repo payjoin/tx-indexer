@@ -276,6 +276,10 @@ impl<'a> AbstractTxIn for TxInHandle<'a> {
     fn prev_txout_id(&self) -> Option<AnyOutId> {
         self.index.prev_txout(&self.in_id)
     }
+
+    fn sequence(&self) -> u32 {
+        self.index.input_sequence(&self.in_id)
+    }
 }
 
 impl<'a> AbstractTxOut for TxOutHandle<'a> {

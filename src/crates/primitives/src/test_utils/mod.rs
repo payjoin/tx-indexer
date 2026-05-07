@@ -69,6 +69,7 @@ impl HasNLockTime for DummyTxData {
 struct DummyTxInWrapper {
     prev_txid: TxId,
     prev_vout: u32,
+    sequence: u32,
 }
 
 impl AbstractTxIn for DummyTxInWrapper {
@@ -82,6 +83,10 @@ impl AbstractTxIn for DummyTxInWrapper {
 
     fn prev_txout_id(&self) -> Option<AnyOutId> {
         Some(AnyOutId::from(TxOutId::new(self.prev_txid, self.prev_vout)))
+    }
+
+    fn sequence(&self) -> u32 {
+        self.sequence
     }
 }
 
@@ -138,6 +143,7 @@ impl AbstractTransaction for DummyTxData {
                 Box::new(DummyTxInWrapper {
                     prev_txid: spent.txid(),
                     prev_vout: spent.vout(),
+                    sequence: 0,
                 }) as Box<dyn AbstractTxIn>
             })
             .collect();

@@ -49,6 +49,7 @@ impl Visitor for ParsedTx {
         self.inputs.push(ConfirmedTxIn {
             prev_txid_bytes,
             prev_vout: prevout.vout(),
+            sequence: tx_in.sequence(),
         });
         ControlFlow::Continue(())
     }
@@ -71,6 +72,7 @@ impl Visitor for ParsedTx {
 struct ConfirmedTxIn {
     prev_txid_bytes: [u8; 32],
     prev_vout: u32,
+    sequence: u32,
 }
 
 struct ConfirmedTxOut {
@@ -112,6 +114,10 @@ impl AbstractTxIn for ConfirmedTxIn {
 
     fn prev_txout_id(&self) -> Option<AnyOutId> {
         None
+    }
+
+    fn sequence(&self) -> u32 {
+        self.sequence
     }
 }
 

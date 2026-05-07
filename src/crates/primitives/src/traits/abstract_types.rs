@@ -40,6 +40,8 @@ pub trait AbstractTxIn {
     /// Returns the previous output ID
     // TODO: this should be on the handler
     fn prev_txout_id(&self) -> Option<AnyOutId>;
+    /// Returns the sequence number of the input
+    fn sequence(&self) -> u32;
 }
 
 /// Trait for transaction outputs
@@ -71,7 +73,7 @@ pub trait HasNLockTime: AbstractTransaction {
     fn n_locktime(&self) -> u32;
 }
 
-/// Sequence number of a transaction input (needed for RBF detection)
+/// Sequence number of a transaction input
 pub trait HasSequence {
     fn sequence(&self) -> u32;
 }
@@ -110,6 +112,24 @@ pub trait HasPrevOutput {
 }
 
 // --- bitcoin type impls ---
+
+impl AbstractTxIn for bitcoin::TxIn {
+    fn prev_txid(&self) -> Option<AnyTxId> {
+        todo!()
+    }
+
+    fn prev_vout(&self) -> Option<u32> {
+        todo!()
+    }
+
+    fn prev_txout_id(&self) -> Option<AnyOutId> {
+        todo!()
+    }
+
+    fn sequence(&self) -> u32 {
+        self.sequence.0
+    }
+}
 
 impl HasSequence for bitcoin::TxIn {
     fn sequence(&self) -> u32 {
