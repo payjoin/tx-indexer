@@ -139,22 +139,20 @@ impl HasScriptSig for ConfirmedTxIn {
 impl AbstractTransaction for ConfirmedTx {
     fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn + '_>> + '_> {
         let parsed = self.parse_all();
-        let items: Vec<Box<dyn AbstractTxIn + 'static>> = parsed
+        let inputs = parsed
             .inputs
             .into_iter()
-            .map(|i| Box::new(i) as Box<dyn AbstractTxIn + 'static>)
-            .collect();
-        Box::new(items.into_iter())
+            .map(|i| Box::new(i) as Box<dyn AbstractTxIn + '_>);
+        Box::new(inputs)
     }
 
     fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut + '_>> + '_> {
         let parsed = self.parse_all();
-        let items: Vec<Box<dyn AbstractTxOut + 'static>> = parsed
+        let outputs = parsed
             .outputs
             .into_iter()
-            .map(|o| Box::new(o) as Box<dyn AbstractTxOut + 'static>)
-            .collect();
-        Box::new(items.into_iter())
+            .map(|o| Box::new(o) as Box<dyn AbstractTxOut + '_>);
+        Box::new(outputs)
     }
 
     fn input_len(&self) -> usize {

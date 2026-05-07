@@ -213,30 +213,24 @@ impl<'a> AbstractTransaction for TxHandle<'a> {
 
     fn inputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxIn + '_>> + '_> {
         let input_ids = self.index.tx_in_ids(&self.tx_id);
-        let inputs: Vec<_> = input_ids
-            .into_iter()
-            .map(|in_id| {
-                Box::new(TxInHandle {
-                    in_id,
-                    index: self.index,
-                }) as Box<dyn AbstractTxIn + '_>
-            })
-            .collect();
-        Box::new(inputs.into_iter())
+        let inputs = input_ids.into_iter().map(|in_id| {
+            Box::new(TxInHandle {
+                in_id,
+                index: self.index,
+            }) as Box<dyn AbstractTxIn + '_>
+        });
+        Box::new(inputs)
     }
 
     fn outputs(&self) -> Box<dyn Iterator<Item = Box<dyn AbstractTxOut + '_>> + '_> {
         let out_ids = self.index.tx_out_ids(&self.tx_id);
-        let outputs: Vec<_> = out_ids
-            .into_iter()
-            .map(|out_id| {
-                Box::new(TxOutHandle {
-                    out_id,
-                    index: self.index,
-                }) as Box<dyn AbstractTxOut + '_>
-            })
-            .collect();
-        Box::new(outputs.into_iter())
+        let outputs = out_ids.into_iter().map(|out_id| {
+            Box::new(TxOutHandle {
+                out_id,
+                index: self.index,
+            }) as Box<dyn AbstractTxOut + '_>
+        });
+        Box::new(outputs)
     }
 
     fn output_len(&self) -> usize {
