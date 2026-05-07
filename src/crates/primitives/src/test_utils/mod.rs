@@ -1,14 +1,14 @@
 use bitcoin::Amount;
 
 use crate::{
-    AnyOutId, AnyTxId, HasSequence, HasValue, HasVersion, HasWitness,
+    AnyOutId, HasSequence, HasValue, HasVersion, HasWitness,
     loose::{TxId, TxOutId},
     traits::{
         HasNLockTime,
         abstract_types::{
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateOutputValueInArbitraryOrder,
-            EnumerateSpentTxOuts, HasScriptPubkey, HasScriptSig, InputCount, OutputCount,
-            TxConstituent,
+            EnumerateSpentTxOuts, HasPrevOutpoint, HasScriptPubkey, HasScriptSig, InputCount,
+            OutputCount, TxConstituent,
         },
     },
 };
@@ -79,15 +79,20 @@ struct DummyTxInWrapper {
     sequence: u32,
 }
 
-impl AbstractTxIn for DummyTxInWrapper {
-    fn prev_txid(&self) -> Option<AnyTxId> {
-        Some(AnyTxId::from(self.prev_txid))
+impl HasPrevOutpoint for DummyTxInWrapper {
+    fn prev_outpoint_txid_bytes(&self) -> [u8; 32] {
+        // TxId surrogate encoded as LE u32 in bytes[0..4]; not a real wire txid.
+        let mut bytes = [0u8; 32];
+        bytes[..4].copy_from_slice(&self.prev_txid.0.to_le_bytes());
+        bytes
     }
 
-    fn prev_vout(&self) -> Option<u32> {
-        Some(self.prev_vout)
+    fn prev_outpoint_vout(&self) -> u32 {
+        self.prev_vout
     }
 }
+
+impl AbstractTxIn for DummyTxInWrapper {}
 
 impl HasSequence for DummyTxInWrapper {
     fn sequence(&self) -> u32 {

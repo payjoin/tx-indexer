@@ -1,10 +1,11 @@
 use crate::{
-    AnyInId, AnyOutId, AnyTxId, HasPrevOutput, HasValue, HasVersion, HasWitness, OutputType,
+    AnyInId, AnyOutId, AnyTxId, HasValue, HasVersion, HasWitness, OutputType,
     traits::{
         abstract_types::{
             AbstractTransaction, AbstractTxIn, AbstractTxOut, EnumerateInputValueInArbitraryOrder,
             EnumerateOutputValueInArbitraryOrder, EnumerateSpentTxOuts, HasNLockTime,
-            HasScriptPubkey, HasScriptSig, HasSequence, InputCount, OutputCount, TxConstituent,
+            HasPrevOutpoint, HasScriptPubkey, HasScriptSig, HasSequence, InputCount, OutputCount,
+            TxConstituent,
         },
         graph_index::IndexedGraph,
     },
@@ -165,7 +166,7 @@ impl<'a> TxInHandle<'a> {
     }
 }
 
-impl<'a> HasPrevOutput for TxInHandle<'a> {
+impl<'a> HasPrevOutpoint for TxInHandle<'a> {
     fn prev_outpoint_txid_bytes(&self) -> [u8; 32] {
         self.index.prev_outpoint_txid_bytes(&self.in_id)
     }
@@ -274,19 +275,7 @@ impl<'a> HasVersion for TxHandle<'a> {
     }
 }
 
-impl<'a> AbstractTxIn for TxInHandle<'a> {
-    fn prev_txid(&self) -> Option<AnyTxId> {
-        self.index
-            .prev_txout(&self.in_id)
-            .map(|out_id| self.index.outpoint_for_out(&out_id).0)
-    }
-
-    fn prev_vout(&self) -> Option<u32> {
-        self.index
-            .prev_txout(&self.in_id)
-            .map(|out_id| self.index.outpoint_for_out(&out_id).1)
-    }
-}
+impl<'a> AbstractTxIn for TxInHandle<'a> {}
 
 impl<'a> AbstractTxOut for TxOutHandle<'a> {}
 

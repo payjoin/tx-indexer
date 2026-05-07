@@ -19,8 +19,8 @@ mod tests;
 
 pub use output_type::{OutputType, classify_script_pubkey};
 pub use traits::abstract_types::{
-    AbstractTransaction, AbstractTxIn, AbstractTxOut, HasPrevOutput, HasScriptPubkey, HasScriptSig,
-    HasSequence, HasValue, HasVersion, HasWitness,
+    AbstractTransaction, AbstractTxIn, AbstractTxOut, HasPrevOutpoint, HasScriptPubkey,
+    HasScriptSig, HasSequence, HasValue, HasVersion, HasWitness,
 };
 pub use unified::{AnyInId, AnyOutId, AnyTxId, UnifiedStorage};
 

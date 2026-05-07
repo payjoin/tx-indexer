@@ -1,6 +1,6 @@
 use bitcoin::Amount;
 
-use crate::{AnyOutId, AnyTxId, OutputType, ScriptPubkeyHash, classify_script_pubkey};
+use crate::{AnyOutId, OutputType, ScriptPubkeyHash, classify_script_pubkey};
 
 // Should be implemented by any type that is contained within a transaction.
 pub trait TxConstituent {
@@ -32,13 +32,7 @@ pub trait EnumerateInputValueInArbitraryOrder: AbstractTransaction {
 }
 
 /// Trait for transaction inputs
-// TODO: add other input elements: witness, scriptsig
-pub trait AbstractTxIn: HasSequence + HasWitness + HasScriptSig {
-    /// Returns the transaction ID of the previous output
-    fn prev_txid(&self) -> Option<AnyTxId>;
-    /// Returns the output index of the previous output
-    fn prev_vout(&self) -> Option<u32>;
-}
+pub trait AbstractTxIn: HasSequence + HasWitness + HasScriptSig + HasPrevOutpoint {}
 
 /// Trait for transaction outputs
 pub trait AbstractTxOut: HasScriptPubkey + HasValue {}
@@ -101,8 +95,9 @@ pub trait HasValue {
     fn value(&self) -> Amount;
 }
 
-/// Previous outpoint of a transaction input (for BIP69 sorting)
-pub trait HasPrevOutput {
+/// Raw outpoint reference carried by every transaction input.
+/// Coinbase inputs carry the null outpoint (all-zero txid, vout = u32::MAX).
+pub trait HasPrevOutpoint {
     /// Txid bytes in internal (wire) order
     fn prev_outpoint_txid_bytes(&self) -> [u8; 32];
     fn prev_outpoint_vout(&self) -> u32;
@@ -110,15 +105,7 @@ pub trait HasPrevOutput {
 
 // --- bitcoin type impls ---
 
-impl AbstractTxIn for bitcoin::TxIn {
-    fn prev_txid(&self) -> Option<AnyTxId> {
-        todo!()
-    }
-
-    fn prev_vout(&self) -> Option<u32> {
-        todo!()
-    }
-}
+impl AbstractTxIn for bitcoin::TxIn {}
 
 impl HasSequence for bitcoin::TxIn {
     fn sequence(&self) -> u32 {
@@ -156,7 +143,7 @@ impl HasValue for bitcoin::TxOut {
     }
 }
 
-impl HasPrevOutput for bitcoin::TxIn {
+impl HasPrevOutpoint for bitcoin::TxIn {
     fn prev_outpoint_txid_bytes(&self) -> [u8; 32] {
         let txid_ref: &[u8] = self.previous_output.txid.as_ref();
         let mut bytes = [0u8; 32];

@@ -3,7 +3,7 @@ pub mod graph_index;
 pub mod index_sink;
 
 pub use abstract_types::{
-    HasNLockTime, HasPrevOutput, HasScriptPubkey, HasSequence, HasValue, HasVersion, HasWitness,
+    HasNLockTime, HasPrevOutpoint, HasScriptPubkey, HasSequence, HasValue, HasVersion, HasWitness,
     InputCount,
 };
 

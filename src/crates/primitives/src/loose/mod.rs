@@ -198,20 +198,21 @@ impl InMemoryIndex {
         let loose_txid = TxId::new(self.txs.len() as u32 + 1);
         let tx_id = AnyTxId::from(loose_txid);
 
-        // Process inputs to build the index before storing
-        // Collect inputs into a vector to avoid lifetime issues
+        // Process inputs to build the index before storing.
+        // DummyTxInWrapper encodes its TxId surrogate as LE u32 in bytes[0..4];
+        // surrogate 0 means unset (no prevout / coinbase).
         for (vin, txin) in tx.inputs().enumerate() {
             let vin_id = loose_txid.txin_id(vin as u32);
-            let prev_vout = txin.prev_vout();
-            let prev_txid = txin.prev_txid();
-            if let (Some(prev_vout), Some(prev_txid)) = (prev_vout, prev_txid) {
-                let Some(prev_loose_txid) = prev_txid.loose_txid() else {
-                    todo!("link loose tx input to confirmed (dense) prevout");
-                };
-                let prev_outid = TxOutId::new(prev_loose_txid, prev_vout);
-                self.spending_txins.insert(prev_outid, vin_id);
-                self.prev_txouts.insert(vin_id, prev_outid);
+            let prev_txid_bytes = txin.prev_outpoint_txid_bytes();
+            let prev_vout = txin.prev_outpoint_vout();
+            let surrogate = u32::from_le_bytes(prev_txid_bytes[..4].try_into().unwrap());
+            if surrogate == 0 || prev_vout == u32::MAX {
+                continue;
             }
+            let prev_loose_txid = TxId::new(surrogate);
+            let prev_outid = TxOutId::new(prev_loose_txid, prev_vout);
+            self.spending_txins.insert(prev_outid, vin_id);
+            self.prev_txouts.insert(vin_id, prev_outid);
         }
 
         // Process outputs to build SPK index

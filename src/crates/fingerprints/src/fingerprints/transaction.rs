@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use bitcoin::Amount;
-use tx_indexer_primitives::{HasPrevOutput, HasScriptPubkey, HasSequence, HasValue, OutputType};
+use tx_indexer_primitives::{HasPrevOutpoint, HasScriptPubkey, HasSequence, HasValue, OutputType};
 
 use crate::types::{InputSortingType, OutputStructureType};
 
@@ -39,7 +39,7 @@ pub fn mixed_input_types(prevouts: &[impl HasScriptPubkey]) -> bool {
 // TODO: should only have one argument. A rich input type that has prevout values and outpoint.
 pub fn input_order<I, P>(inputs: &[I], prevout_values: &[P]) -> Vec<InputSortingType>
 where
-    I: HasPrevOutput,
+    I: HasPrevOutpoint,
     P: HasValue,
 {
     if inputs.len() == 1 {

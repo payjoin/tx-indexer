@@ -5,11 +5,12 @@ use bitcoin_slices::{Visit, Visitor, bsl};
 use core::ops::ControlFlow;
 
 use crate::{
-    AnyTxId, HasSequence, HasValue, HasVersion, HasWitness,
+    HasSequence, HasValue, HasVersion, HasWitness,
     traits::{
         HasNLockTime,
         abstract_types::{
-            AbstractTransaction, AbstractTxIn, AbstractTxOut, HasScriptPubkey, HasScriptSig,
+            AbstractTransaction, AbstractTxIn, AbstractTxOut, HasPrevOutpoint, HasScriptPubkey,
+            HasScriptSig,
         },
     },
 };
@@ -104,21 +105,17 @@ impl HasValue for ConfirmedTxOut {
     }
 }
 
-impl AbstractTxIn for ConfirmedTxIn {
-    fn prev_txid(&self) -> Option<AnyTxId> {
-        // Raw txid bytes cannot be resolved to AnyTxId without storage context.
-        None
+impl HasPrevOutpoint for ConfirmedTxIn {
+    fn prev_outpoint_txid_bytes(&self) -> [u8; 32] {
+        self.prev_txid_bytes
     }
 
-    fn prev_vout(&self) -> Option<u32> {
-        // Coinbase inputs have a null prevout (all-zero txid, vout = u32::MAX).
-        if self.prev_vout == u32::MAX && self.prev_txid_bytes.iter().all(|b| *b == 0) {
-            None
-        } else {
-            Some(self.prev_vout)
-        }
+    fn prev_outpoint_vout(&self) -> u32 {
+        self.prev_vout
     }
 }
+
+impl AbstractTxIn for ConfirmedTxIn {}
 
 impl HasSequence for ConfirmedTxIn {
     fn sequence(&self) -> u32 {
@@ -180,7 +177,7 @@ impl AbstractTransaction for ConfirmedTx {
         self.parse_all()
             .inputs
             .first()
-            .map(|i| i.prev_vout().is_none())
+            .map(|i| i.prev_vout == u32::MAX && i.prev_txid_bytes.iter().all(|b| *b == 0))
             .unwrap_or(false)
     }
 }
