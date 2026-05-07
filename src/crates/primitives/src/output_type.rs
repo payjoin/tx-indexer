@@ -17,8 +17,7 @@ impl OutputType {
     }
 
     pub fn is_spendable(self) -> bool {
-        self != OutputType::OpReturn
-        && self != OutputType::NonStandard
+        self != OutputType::OpReturn && self != OutputType::NonStandard
     }
 }
 
