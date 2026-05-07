@@ -23,16 +23,15 @@ impl<'a> TxHandle<'a> {
         self.tx_id
     }
 
-    pub fn output_at(&self, index: usize) -> TxOutHandle<'a> {
-        TxOutHandle {
-            out_id: self
-                .index
-                .tx_out_ids(&self.tx_id)
-                .get(index)
-                .copied()
-                .unwrap(),
-            index: self.index,
-        }
+    pub fn output_at(&self, index: usize) -> Option<TxOutHandle<'a>> {
+        self.index
+            .tx_out_ids(&self.tx_id)
+            .get(index)
+            .copied()
+            .map(|out_id| TxOutHandle {
+                out_id,
+                index: self.index,
+            })
     }
 
     pub fn inputs(&self) -> impl Iterator<Item = TxInHandle<'a>> {

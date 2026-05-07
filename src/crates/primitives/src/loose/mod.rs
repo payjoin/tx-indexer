@@ -344,24 +344,52 @@ impl TxIoIndex for InMemoryIndex {
             .sequence()
     }
 
-    fn witness_items(&self, _in_id: &AnyInId) -> Vec<Vec<u8>> {
-        todo!()
+    fn witness_items(&self, in_id: &AnyInId) -> Vec<Vec<u8>> {
+        let loose_in = in_id
+            .loose_id()
+            .expect("loose storage only supports loose txin ids");
+        self.txs[&loose_in.txid()]
+            .inputs()
+            .nth(loose_in.vin() as usize)
+            .expect("sane vin")
+            .witness_items()
     }
 
-    fn script_sig_bytes(&self, _in_id: &AnyInId) -> Vec<u8> {
-        todo!()
+    fn script_sig_bytes(&self, in_id: &AnyInId) -> Vec<u8> {
+        let loose_in = in_id
+            .loose_id()
+            .expect("loose storage only supports loose txin ids");
+        self.txs[&loose_in.txid()]
+            .inputs()
+            .nth(loose_in.vin() as usize)
+            .expect("sane vin")
+            .script_sig_bytes()
     }
 
     fn block_height(&self, _txid: &AnyTxId) -> Option<u64> {
         None
     }
 
-    fn prev_outpoint_vout(&self, _in_id: &AnyInId) -> u32 {
-        todo!()
+    fn prev_outpoint_vout(&self, in_id: &AnyInId) -> u32 {
+        let loose_in = in_id
+            .loose_id()
+            .expect("loose storage only supports loose txin ids");
+        self.txs[&loose_in.txid()]
+            .inputs()
+            .nth(loose_in.vin() as usize)
+            .expect("sane vin")
+            .prev_outpoint_vout()
     }
 
-    fn prev_outpoint_txid_bytes(&self, _in_id: &AnyInId) -> [u8; 32] {
-        todo!()
+    fn prev_outpoint_txid_bytes(&self, in_id: &AnyInId) -> [u8; 32] {
+        let loose_in = in_id
+            .loose_id()
+            .expect("loose storage only supports loose txin ids");
+        self.txs[&loose_in.txid()]
+            .inputs()
+            .nth(loose_in.vin() as usize)
+            .expect("sane vin")
+            .prev_outpoint_txid_bytes()
     }
 }
 

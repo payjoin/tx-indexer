@@ -3,8 +3,8 @@ pub mod graph_index;
 pub mod index_sink;
 
 pub use abstract_types::{
-    HasNLockTime, HasPrevOutpoint, HasScriptPubkey, HasSequence, HasValue, HasVersion, HasWitness,
-    InputCount,
+    AbstractTransaction, AbstractTxIn, AbstractTxOut, HasNLockTime, HasPrevOutpoint,
+    HasScriptPubkey, HasScriptSig, HasSequence, HasValue, HasVersion, HasWitness, InputCount,
 };
 
 pub use index_sink::IndexSink;
