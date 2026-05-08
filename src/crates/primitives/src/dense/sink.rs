@@ -6,7 +6,7 @@ use bitcoin_slices::bitcoin_hashes::Hash;
 use crate::{
     ScriptPubkeyHash,
     dense::{TxId, TxOutId},
-    indecies::{ConfirmedTxPtrIndex, DenseIndexSet, INID_NONE, OUTID_NONE, TxPtr},
+    indices::{ConfirmedTxPtrIndex, DenseIndexSet, INID_NONE, OUTID_NONE, TxPtr},
     parser::BlockFileError,
     sled::spk_db::SledScriptPubkeyDb,
     traits::{IndexSink, ScriptPubkeyDb},

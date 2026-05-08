@@ -115,7 +115,7 @@ impl LooseIndexBuilder {
     /// `index_dir` is the output directory where all dense index files and the sled database
     /// will be written. The caller is responsible for creating this directory before calling.
     pub fn sync_from_tip(data_dir: PathBuf, depth: u32) -> Result<InMemoryIndex, BlockFileError> {
-        // TODO: check if the indecies were built already past or before the depth
+        // TODO: check if the indices were built already past or before the depth
         use bitcoin_block_index::BlockIndex;
         let block_index_path = data_dir.join("blocks/index");
 

@@ -40,7 +40,7 @@ define_entity_info!(Wallet, {
         pub(crate) unconfirmed_txos: OrdSet<Outpoint>,  // compute CPFP cost
         pub(crate) unconfirmed_spends: OrdSet<Outpoint>, // RBFable
         /// Map of txids to the payment obligations that they are associated with
-        /// Sim state should refrence this when updating wallet states after confirmation
+        /// Sim state should reference this when updating wallet states after confirmation
         pub(crate) txid_to_payment_obligation_ids: HashMap<TxId, Vec<PaymentObligationId>>,
 
         /// Set of payment obligations that have been handled
@@ -62,7 +62,7 @@ impl<'a> WalletHandle<'a> {
     }
 
     // TODO: this should take into account liabilties spending unconfirmed UTXOs. For which a CPFP cost model is needed
-    // In the future in needs to take as arg the current mempool and somethign to predict the state of the mempool overtime
+    // In the future in needs to take as arg the current mempool and something to predict the state of the mempool overtime
     #[allow(dead_code)]
     pub(crate) fn effective_balance(&self) -> Amount {
         let utxos: Vec<OutputHandle<'a>> = self.unspent_coins().collect();

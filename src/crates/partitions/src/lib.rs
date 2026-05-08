@@ -242,7 +242,7 @@ mod tests {
 
     use super::*;
 
-    // HACK: DummyTxData doesnt impl `EnumerateInputValueInArbitraryOrder` so we use this wrapper.
+    // HACK: DummyTxData does not impl `EnumerateInputValueInArbitraryOrder` so we use this wrapper.
     struct MockTx {
         inputs: Vec<u64>,
         tx: DummyTxData,
