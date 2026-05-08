@@ -4,7 +4,7 @@ use std::fs;
 
 use tx_indexer_primitives::{
     dense::DenseIndexSink,
-    indecies::DenseIndexSet,
+    indices::DenseIndexSet,
     parser::Parser,
     sled::db::SledDBFactory,
     test_utils::{temp_dir, write_single_block_file},

@@ -99,7 +99,7 @@ impl PrngFactory {
 
 // Decomposition
 // - given predefined outputs (payment targets)
-//   - later, account for address reuse likelyhood in failed txn context?
+//   - later, account for address reuse likelihood in failed txn context?
 //   - what about breakdown to unilateral spend on timeout?
 // - take power set of candidate output set
 // - sum density over a window, until some saturation limit
@@ -135,13 +135,13 @@ impl PrngFactory {
 // OrdMap, OrdSet -> HashMap HashSet - where?
 // just accept randomization and test that simulation is replicable even with
 
-// TODO data() and info() fetchers from handle, deref into touple?
+// TODO data() and info() fetchers from handle, deref into tuple?
 // TODO break down into define_id, define_handle, define_handle_mut, define_data, define_info, define_info_id
 // TODO define_sequenced_entity (broadcast set, monad-ish) vs. define_mut_entity (wallet, append only updates)
 // TODO handle enum for broadcastset data?
 //
 
-// TODO: unsued do we need this?
+// TODO: unused do we need this?
 // #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 // struct TxByFeerate(FeeRate, TxId);
 
@@ -431,7 +431,7 @@ impl<'a> Simulation {
                 debug_assert!(from != to, "circular payment obligation");
                 // TODO: should be a configurable or dependent on the balance of each wallet?
                 let reveal_time =
-                    prng.random_range(current_timestep + 1..self.config.max_timestep.0 / 2); // Payments shouldnt be revealed too late. Aim to have them revealed within the first half of the simulation.
+                    prng.random_range(current_timestep + 1..self.config.max_timestep.0 / 2); // Payments shouldn't be revealed too late. Aim to have them revealed within the first half of the simulation.
                 let deadline = reveal_time
                     + std::cmp::min(
                         self.config.max_timestep.0,

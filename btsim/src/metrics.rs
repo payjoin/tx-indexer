@@ -313,9 +313,9 @@ mod tests {
     #[test]
     fn unilateral_bracket_collapses_with_bundle() {
         // With SubsetSumMetric, a unilateral plan should have the same cost in both modes
-        // because BestCase returns usize::MAX (≈0 cost) and WorstCase also computes the same
+        // because BestCase returns usize::MAX (≈0 cost) and worst-case also computes the same
         // mapping count from the fixed amounts. Wait: they differ if the metric is external-only.
-        // BestCase → usize::MAX → near-zero. WorstCase → actual count.
+        // BestCase → usize::MAX → near-zero. worst-case → actual count.
         // So they're only equal if the actual count happens to be usize::MAX too.
         // The spec says "bracket collapses" for unilateral — meaning both modes give ~same answer
         // because there's no external counterparty. Let's verify best_case ≤ worst_case.
@@ -328,7 +328,7 @@ mod tests {
         let worst = metric
             .evaluate(&plan, CostMode::EXTERNAL_PENALTIES_ON)
             .into_cost(budget);
-        // BestCase gives near-zero (usize::MAX mappings), WorstCase gives full penalty (0 mappings).
+        // BestCase gives near-zero (usize::MAX mappings), worst-case gives full penalty (0 mappings).
         // For a unilateral plan with no amount match, best < worst.
         assert!(best <= worst, "best case should be ≤ worst case");
     }

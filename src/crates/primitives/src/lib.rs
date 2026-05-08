@@ -2,7 +2,7 @@ pub(crate) mod blk_file;
 pub mod dense;
 pub mod hamming_weight;
 pub mod handle;
-pub mod indecies;
+pub mod indices;
 pub mod loose;
 pub mod output_type;
 pub mod parser;

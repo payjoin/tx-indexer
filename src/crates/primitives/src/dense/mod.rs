@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::{
     ScriptPubkeyHash,
     blk_file::BlkFileStore,
-    indecies::{DenseIndexSet, INID_NONE, OUTID_NONE, TxPtr},
+    indices::{DenseIndexSet, INID_NONE, OUTID_NONE, TxPtr},
     parser::{BlkFileHint, BlockFileError, Parser, collect_file_hints},
     sled::{db::SledDBFactory, spk_db::SledScriptPubkeyDb},
     traits::ScriptPubkeyDb,
@@ -129,7 +129,7 @@ impl DenseStorageBuilder {
         index_dir: PathBuf,
         depth: u32,
     ) -> Result<Self, BlockFileError> {
-        // TODO: check if the indecies were built already past or before the depth
+        // TODO: check if the indices were built already past or before the depth
         use bitcoin_block_index::BlockIndex;
         let block_index_path = data_dir.join("blocks/index");
 

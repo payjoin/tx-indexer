@@ -59,7 +59,7 @@ pub(crate) enum Action {
     CreateAggregateProposal(Vec<CospendInterest>),
     /// Register a single UTXO in the order book (maker action)
     RegisterInput(Vec<Outpoint>),
-    /// Do nothing. There may be better oppurtunities to spend a payment obligation or participate in a payjoin.
+    /// Do nothing. There may be better opportunities to spend a payment obligation or participate in a payjoin.
     Wait,
 }
 
@@ -120,7 +120,7 @@ impl CostMode {
     };
 }
 
-/// Cost interval for a plan. Best and worse case senarios are based on the cost mode.
+/// Cost interval for a plan. Best and worse case scenarios are based on the cost mode.
 #[derive(Debug, Clone)]
 pub(crate) struct CostBracket {
     pub(crate) worst: ActionCost,
