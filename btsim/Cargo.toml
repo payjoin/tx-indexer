@@ -1,0 +1,37 @@
+[package]
+name = "btsim"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "btsim"
+path = "src/lib.rs"
+
+[[bin]]
+name = "btsim"
+path = "src/main.rs"
+
+[dependencies]
+bdk_coin_select = "0.3.0"
+bitcoin = "0.32.1"
+bitcoin-units = "0.1.1"
+im = "15.1.0"
+knaptime = "0.0.4"
+paste = "1.0.15"
+petgraph = "0.8.3"
+rand = "^0.9.0"
+rustworkx-core = "0.17.1"
+colorous = "1.0.16"
+graphalgs = "0.2.0"
+graphviz-rust = "0.9.6"
+clap = { version = "4.5.51", features = ["derive"] }
+log = "0.4.28"
+env_logger = "0.11.8"
+rand_distr = "0.5.1"
+rand_pcg = "0.9.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+tx-indexer-primitives = { path = "../src/crates/primitives" }

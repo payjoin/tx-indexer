@@ -1,0 +1,13 @@
+[simulation]
+seed = 42
+max_timestep = 10
+num_payment_obligations = 15
+
+[[wallet_types]]
+name = "default"
+count = 3
+script_type = "p2tr"
+strategies = ["UnilateralSpender", "BatchSpender"]
+[wallet_types.scorer]
+privacy_weight = 2.0
+payment_obligation_weight = 1.0
