@@ -14,6 +14,7 @@ members = [
     "src/crates/block-index",
     "src/crates/partitions",
 ]
+exclude = ["btsim"]
 
 [workspace.dependencies]
 bitcoin = { version = "0.32.0", features = ["rand"] }
