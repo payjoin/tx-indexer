@@ -1,12 +1,22 @@
+use tx_indexer_primitives::hamming_weight::decimal_hamming_weight;
 use tx_indexer_primitives::{
     handle::TxHandle,
-    traits::abstract_types::{HasNLockTime, HasScriptPubkey, OutputCount, TxConstituent},
+    traits::abstract_types::{
+        AbstractTransaction, HasNLockTime, HasScriptPubkey, OutputCount, TxConstituent,
+    },
 };
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum TxOutChangeAnnotation {
     Change,
     NotChange,
+    Inconclusive,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum RoundNumberAnnotation {
+    Round,
+    NotRound,
 }
 
 pub struct NaiveChangeIdentificationHueristic;
@@ -41,6 +51,67 @@ impl NLockTimeChangeIdentification {
         } else {
             // Unknown
             TxOutChangeAnnotation::NotChange
+        }
+    }
+}
+
+pub struct RoundNumberAnnotator;
+
+impl RoundNumberAnnotator {
+    /// Maximum decimal Hamming weight for an amount to be considered round.
+    pub const ROUNDNESS_THRESHOLD: u32 = 2;
+
+    /// Judge how round a satoshi amount is via its decimal Hamming weight.
+    pub fn annotate(satoshis: u64) -> RoundNumberAnnotation {
+        if decimal_hamming_weight(satoshis) <= Self::ROUNDNESS_THRESHOLD {
+            RoundNumberAnnotation::Round
+        } else {
+            RoundNumberAnnotation::NotRound
+        }
+    }
+}
+
+pub struct RoundNumberChangeHeuristic;
+
+impl RoundNumberChangeHeuristic {
+    /// Classify a txout as change by labeling every output via
+    /// `RoundNumberAnnotator` and reasoning over the label distribution.
+    ///
+    /// - `Change`: target is the sole `NotRound` output (others are all `Round`).
+    /// - `NotChange`: target is `Round`, or the tx has a single output.
+    /// - `Inconclusive`: target is `NotRound` but other outputs are too — can't tell.
+    pub fn is_change(
+        txout: impl TxConstituent<Handle: AbstractTransaction>,
+    ) -> TxOutChangeAnnotation {
+        let tx = txout.containing_tx();
+        let vout = txout.vout();
+        let labels: Vec<RoundNumberAnnotation> = tx
+            .outputs()
+            .map(|out| RoundNumberAnnotator::annotate(out.value().to_sat()))
+            .collect();
+
+        if labels.len() <= 1 {
+            return TxOutChangeAnnotation::NotChange;
+        }
+
+        let Some(target_label) = labels.get(vout) else {
+            return TxOutChangeAnnotation::Inconclusive;
+        };
+
+        if *target_label == RoundNumberAnnotation::Round {
+            return TxOutChangeAnnotation::NotChange;
+        }
+
+        let other_non_round = labels
+            .iter()
+            .enumerate()
+            .filter(|&(i, label)| i != vout && *label == RoundNumberAnnotation::NotRound)
+            .count();
+
+        if other_non_round == 0 {
+            TxOutChangeAnnotation::Change
+        } else {
+            TxOutChangeAnnotation::Inconclusive
         }
     }
 }
@@ -297,5 +368,80 @@ mod tests {
             ScriptTypesMatchingChangeIdentification::is_change(output1),
             TxOutChangeAnnotation::NotChange
         );
+    }
+
+    #[test]
+    fn test_round_number_annotator() {
+        assert_eq!(
+            RoundNumberAnnotator::annotate(100_000_000),
+            RoundNumberAnnotation::Round
+        );
+        assert_eq!(
+            RoundNumberAnnotator::annotate(1_600),
+            RoundNumberAnnotation::Round
+        );
+        assert_eq!(
+            RoundNumberAnnotator::annotate(143_000),
+            RoundNumberAnnotation::NotRound
+        );
+        assert_eq!(
+            RoundNumberAnnotator::annotate(34_567_891),
+            RoundNumberAnnotation::NotRound
+        );
+    }
+
+    #[test]
+    fn test_round_number_change_picks_sole_non_round() {
+        // 1 BTC payment + high-precision change.
+        let tx = DummyTxData::new_with_amounts(vec![100_000_000, 34_567_891]);
+
+        let payment = DummyTxOut {
+            vout: 0,
+            containing_tx: tx.clone(),
+        };
+        assert_eq!(
+            RoundNumberChangeHeuristic::is_change(payment),
+            TxOutChangeAnnotation::NotChange
+        );
+
+        let change = DummyTxOut {
+            vout: 1,
+            containing_tx: tx,
+        };
+        assert_eq!(
+            RoundNumberChangeHeuristic::is_change(change),
+            TxOutChangeAnnotation::Change
+        );
+    }
+
+    #[test]
+    fn test_round_number_change_multiple_non_round_is_inconclusive() {
+        // Two non-round outputs → can't tell which is change.
+        let tx = DummyTxData::new_with_amounts(vec![12_345_678, 87_654_321]);
+        for vout in 0..2 {
+            let txout = DummyTxOut {
+                vout,
+                containing_tx: tx.clone(),
+            };
+            assert_eq!(
+                RoundNumberChangeHeuristic::is_change(txout),
+                TxOutChangeAnnotation::Inconclusive
+            );
+        }
+    }
+
+    #[test]
+    fn test_round_number_change_all_round_is_not_change() {
+        let tx = DummyTxData::new_with_amounts(vec![100_000_000, 50_000_000, 10_000_000]);
+        for vout in 0..3 {
+            let txout = DummyTxOut {
+                vout,
+                containing_tx: tx.clone(),
+            };
+            assert_eq!(
+                RoundNumberChangeHeuristic::is_change(txout),
+                TxOutChangeAnnotation::NotChange
+            );
+        }
     }
 }
