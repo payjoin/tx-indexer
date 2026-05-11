@@ -187,10 +187,6 @@ pub(crate) fn build_indices(builder: DenseStorageBuilder) -> Result<DenseStorage
         .parse_blocks(builder.range, &mut sink)
         .map_err(SyncError::Parse)?;
 
-    indices
-        .remap()
-        .map_err(|e| SyncError::Parse(BlockFileError::Io(e)))?;
-
     Ok(DenseStorage {
         store: parser.into_blk_store(),
         block_height_offset,

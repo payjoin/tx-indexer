@@ -3,8 +3,6 @@ use std::io::{self, Seek, SeekFrom, Write};
 use std::os::unix::fs::FileExt;
 use std::path::Path;
 
-use memmap2::Mmap;
-
 use crate::dense::TxId;
 
 const TXPTR_LEN_BYTES: usize = 28;
@@ -92,7 +90,6 @@ impl TxPtr {
 struct FixedWidthIndex<const N: usize> {
     file: File,
     len: u64,
-    mmap: Option<Mmap>,
 }
 
 impl<const N: usize> FixedWidthIndex<N> {
@@ -103,11 +100,7 @@ impl<const N: usize> FixedWidthIndex<N> {
             .create(true)
             .truncate(true)
             .open(path)?;
-        Ok(Self {
-            file,
-            len: 0,
-            mmap: None,
-        })
+        Ok(Self { file, len: 0 })
     }
 
     fn open(path: impl AsRef<Path>, len_error: &'static str) -> io::Result<Self> {
@@ -117,13 +110,7 @@ impl<const N: usize> FixedWidthIndex<N> {
             return Err(io::Error::new(io::ErrorKind::InvalidData, len_error));
         }
         let len = len_bytes / (N as u64);
-        let mmap = if len_bytes > 0 {
-            // Safety: the file is complete and will not be written to via this handle.
-            Some(unsafe { Mmap::map(&file)? })
-        } else {
-            None
-        };
-        Ok(Self { file, len, mmap })
+        Ok(Self { file, len })
     }
 
     /// Open an existing file or create a new one without truncating existing content.
@@ -141,21 +128,7 @@ impl<const N: usize> FixedWidthIndex<N> {
         Ok(Self {
             file,
             len: len_bytes / (N as u64),
-            mmap: None,
         })
-    }
-
-    /// Remap the file for read access after all writes are complete.
-    ///
-    /// Must not be called while any concurrent writes to this file are in flight.
-    fn remap(&mut self) -> io::Result<()> {
-        self.mmap = if self.len > 0 {
-            // Safety: no more writes will occur on this handle after remap.
-            Some(unsafe { Mmap::map(&self.file)? })
-        } else {
-            None
-        };
-        Ok(())
     }
 
     fn len(&self) -> u64 {
@@ -183,14 +156,9 @@ impl<const N: usize> FixedWidthIndex<N> {
         if index >= self.len {
             return Ok(None);
         }
-        let offset = (index * N as u64) as usize;
-        if let Some(mmap) = &self.mmap {
-            let mut buf = [0u8; N];
-            buf.copy_from_slice(&mmap[offset..offset + N]);
-            return Ok(Some(buf));
-        }
+        let offset = index * N as u64;
         let mut buf = [0u8; N];
-        self.file.read_exact_at(&mut buf, offset as u64)?;
+        self.file.read_exact_at(&mut buf, offset)?;
         Ok(Some(buf))
     }
 }
@@ -264,10 +232,6 @@ impl ConfirmedTxPtrIndex {
         let index = txid.index() as u64;
         Ok(self.inner.get_bytes(index)?.map(TxPtr::from_le_bytes))
     }
-
-    pub fn remap(&mut self) -> io::Result<()> {
-        self.inner.remap()
-    }
 }
 
 impl BlockTxIndex {
@@ -318,10 +282,6 @@ impl BlockTxIndex {
     pub fn get(&self, height: u64) -> io::Result<Option<u32>> {
         Ok(self.inner.get_bytes(height)?.map(u32::from_le_bytes))
     }
-
-    pub fn remap(&mut self) -> io::Result<()> {
-        self.inner.remap()
-    }
 }
 
 impl InPrevoutIndex {
@@ -363,10 +323,6 @@ impl InPrevoutIndex {
 
     pub fn get(&self, in_id: u64) -> io::Result<Option<u64>> {
         Ok(self.inner.get_bytes(in_id)?.map(u64::from_le_bytes))
-    }
-
-    pub fn remap(&mut self) -> io::Result<()> {
-        self.inner.remap()
     }
 }
 
@@ -414,10 +370,6 @@ impl OutSpentByIndex {
     pub fn get(&self, out_id: u64) -> io::Result<Option<u64>> {
         Ok(self.inner.get_bytes(out_id)?.map(u64::from_le_bytes))
     }
-
-    pub fn remap(&mut self) -> io::Result<()> {
-        self.inner.remap()
-    }
 }
 
 /// All four dense index files grouped under a single directory.
@@ -439,16 +391,6 @@ impl DenseIndexSet {
             in_prevout: InPrevoutIndex::open_or_create(dir.join("in_prevout.bin"))?,
             out_spent: OutSpentByIndex::open_or_create(dir.join("out_spent.bin"))?,
         })
-    }
-
-    /// Map all four index files into memory for zero-syscall reads.
-    ///
-    /// Call once after all writes are complete.
-    pub fn remap(&mut self) -> io::Result<()> {
-        self.txptr.remap()?;
-        self.block_tx.remap()?;
-        self.in_prevout.remap()?;
-        self.out_spent.remap()
     }
 }
 
