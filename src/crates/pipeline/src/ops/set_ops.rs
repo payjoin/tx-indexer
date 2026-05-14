@@ -37,7 +37,7 @@ impl Node for OutputsNode {
     fn evaluate(&self, ctx: &EvalContext) -> HashSet<AnyOutId> {
         let tx_ids = ctx.get_or_default(&self.input);
         let mut outputs = HashSet::new();
-        for id in tx_ids {
+        for id in tx_ids.iter().copied() {
             let tx_outputs = ctx.unified_storage().tx_out_ids(id);
             outputs.extend(tx_outputs);
         }
