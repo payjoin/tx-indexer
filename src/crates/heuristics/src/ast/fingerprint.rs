@@ -55,6 +55,7 @@ impl Node for CollectFingerprintsNode {
             f.push(tx.inputs().any(|input| input.low_r_grinding()) as u32);
 
             let inputs: Vec<_> = tx.inputs().collect();
+            let outputs: Vec<_> = tx.outputs().collect();
             let locktime = tx.locktime();
 
             // anti_fee_snipe
@@ -67,16 +68,17 @@ impl Node for CollectFingerprintsNode {
             // For dense (confirmed) txs, add fingerprints that need raw bitcoin types
             // output_types - sorted deduped discriminants
             let output_types = sorted_deduped(
-                tx.outputs()
+                outputs
+                    .iter()
                     .map(|o| classify_script_pubkey(&o.script_pubkey_bytes()).as_u32()),
             );
             f.extend(output_types);
 
             // output_structure - sorted deduped discriminants
-            f.push(output_structure(&tx.outputs().collect::<Vec<_>>()).as_u32());
+            f.push(output_structure(&outputs).as_u32());
 
             // Is outputs bip69 sorted
-            f.push(is_bip69_sorted(&tx.outputs().collect::<Vec<_>>()) as u32);
+            f.push(is_bip69_sorted(&outputs) as u32);
 
             // Collect prevout TxOuts for inputs (requires loading spent txs)
             let prevouts: Vec<TxOutHandle<'_>> = inputs
@@ -100,7 +102,7 @@ impl Node for CollectFingerprintsNode {
             f.push(mixed_input_types(&prevouts) as u32);
 
             // intra address_reuse
-            f.push(address_reuse(&tx.outputs().collect::<Vec<_>>(), &prevouts) as u32);
+            f.push(address_reuse(&outputs, &prevouts) as u32);
 
             // input_order - sorted deduped discriminants
             let order_types = sorted_deduped(
