@@ -111,6 +111,13 @@ impl<'a> EvalContext<'a> {
     }
 }
 
+/// duplicate check for small dependency lists
+fn deps_have_duplicate_ids(deps: &[NodeId]) -> bool {
+    deps.iter()
+        .enumerate()
+        .any(|(i, id)| deps[i + 1..].iter().any(|other| other == id))
+}
+
 /// Lazy evaluation engine for the pipeline.
 ///
 /// The engine evaluates expressions on demand, caching results and
@@ -279,7 +286,7 @@ impl Engine {
 
             if let Some(node) = ctx.get_node(id) {
                 let deps = node.dependencies();
-                if deps.len() != deps.iter().collect::<HashSet<_>>().len() {
+                if deps_have_duplicate_ids(&deps) {
                     panic!("Duplicate dependencies detected for node: {:?}", id);
                 }
                 for dep_id in deps {
