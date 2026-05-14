@@ -16,6 +16,9 @@ members = [
 ]
 exclude = ["btsim"]
 
+[profile.release]
+debug = 1
+
 [workspace.dependencies]
 bitcoin = { version = "0.32.0", features = ["rand"] }
 
