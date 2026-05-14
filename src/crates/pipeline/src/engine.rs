@@ -98,16 +98,22 @@ impl<'a> EvalContext<'a> {
             })
     }
 
-    /// Get a dependency result or a default value if not yet evaluated.
-    /// This is useful for nodes that may be part of a cycle.
-    pub fn get_or_default<T: ExprValue>(&self, expr: &Expr<T>) -> T::Output
+    /// Get a dependency result, or the type's default when there is no slot yet.
+    ///
+    /// This is for nodes that may be part of a cycle (back-edges before the producer
+    /// has run). There is **no** `&T::Output` to return in that case: nothing is stored
+    /// to borrow from, unlike [`Self::get`], which always points at an existing fact.
+    ///
+    /// Returns [`Cow::Borrowed`] when a value is present, and
+    /// [`Cow::Owned`]`(T::Output::default())` when absent.
+    pub fn get_or_default<T: ExprValue>(&self, expr: &Expr<T>) -> Cow<'_, T::Output>
     where
         T::Output: Default,
     {
-        self.storage
-            .get::<T>(expr.id(), self.node_id)
-            .cloned()
-            .unwrap_or_default()
+        match self.storage.get::<T>(expr.id(), self.node_id) {
+            Some(v) => Cow::Borrowed(v),
+            None => Cow::Owned(T::Output::default()),
+        }
     }
 }
 

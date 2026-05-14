@@ -42,7 +42,7 @@ impl Node for UnnecessaryInputHeuristic1Node {
 
         let mut result = HashSet::new();
 
-        for tx_id in &tx_ids {
+        for tx_id in tx_ids.iter() {
             let tx = tx_id.with(ctx.unified_storage());
 
             let outputs: Vec<_> = tx.outputs().map(|o| (o.id(), o.value())).collect();
@@ -105,7 +105,7 @@ impl Node for UnnecessaryInputHeuristic2Node {
 
         let mut result = std::collections::HashMap::new();
 
-        for tx_id in &tx_ids {
+        for tx_id in tx_ids.iter() {
             let tx = tx_id.with(ctx.unified_storage());
 
             result.insert(*tx_id, UnnecessaryInputHeuristic::is_uih2(&tx));

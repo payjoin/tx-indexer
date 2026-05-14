@@ -159,7 +159,7 @@ impl Node for IsUnilateralNode {
 
         let mut result = HashMap::new();
 
-        for tx_id in &tx_ids {
+        for tx_id in tx_ids.iter() {
             let tx = tx_id.with(ctx.unified_storage());
             let inputs: Vec<AnyOutId> = tx
                 .inputs()
@@ -231,7 +231,7 @@ impl Node for ChangeClusteringNode {
 
         let clustering = SparseDisjointSet::new();
 
-        for tx_id in &tx_ids {
+        for tx_id in tx_ids.iter() {
             let tx = tx_id.with(ctx.unified_storage());
 
             let first_input: Option<AnyOutId> = tx
