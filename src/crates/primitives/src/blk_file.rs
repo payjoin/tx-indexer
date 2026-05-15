@@ -1,8 +1,10 @@
 use std::{
     fs::File,
-    io::{self, Read, Seek, SeekFrom},
+    io::{self, BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
+
+const BLOCK_HEADER_LEN: usize = 8;
 
 /// XOR-aware reader for Bitcoin Core blk*.dat files.
 ///
@@ -41,6 +43,69 @@ impl BlkFileStore {
         let mut bytes = std::fs::read(self.blk_path(file_no))?;
         self.apply_xor(&mut bytes, 0);
         Ok(bytes)
+    }
+
+    /// Stream blocks from a blk file one at a time, yielding `(block_start_offset, block_bytes)`.
+    ///
+    /// Never reads more than one block into memory at once — no 128 MB allocation.
+    /// Stops at `data_len` bytes when provided (from the LevelDB block-index hint).
+    pub fn iter_blocks(
+        &self,
+        file_no: u32,
+        data_len: Option<usize>,
+    ) -> impl Iterator<Item = io::Result<(u64, Vec<u8>)>> + '_ {
+        let limit = data_len.unwrap_or(usize::MAX);
+        // Encode the file-open error as `Err(Some(e))` so the closure can yield it on the
+        // first `next()` call without a separate code path.
+        let mut state: Result<BufReader<File>, Option<io::Error>> =
+            File::open(self.blk_path(file_no))
+                .map(BufReader::new)
+                .map_err(Some);
+        let mut file_offset: usize = 0;
+        let mut done = false;
+
+        std::iter::from_fn(move || {
+            if done {
+                return None;
+            }
+            let reader = match &mut state {
+                Err(e_opt) => return e_opt.take().map(Err),
+                Ok(r) => r,
+            };
+            if file_offset + BLOCK_HEADER_LEN > limit {
+                return None;
+            }
+            let mut header = [0u8; BLOCK_HEADER_LEN];
+            match reader.read_exact(&mut header) {
+                Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return None,
+                Err(e) => {
+                    done = true;
+                    return Some(Err(e));
+                }
+                Ok(()) => {}
+            }
+            self.apply_xor(&mut header, file_offset);
+            let block_size =
+                u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
+            file_offset += BLOCK_HEADER_LEN;
+            let block_start = file_offset as u64;
+            let block_end = file_offset + block_size;
+            if block_end > limit {
+                done = true;
+                return Some(Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "block exceeds data_len",
+                )));
+            }
+            let mut block_buf = vec![0u8; block_size];
+            if let Err(e) = reader.read_exact(&mut block_buf) {
+                done = true;
+                return Some(Err(e));
+            }
+            self.apply_xor(&mut block_buf, file_offset);
+            file_offset = block_end;
+            Some(Ok((block_start, block_buf)))
+        })
     }
 
     /// Read `len` bytes starting at `offset` from a blk file, XOR-decrypting in place.

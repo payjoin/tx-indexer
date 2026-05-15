@@ -10,9 +10,6 @@ use crate::{
     traits::IndexSink,
 };
 
-/// Block file layout: 4-byte magic + 4-byte block size (LE) + block payload.
-const BLOCK_START_LEN: usize = 8;
-
 /// Collect [`BlkFileHint`] entries for every blk file that
 /// overlaps the inclusive height range `[start_height, end_height]`, so the parser
 /// can skip blk files outside the requested range.
@@ -123,57 +120,26 @@ impl Parser {
             }
 
             let file_id = BlockFileId(file_no);
-            let bytes = self.store.read_file(file_no).map_err(BlockFileError::Io)?;
-            let used_len = match hint.data_len {
-                Some(data_len) => {
-                    if data_len > bytes.len() {
-                        return Err(BlockFileError::UnexpectedEof {
-                            offset: data_len,
-                            len: bytes.len(),
-                        });
-                    }
-                    data_len
-                }
-                None => bytes.len(),
-            };
-            let bytes = &bytes[..used_len];
-
             let mut global_height = file_first;
-            let mut offset = 0usize;
 
-            while offset + BLOCK_START_LEN <= bytes.len() {
+            for result in self.store.iter_blocks(file_no, hint.data_len) {
+                let (block_start, block_bytes) = result.map_err(BlockFileError::Io)?;
+
                 if global_height >= range.end {
                     break 'files;
                 }
 
-                let block_size =
-                    u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().map_err(|_| {
-                        BlockFileError::UnexpectedEof {
-                            offset: offset + 8,
-                            len: bytes.len(),
-                        }
-                    })?) as usize;
-                let block_start = offset + BLOCK_START_LEN;
-                let block_end = block_start + block_size;
-                if block_end > bytes.len() {
-                    return Err(BlockFileError::UnexpectedEof {
-                        offset: block_end,
-                        len: bytes.len(),
-                    });
-                }
-
                 if global_height >= range.start {
-                    let block_slice = &bytes[block_start..block_end];
                     let tx_count = {
                         let mut collector = TxIdCollector {
                             block_file: file_id,
-                            block_start_in_file: block_start as u64,
-                            block_slice,
+                            block_start_in_file: block_start,
+                            block_slice: &block_bytes,
                             sink,
                             error: None,
                             tx_count: 0,
                         };
-                        bsl::Block::visit(block_slice, &mut collector)
+                        bsl::Block::visit(&block_bytes, &mut collector)
                             .map_err(BlockFileError::Parse)?;
                         if let Some(error) = collector.error.take() {
                             return Err(error);
@@ -183,7 +149,6 @@ impl Parser {
                     sink.on_block_end(tx_count).map_err(BlockFileError::from)?;
                 }
 
-                offset = block_end;
                 global_height += 1;
             }
         }
