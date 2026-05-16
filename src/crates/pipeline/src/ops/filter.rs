@@ -1,6 +1,5 @@
 //! Filter operations for the pipeline DSL.
 
-use std::collections::HashSet;
 use std::hash::Hash;
 use std::sync::Arc;
 
@@ -33,7 +32,7 @@ impl Node for FilterWithMaskNode<TxSet, AnyTxId> {
         vec![self.input.id(), self.mask.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AnyTxId> {
+    fn evaluate(&self, ctx: &EvalContext) -> Vec<AnyTxId> {
         let input_set = ctx.get_or_default(&self.input);
         let mask = ctx.get_or_default(&self.mask);
 
@@ -56,7 +55,7 @@ impl Node for FilterWithMaskNode<TxOutSet, AnyOutId> {
         vec![self.input.id(), self.mask.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AnyOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> Vec<AnyOutId> {
         let input_set = ctx.get_or_default(&self.input);
         let mask = ctx.get_or_default(&self.mask);
 
@@ -99,9 +98,9 @@ impl Node for FilterWithPredicateNode<TxSet, AnyTxId> {
         vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AnyTxId> {
+    fn evaluate(&self, ctx: &EvalContext) -> Vec<AnyTxId> {
         let input_set = ctx.get_or_default(&self.input);
-        let mut result = HashSet::with_capacity(input_set.len());
+        let mut result = Vec::with_capacity(input_set.len());
         result.extend(
             input_set
                 .iter()
@@ -123,9 +122,9 @@ impl Node for FilterWithPredicateNode<TxOutSet, AnyOutId> {
         vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AnyOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> Vec<AnyOutId> {
         let input_set = ctx.get_or_default(&self.input);
-        let mut result = HashSet::with_capacity(input_set.len());
+        let mut result = Vec::with_capacity(input_set.len());
         result.extend(
             input_set
                 .iter()
@@ -202,7 +201,7 @@ impl Node for FilterExcludeNode<TxSet, AnyTxId> {
         vec![self.input.id(), self.mask.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AnyTxId> {
+    fn evaluate(&self, ctx: &EvalContext) -> Vec<AnyTxId> {
         let input_set = ctx.get(&self.input);
         let mask = ctx.get(&self.mask);
 
@@ -225,7 +224,7 @@ impl Node for FilterExcludeNode<TxOutSet, AnyOutId> {
         vec![self.input.id(), self.mask.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AnyOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> Vec<AnyOutId> {
         let input_set = ctx.get(&self.input);
         let mask = ctx.get(&self.mask);
 

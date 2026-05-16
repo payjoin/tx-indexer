@@ -4,8 +4,6 @@
 //! - UIH1 (Optimal change): smallest output is likely change when min(out) < min(in).
 //! - UIH2 (Unnecessary input): transaction could pay outputs without the smallest input.
 
-use std::collections::HashSet;
-
 use tx_indexer_pipeline::{
     engine::EvalContext,
     expr::Expr,
@@ -37,10 +35,9 @@ impl Node for UnnecessaryInputHeuristic1Node {
         vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AnyOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> Vec<AnyOutId> {
         let tx_ids = ctx.get_or_default(&self.input);
-
-        let mut result = HashSet::new();
+        let mut result = Vec::new();
 
         for tx_id in tx_ids.iter() {
             let tx = tx_id.with(ctx.unified_storage());
@@ -51,9 +48,9 @@ impl Node for UnnecessaryInputHeuristic1Node {
             }
 
             if let Some(min_out) = UnnecessaryInputHeuristic::uih1_min_output_value(&tx) {
-                for (out_id, v) in &outputs {
-                    if *v == min_out {
-                        result.insert(*out_id);
+                for output in tx.outputs() {
+                    if output.value() == min_out {
+                        result.push(output.id());
                     }
                 }
             }

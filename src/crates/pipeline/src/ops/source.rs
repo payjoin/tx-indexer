@@ -3,7 +3,6 @@
 //! Source nodes produce values from external data rather than transforming
 //! other expressions.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use tx_indexer_primitives::unified::AnyTxId;
@@ -28,7 +27,7 @@ impl AllLooseTxsNode {
 impl SourceNode for AllLooseTxsNode {
     type OutputValue = TxSet;
 
-    fn evaluate(&self, ctx: &mut SourceNodeEvalContext<'_>) -> HashSet<AnyTxId> {
+    fn evaluate(&self, ctx: &mut SourceNodeEvalContext<'_>) -> Vec<AnyTxId> {
         let start = ctx.processed_loose_len();
         ctx.unified_storage.loose_txids_from(start).collect()
     }
@@ -52,7 +51,7 @@ impl AllDenseTxsNode {
 impl SourceNode for AllDenseTxsNode {
     type OutputValue = TxSet;
 
-    fn evaluate(&self, ctx: &mut SourceNodeEvalContext<'_>) -> HashSet<AnyTxId> {
+    fn evaluate(&self, ctx: &mut SourceNodeEvalContext<'_>) -> Vec<AnyTxId> {
         let start = ctx.processed_dense_len();
         ctx.unified_storage.dense_txids_from(start).collect()
     }
