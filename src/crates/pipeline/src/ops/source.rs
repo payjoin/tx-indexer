@@ -11,7 +11,7 @@ use tx_indexer_primitives::unified::AnyTxId;
 use crate::context::PipelineContext;
 use crate::engine::SourceNodeEvalContext;
 use crate::expr::Expr;
-use crate::node::{Node, NodeId, SourceNode};
+use crate::node::SourceNode;
 use crate::value::TxSet;
 
 /// Node that returns all newly observed loose transaction IDs.
@@ -62,32 +62,6 @@ impl SourceNode for AllDenseTxsNode {
     }
 }
 
-pub struct SourceTxsNode {
-    source: Expr<TxSet>,
-}
-
-impl SourceTxsNode {
-    pub fn new(source: Expr<TxSet>) -> Self {
-        Self { source }
-    }
-}
-
-impl Node for SourceTxsNode {
-    type OutputValue = TxSet;
-
-    fn dependencies(&self) -> Vec<NodeId> {
-        vec![self.source.id()]
-    }
-
-    fn evaluate(&self, ctx: &crate::engine::EvalContext) -> HashSet<AnyTxId> {
-        ctx.get(&self.source).clone()
-    }
-
-    fn name(&self) -> &'static str {
-        "SourceTxs"
-    }
-}
-
 /// Factory for creating source expressions.
 pub struct AllLooseTxs {
     txs: Expr<TxSet>,
@@ -96,8 +70,7 @@ pub struct AllLooseTxs {
 impl AllLooseTxs {
     /// Create source expressions for all known transaction IDs.
     pub fn new(ctx: &Arc<PipelineContext>) -> Self {
-        let source = ctx.register_source(AllLooseTxsNode::new(Arc::new(())));
-        let txs = ctx.register(SourceTxsNode::new(source.clone()));
+        let txs = ctx.register_source(AllLooseTxsNode::new(Arc::new(())));
         Self { txs }
     }
 
@@ -114,8 +87,7 @@ pub struct AllDenseTxs {
 impl AllDenseTxs {
     /// Create source expressions for all known confirmed transaction IDs.
     pub fn new(ctx: &Arc<PipelineContext>) -> Self {
-        let source = ctx.register_source(AllDenseTxsNode::new(Arc::new(())));
-        let txs = ctx.register(SourceTxsNode::new(source.clone()));
+        let txs = ctx.register_source(AllDenseTxsNode::new(Arc::new(())));
         Self { txs }
     }
 
