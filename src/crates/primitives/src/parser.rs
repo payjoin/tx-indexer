@@ -122,6 +122,8 @@ impl Parser {
             let file_id = BlockFileId(file_no);
             let mut global_height = file_first;
 
+            // `global_height` is being used a loop counter
+            #[allow(clippy::explicit_counter_loop)]
             for result in self.store.iter_blocks(file_no, hint.data_len) {
                 let (block_start, block_bytes) = result.map_err(BlockFileError::Io)?;
 

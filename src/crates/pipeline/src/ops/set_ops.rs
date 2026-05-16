@@ -36,6 +36,7 @@ impl Node for OutputsNode {
 
     fn evaluate(&self, ctx: &EvalContext) -> HashSet<AnyOutId> {
         let tx_ids = ctx.get_or_default(&self.input);
+        // Can't use `with_capacity` bc we don't necessarily know the number of outputs
         let mut outputs = HashSet::new();
         for id in tx_ids.iter().copied() {
             let tx_outputs = ctx.unified_storage().tx_out_ids(id);
@@ -69,10 +70,13 @@ impl Node for TxsNode {
 
     fn evaluate(&self, ctx: &EvalContext) -> HashSet<AnyTxId> {
         let outputs = ctx.get(&self.input);
-        outputs
-            .iter()
-            .map(|out| ctx.unified_storage().txid_for_out(*out))
-            .collect()
+        let mut result = HashSet::with_capacity(outputs.len());
+        result.extend(
+            outputs
+                .iter()
+                .map(|out| ctx.unified_storage().txid_for_out(*out)),
+        );
+        result
     }
 
     fn name(&self) -> &'static str {
