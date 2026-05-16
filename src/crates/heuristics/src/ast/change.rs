@@ -7,7 +7,10 @@ use tx_indexer_pipeline::{
     node::{Node, NodeId},
     value::{TxMask, TxOutClustering, TxOutMask, TxOutSet, TxSet},
 };
-use tx_indexer_primitives::unified::{AnyOutId, AnyTxId};
+use tx_indexer_primitives::{
+    handle::SpendableTxConstituent,
+    unified::{AnyOutId, AnyTxId},
+};
 
 use crate::change_identification::{
     NLockTimeChangeIdentification, NaiveChangeIdentificationHueristic, TxOutChangeAnnotation,
@@ -40,9 +43,14 @@ impl Node for ChangeIdentificationNode {
         let mut result = HashMap::new();
 
         for output_id in txouts.iter() {
-            let output = output_id.with(ctx.unified_storage());
+            let Ok(spendable) =
+                SpendableTxConstituent::try_new(output_id.with(ctx.unified_storage()))
+            else {
+                result.insert(*output_id, false);
+                continue;
+            };
             let is_change = matches!(
-                NaiveChangeIdentificationHueristic::is_change(output),
+                NaiveChangeIdentificationHueristic::is_change(spendable),
                 TxOutChangeAnnotation::Change
             );
             result.insert(*output_id, is_change);
@@ -108,11 +116,16 @@ impl Node for FingerPrintChangeIdentificationNode {
 
         for output_id in txouts.iter() {
             let output = output_id.with(ctx.unified_storage());
-            let is_change = match output.spender_txin() {
+            let spender = output.spender_txin();
+            let Ok(spendable) = SpendableTxConstituent::try_new(output) else {
+                result.insert(*output_id, false);
+                continue;
+            };
+            let is_change = match spender {
                 Some(spending_txin) => {
                     let spending_tx = spending_txin.containing_tx();
                     matches!(
-                        NLockTimeChangeIdentification::is_change(output, spending_tx),
+                        NLockTimeChangeIdentification::is_change(spendable, spending_tx),
                         TxOutChangeAnnotation::Change
                     )
                 }

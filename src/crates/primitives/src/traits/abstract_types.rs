@@ -88,6 +88,10 @@ pub trait HasScriptPubkey {
     fn output_type(&self) -> OutputType {
         classify_script_pubkey(&self.script_pubkey_bytes())
     }
+
+    fn is_spendable(&self) -> bool {
+        self.output_type().is_spendable()
+    }
 }
 
 /// Value (amount) of a transaction output

@@ -1,38 +1,36 @@
 use bitcoin::Amount;
-use tx_indexer_primitives::traits::abstract_types::{
-    EnumerateInputValueInArbitraryOrder, EnumerateOutputValueInArbitraryOrder,
+use tx_indexer_primitives::{
+    AbstractTransaction,
+    handle::SpendableTxConstituent,
+    traits::abstract_types::{
+        EnumerateInputValueInArbitraryOrder, EnumerateOutputValueInArbitraryOrder, TxConstituent,
+    },
 };
 
 pub struct UnnecessaryInputHeuristic;
 
 impl UnnecessaryInputHeuristic {
-    pub fn uih1_min_output_value<T>(tx: &T) -> Option<Amount>
+    /// Returns the minimum output value that is smaller than the minimum input value.
+    pub fn is_uih1_candidate<T>(txout: SpendableTxConstituent<T>) -> bool
     where
-        T: EnumerateInputValueInArbitraryOrder + EnumerateOutputValueInArbitraryOrder,
+        T: TxConstituent<
+            Handle: EnumerateInputValueInArbitraryOrder + EnumerateOutputValueInArbitraryOrder,
+        >,
     {
-        let input_values: Vec<Amount> = tx.input_values().collect();
-        let output_values: Vec<Amount> = tx.output_values().collect();
+        let tx = txout.containing_tx();
+        let min_in = tx.input_values().min();
+        let output_val = tx
+            .output_at(txout.vout())
+            .expect("vout should be present")
+            .value();
 
-        if input_values.is_empty() || output_values.is_empty() {
-            return None;
+        if let Some(min_in) = min_in
+            && output_val < min_in
+        {
+            return true;
         }
 
-        let min_in = input_values
-            .iter()
-            .min()
-            .copied()
-            .expect("non-empty inputs");
-        let min_out = output_values
-            .iter()
-            .min()
-            .copied()
-            .expect("non-empty outputs");
-
-        if min_out < min_in {
-            Some(min_out)
-        } else {
-            None
-        }
+        false
     }
 
     pub fn is_uih2<T>(tx: &T) -> bool

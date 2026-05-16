@@ -4,56 +4,57 @@
 //! - UIH1 (Optimal change): smallest output is likely change when min(out) < min(in).
 //! - UIH2 (Unnecessary input): transaction could pay outputs without the smallest input.
 
+use std::collections::HashMap;
+
 use tx_indexer_pipeline::{
     engine::EvalContext,
     expr::Expr,
     node::{Node, NodeId},
-    value::{TxMask, TxOutSet, TxSet},
+    value::{TxMask, TxOutMask, TxOutSet, TxSet},
 };
-use tx_indexer_primitives::unified::{AnyOutId, AnyTxId};
+use tx_indexer_primitives::{
+    handle::SpendableTxConstituent,
+    unified::{AnyOutId, AnyTxId},
+};
 
 use crate::uih::UnnecessaryInputHeuristic;
 
 /// Node that implements UIH1 (Optimal change heuristic).
 ///
-/// For each transaction where min(output values) < min(input values), adds the
-/// smallest output(s) by value to the result set (likely change).
+/// For each output, returns `true` if its value is less than the minimum input
+/// value of its containing transaction.
 pub struct UnnecessaryInputHeuristic1Node {
-    input: Expr<TxSet>,
+    input: Expr<TxOutSet>,
 }
 
 impl UnnecessaryInputHeuristic1Node {
-    pub fn new(input: Expr<TxSet>) -> Self {
+    pub fn new(input: Expr<TxOutSet>) -> Self {
         Self { input }
     }
 }
 
 impl Node for UnnecessaryInputHeuristic1Node {
-    type OutputValue = TxOutSet;
+    type OutputValue = TxOutMask;
 
     fn dependencies(&self) -> Vec<NodeId> {
         vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Vec<AnyOutId> {
-        let tx_ids = ctx.get_or_default(&self.input);
-        let mut result = Vec::new();
+    fn evaluate(&self, ctx: &EvalContext) -> HashMap<AnyOutId, bool> {
+        let txouts = ctx.get_or_default(&self.input);
+        let mut result = HashMap::new();
 
-        for tx_id in tx_ids.iter() {
-            let tx = tx_id.with(ctx.unified_storage());
-
-            let outputs: Vec<_> = tx.outputs().map(|o| (o.id(), o.value())).collect();
-            if outputs.is_empty() {
+        for output_id in txouts.iter() {
+            let Ok(spendable) =
+                SpendableTxConstituent::try_new(output_id.with(ctx.unified_storage()))
+            else {
+                result.insert(*output_id, false);
                 continue;
-            }
-
-            if let Some(min_out) = UnnecessaryInputHeuristic::uih1_min_output_value(&tx) {
-                for output in tx.outputs() {
-                    if output.value() == min_out {
-                        result.push(output.id());
-                    }
-                }
-            }
+            };
+            result.insert(
+                *output_id,
+                UnnecessaryInputHeuristic::is_uih1_candidate(spendable),
+            );
         }
 
         result
@@ -68,9 +69,9 @@ impl Node for UnnecessaryInputHeuristic1Node {
 pub struct UnnecessaryInputHeuristic1;
 
 impl UnnecessaryInputHeuristic1 {
-    /// Returns the set of outputs that are the smallest by value in each tx
-    /// where min(out) < min(in) (BlockSci optimal change heuristic).
-    pub fn new(input: Expr<TxSet>) -> Expr<TxOutSet> {
+    /// Returns a mask over outputs where `true` indicates a UIH1 candidate
+    /// (output value < min input value of its containing transaction).
+    pub fn new(input: Expr<TxOutSet>) -> Expr<TxOutMask> {
         let ctx = input.context().clone();
         ctx.register(UnnecessaryInputHeuristic1Node::new(input))
     }
@@ -243,15 +244,16 @@ mod tests {
         let mut engine = engine_with_loose(ctx.clone(), all_txs);
 
         let source = AllLooseTxs::new(&ctx);
-        let uih1 = UnnecessaryInputHeuristic1::new(source.txs());
+        let uih1 = UnnecessaryInputHeuristic1::new(source.txs().outputs());
         let result = engine.eval(&uih1);
 
         let smallest_out = AnyOutId::from(TxOutId::new(TxId(3), 0));
-        assert!(
-            result.contains(&smallest_out),
-            "UIH1 should contain the smallest output (value 50)"
+        assert_eq!(
+            result.get(&smallest_out),
+            Some(&true),
+            "UIH1 should flag the smallest output (value 50)"
         );
-        assert_eq!(result.len(), 1);
+        assert_eq!(result.values().filter(|&&v| v).count(), 1);
     }
 
     #[test]
@@ -261,12 +263,12 @@ mod tests {
         let mut engine = engine_with_loose(ctx.clone(), all_txs);
 
         let source = AllLooseTxs::new(&ctx);
-        let uih1 = UnnecessaryInputHeuristic1::new(source.txs());
+        let uih1 = UnnecessaryInputHeuristic1::new(source.txs().outputs());
         let result = engine.eval(&uih1);
 
         assert!(
-            result.is_empty(),
-            "UIH1 should be empty when min(out) >= min(in)"
+            result.values().all(|&v| !v),
+            "UIH1 should have no candidates when min(out) >= min(in)"
         );
     }
 
@@ -277,12 +279,18 @@ mod tests {
         let mut engine = engine_with_loose(ctx.clone(), all_txs);
 
         let source = AllLooseTxs::new(&ctx);
-        let uih1 = UnnecessaryInputHeuristic1::new(source.txs());
+        let uih1 = UnnecessaryInputHeuristic1::new(source.txs().outputs());
         let result = engine.eval(&uih1);
 
-        assert!(result.contains(&AnyOutId::from(TxOutId::new(TxId(3), 0))));
-        assert!(result.contains(&AnyOutId::from(TxOutId::new(TxId(3), 1))));
-        assert_eq!(result.len(), 2);
+        assert_eq!(
+            result.get(&AnyOutId::from(TxOutId::new(TxId(3), 0))),
+            Some(&true)
+        );
+        assert_eq!(
+            result.get(&AnyOutId::from(TxOutId::new(TxId(3), 1))),
+            Some(&true)
+        );
+        assert_eq!(result.values().filter(|&&v| v).count(), 2);
     }
 
     #[test]
@@ -364,7 +372,7 @@ mod tests {
         let mut engine = engine_with_loose(ctx.clone(), all_txs);
 
         let source = AllLooseTxs::new(&ctx);
-        let uih1 = UnnecessaryInputHeuristic1::new(source.txs());
+        let uih1 = UnnecessaryInputHeuristic1::new(source.txs().outputs());
         let uih2 = UnnecessaryInputHeuristic2::new(source.txs());
 
         // `.into_owned()` because we hold both results simultaneously below;
@@ -372,13 +380,15 @@ mod tests {
         let uih1_result = engine.eval(&uih1).into_owned();
         let uih2_result = engine.eval(&uih2).into_owned();
 
-        assert!(
-            uih1_result.contains(&AnyOutId::from(TxOutId::new(TxId(5), 1))),
+        assert_eq!(
+            uih1_result.get(&AnyOutId::from(TxOutId::new(TxId(5), 1))),
+            Some(&true),
             "UIH1 should flag tx4's smallest output (vout=1)"
         );
-        assert!(
-            !uih1_result.contains(&AnyOutId::from(TxOutId::new(TxId(6), 0))),
-            "UIH1 should not flag tx5 (min(out) >= min(in))"
+        assert_ne!(
+            uih1_result.get(&AnyOutId::from(TxOutId::new(TxId(6), 0))),
+            Some(&true),
+            "UIH1 should not flag tx5's vout=0 (min(out) >= min(in))"
         );
 
         // uih2: tx4 true, tx5 false

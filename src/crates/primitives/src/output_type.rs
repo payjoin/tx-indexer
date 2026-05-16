@@ -15,6 +15,10 @@ impl OutputType {
     pub fn as_u32(self) -> u32 {
         self as u32
     }
+
+    pub fn is_spendable(self) -> bool {
+        self != OutputType::OpReturn && self != OutputType::NonStandard
+    }
 }
 
 /// Classify a scriptPubKey by type from raw bytes.

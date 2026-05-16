@@ -1,5 +1,5 @@
 use tx_indexer_primitives::{
-    handle::TxHandle,
+    handle::{SpendableTxConstituent, TxHandle},
     traits::abstract_types::{HasNLockTime, HasScriptPubkey, OutputCount, TxConstituent},
 };
 
@@ -13,7 +13,9 @@ pub struct NaiveChangeIdentificationHueristic;
 
 impl NaiveChangeIdentificationHueristic {
     /// Check if a txout is change based on its containing transaction.
-    pub fn is_change(txout: impl TxConstituent<Handle: OutputCount>) -> TxOutChangeAnnotation {
+    pub fn is_change(
+        txout: SpendableTxConstituent<impl TxConstituent<Handle: OutputCount>>,
+    ) -> TxOutChangeAnnotation {
         let tx = txout.containing_tx();
         if tx.output_count() > 0 && txout.vout() == tx.output_count() - 1 {
             TxOutChangeAnnotation::Change
@@ -27,7 +29,7 @@ pub struct NLockTimeChangeIdentification;
 
 impl NLockTimeChangeIdentification {
     pub fn is_change(
-        tx_out: impl TxConstituent<Handle: HasNLockTime>,
+        tx_out: SpendableTxConstituent<impl TxConstituent<Handle: HasNLockTime>>,
         spending_tx: impl HasNLockTime,
     ) -> TxOutChangeAnnotation {
         let containing_tx_n_locktime = tx_out.containing_tx().locktime();
@@ -56,7 +58,7 @@ impl ScriptTypesMatchingChangeIdentification {
     /// types, unresolved prevouts, or multiple matching outputs are all treated
     /// as inconclusive and return `NotChange`.
     pub fn is_change<'a>(
-        tx_out: impl TxConstituent<Handle = TxHandle<'a>>,
+        tx_out: SpendableTxConstituent<impl TxConstituent<Handle = TxHandle<'a>>>,
     ) -> TxOutChangeAnnotation {
         let tx = tx_out.containing_tx();
         let mut input_types = tx.inputs().map(|input| input.output_type());
@@ -94,6 +96,7 @@ mod tests {
 
     use tx_indexer_primitives::{
         UnifiedStorage,
+        handle::SpendableTxConstituent,
         loose::LooseIndexBuilder,
         loose::{TxId, TxOutId},
         test_utils::{DummyTxData, DummyTxOut, DummyTxOutData},
@@ -126,7 +129,9 @@ mod tests {
             containing_tx: DummyTxData::new_with_amounts(vec![100]),
         };
         assert_eq!(
-            NaiveChangeIdentificationHueristic::is_change(txout),
+            NaiveChangeIdentificationHueristic::is_change(
+                SpendableTxConstituent::try_new(txout).unwrap()
+            ),
             TxOutChangeAnnotation::Change
         );
     }
@@ -139,7 +144,10 @@ mod tests {
         };
         let spending_tx = DummyTxData::new_with_amounts(vec![100]);
         assert_eq!(
-            NLockTimeChangeIdentification::is_change(tx_out, spending_tx),
+            NLockTimeChangeIdentification::is_change(
+                SpendableTxConstituent::try_new(tx_out).unwrap(),
+                spending_tx
+            ),
             TxOutChangeAnnotation::NotChange
         );
 
@@ -150,7 +158,10 @@ mod tests {
         };
         let spending_tx = DummyTxData::new(vec![DummyTxOutData::new(100, 0)], vec![], 1);
         assert_eq!(
-            NLockTimeChangeIdentification::is_change(tx_out, spending_tx),
+            NLockTimeChangeIdentification::is_change(
+                SpendableTxConstituent::try_new(tx_out).unwrap(),
+                spending_tx
+            ),
             TxOutChangeAnnotation::Change
         );
     }
@@ -195,11 +206,15 @@ mod tests {
         let change = AnyOutId::from(TxOutId::new(TxId(3), 1)).with(&storage);
 
         assert_eq!(
-            ScriptTypesMatchingChangeIdentification::is_change(payment),
+            ScriptTypesMatchingChangeIdentification::is_change(
+                SpendableTxConstituent::try_new(payment).unwrap_or_else(|_| unreachable!())
+            ),
             TxOutChangeAnnotation::NotChange
         );
         assert_eq!(
-            ScriptTypesMatchingChangeIdentification::is_change(change),
+            ScriptTypesMatchingChangeIdentification::is_change(
+                SpendableTxConstituent::try_new(change).unwrap_or_else(|_| unreachable!())
+            ),
             TxOutChangeAnnotation::Change
         );
     }
@@ -244,11 +259,15 @@ mod tests {
         let change = AnyOutId::from(TxOutId::new(TxId(3), 1)).with(&storage);
 
         assert_eq!(
-            ScriptTypesMatchingChangeIdentification::is_change(payment),
+            ScriptTypesMatchingChangeIdentification::is_change(
+                SpendableTxConstituent::try_new(payment).unwrap_or_else(|_| unreachable!())
+            ),
             TxOutChangeAnnotation::NotChange
         );
         assert_eq!(
-            ScriptTypesMatchingChangeIdentification::is_change(change),
+            ScriptTypesMatchingChangeIdentification::is_change(
+                SpendableTxConstituent::try_new(change).unwrap_or_else(|_| unreachable!())
+            ),
             TxOutChangeAnnotation::NotChange
         );
     }
@@ -290,11 +309,15 @@ mod tests {
         let output1 = AnyOutId::from(TxOutId::new(TxId(3), 1)).with(&storage);
 
         assert_eq!(
-            ScriptTypesMatchingChangeIdentification::is_change(output0),
+            ScriptTypesMatchingChangeIdentification::is_change(
+                SpendableTxConstituent::try_new(output0).unwrap_or_else(|_| unreachable!())
+            ),
             TxOutChangeAnnotation::NotChange
         );
         assert_eq!(
-            ScriptTypesMatchingChangeIdentification::is_change(output1),
+            ScriptTypesMatchingChangeIdentification::is_change(
+                SpendableTxConstituent::try_new(output1).unwrap_or_else(|_| unreachable!())
+            ),
             TxOutChangeAnnotation::NotChange
         );
     }

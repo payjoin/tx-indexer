@@ -120,12 +120,17 @@ pub struct DummyTxOutData {
 }
 
 impl DummyTxOutData {
-    /// Create a new output with empty script pubkey.
+    /// Create a new output. Uses a placeholder P2PKH script (all-zero hash) so outputs are
+    /// spendable by default (empty bytes classify as NonStandard, which is not spendable).
     pub fn new(amount: u64, vout: u32) -> Self {
         Self {
             value: amount,
             vout,
-            script_pubkey: vec![],
+            // OP_DUP OP_HASH160 <20 zero bytes> OP_EQUALVERIFY OP_CHECKSIG
+            script_pubkey: vec![
+                0x76, 0xa9, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x88,
+                0xac,
+            ],
         }
     }
 
@@ -256,6 +261,7 @@ impl From<DummyTxData> for Box<dyn AbstractTransaction + Send + Sync> {
     }
 }
 
+#[derive(Debug)]
 pub struct DummyTxOut {
     pub vout: usize,
     pub containing_tx: DummyTxData,
@@ -269,5 +275,14 @@ impl TxConstituent for DummyTxOut {
 
     fn vout(&self) -> usize {
         self.vout
+    }
+}
+
+impl HasScriptPubkey for DummyTxOut {
+    fn script_pubkey_bytes(&self) -> Vec<u8> {
+        self.containing_tx
+            .output_at(self.vout)
+            .map(|o| o.script_pubkey_bytes())
+            .unwrap_or_default()
     }
 }
