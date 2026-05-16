@@ -243,21 +243,28 @@ impl Engine {
     }
 
     fn evaluate_source_node(&mut self, id: NodeId) {
-        let node = match self.ctx.get_source_node(id) {
-            Some(n) => n,
-            None => return, // TODO: panic? This points to a bug
-        };
-
         let total_loose = self.unified_storage.loose_txids_len();
         let total_dense = self.unified_storage.dense_txids_len();
         let cursor = self
             .source_cursors
             .entry(id)
             .or_insert(SourceCursor { loose: 0, dense: 0 });
+
+        // No new data — skip to avoid accumulating empty facts that force
+        // downstream nodes to re-evaluate and combine_facts to clone.
+        if cursor.loose == total_loose && cursor.dense == total_dense {
+            return;
+        }
+
         let processed_loose = cursor.loose;
         let processed_dense = cursor.dense;
         cursor.loose = total_loose;
         cursor.dense = total_dense;
+
+        let node = match self.ctx.get_source_node(id) {
+            Some(n) => n,
+            None => return,
+        };
 
         let mut eval_ctx =
             SourceNodeEvalContext::new(&self.unified_storage, processed_loose, processed_dense, id);
