@@ -101,11 +101,9 @@ impl Node for FilterWithPredicateNode<TxSet, AnyTxId> {
 
     fn evaluate(&self, ctx: &EvalContext) -> HashSet<AnyTxId> {
         let input_set = ctx.get_or_default(&self.input);
-        input_set
-            .iter()
-            .filter(|id| (self.predicate)(id, ctx))
-            .copied()
-            .collect()
+        let mut result = HashSet::with_capacity(input_set.len());
+        result.extend(input_set.iter().filter(|id| (self.predicate)(id, ctx)).copied());
+        result
     }
 
     fn name(&self) -> &'static str {
@@ -122,11 +120,9 @@ impl Node for FilterWithPredicateNode<TxOutSet, AnyOutId> {
 
     fn evaluate(&self, ctx: &EvalContext) -> HashSet<AnyOutId> {
         let input_set = ctx.get_or_default(&self.input);
-        input_set
-            .iter()
-            .filter(|id| (self.predicate)(id, ctx))
-            .copied()
-            .collect()
+        let mut result = HashSet::with_capacity(input_set.len());
+        result.extend(input_set.iter().filter(|id| (self.predicate)(id, ctx)).copied());
+        result
     }
 
     fn name(&self) -> &'static str {
