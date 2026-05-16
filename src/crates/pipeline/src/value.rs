@@ -4,7 +4,7 @@
 //! different kinds of values that expressions can produce.
 
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::Hash;
 use std::marker::PhantomData;
 
@@ -95,16 +95,16 @@ where
 pub struct TransactionSet;
 
 impl ExprValue for TransactionSet {
-    type Output = HashSet<AnyTxId>;
+    type Output = Vec<AnyTxId>;
 
     fn combine_facts<'a>(facts: &[&'a Self::Output]) -> Cow<'a, Self::Output> {
         match facts {
-            [] => Cow::Owned(Default::default()),
+            [] => Cow::Owned(Vec::new()),
             [single] => Cow::Borrowed(*single),
             [first, rest @ ..] => {
                 let mut acc = (*first).clone();
                 for next in rest {
-                    acc.extend(next.iter().cloned());
+                    acc.extend_from_slice(next);
                 }
                 Cow::Owned(acc)
             }
@@ -116,16 +116,16 @@ impl ExprValue for TransactionSet {
 pub struct TransactionOutSet;
 
 impl ExprValue for TransactionOutSet {
-    type Output = HashSet<AnyOutId>;
+    type Output = Vec<AnyOutId>;
 
     fn combine_facts<'a>(facts: &[&'a Self::Output]) -> Cow<'a, Self::Output> {
         match facts {
-            [] => Cow::Owned(Default::default()),
+            [] => Cow::Owned(Vec::new()),
             [single] => Cow::Borrowed(*single),
             [first, rest @ ..] => {
                 let mut acc = (*first).clone();
                 for next in rest {
-                    acc.extend(next.iter().cloned());
+                    acc.extend_from_slice(next);
                 }
                 Cow::Owned(acc)
             }

@@ -4,7 +4,7 @@
 //! - `txs`: TxOutSet -> TxSet (get transactions containing outputs)
 //! - `join`: Clustering x Clustering -> Clustering (merge clusterings)
 
-use std::{collections::HashSet, hash::Hash};
+use std::hash::Hash;
 
 use tx_indexer_disjoint_set::SparseDisjointSet;
 use tx_indexer_primitives::unified::{AnyOutId, AnyTxId};
@@ -34,9 +34,9 @@ impl Node for OutputsNode {
         vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AnyOutId> {
+    fn evaluate(&self, ctx: &EvalContext) -> Vec<AnyOutId> {
         let tx_ids = ctx.get_or_default(&self.input);
-        let mut outputs = HashSet::with_capacity(tx_ids.len() * 2);
+        let mut outputs = Vec::with_capacity(tx_ids.len() * 2);
         for id in tx_ids.iter().copied() {
             let tx_outputs = ctx.unified_storage().tx_out_ids(id);
             outputs.extend(tx_outputs);
@@ -67,11 +67,12 @@ impl Node for TxsNode {
         vec![self.input.id()]
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> HashSet<AnyTxId> {
+    fn evaluate(&self, ctx: &EvalContext) -> Vec<AnyTxId> {
         let outputs = ctx.get(&self.input);
-        let mut result = HashSet::with_capacity(outputs.len());
-        result.extend(outputs.iter().map(|out| ctx.unified_storage().txid_for_out(*out)));
-        result
+        outputs
+            .iter()
+            .map(|out| ctx.unified_storage().txid_for_out(*out))
+            .collect()
     }
 
     fn name(&self) -> &'static str {
