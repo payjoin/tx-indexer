@@ -161,20 +161,16 @@ impl Node for IsUnilateralNode {
 
         for tx_id in tx_ids.iter() {
             let tx = tx_id.with(ctx.unified_storage());
-            let inputs: Vec<AnyOutId> = tx
+            let mut inputs = tx
                 .inputs()
-                .filter_map(|input| input.prev_txout().map(|prevout| prevout.id()))
-                .collect();
+                .filter_map(|input| input.prev_txout().map(|prevout| prevout.id()));
 
-            let is_unilateral = if inputs.is_empty() {
-                false // Coinbase - no inputs to cluster
-            } else if inputs.len() == 1 {
-                true // Single input is trivially unilateral
-            } else {
-                let first_root = clustering.find(inputs[0]);
-                inputs
-                    .iter()
-                    .all(|input| clustering.find(*input) == first_root)
+            let is_unilateral = match inputs.next() {
+                None => false, // coinbase
+                Some(first) => {
+                    let first_root = clustering.find(first);
+                    inputs.all(|input| clustering.find(input) == first_root)
+                }
             };
 
             result.insert(*tx_id, is_unilateral);

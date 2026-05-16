@@ -10,23 +10,8 @@ impl UnnecessaryInputHeuristic {
     where
         T: EnumerateInputValueInArbitraryOrder + EnumerateOutputValueInArbitraryOrder,
     {
-        let input_values: Vec<Amount> = tx.input_values().collect();
-        let output_values: Vec<Amount> = tx.output_values().collect();
-
-        if input_values.is_empty() || output_values.is_empty() {
-            return None;
-        }
-
-        let min_in = input_values
-            .iter()
-            .min()
-            .copied()
-            .expect("non-empty inputs");
-        let min_out = output_values
-            .iter()
-            .min()
-            .copied()
-            .expect("non-empty outputs");
+        let min_in = tx.input_values().min()?;
+        let min_out = tx.output_values().min()?;
 
         if min_out < min_in {
             Some(min_out)
@@ -39,19 +24,33 @@ impl UnnecessaryInputHeuristic {
     where
         T: EnumerateInputValueInArbitraryOrder + EnumerateOutputValueInArbitraryOrder,
     {
-        let input_values: Vec<Amount> = tx.input_values().collect();
-        let output_values: Vec<Amount> = tx.output_values().collect();
-
-        if input_values.len() < 2 || output_values.is_empty() {
+        let mut input_count = 0usize;
+        let mut sum_in = Amount::from_sat(0);
+        let mut min_in = Amount::MAX_MONEY;
+        for v in tx.input_values() {
+            input_count += 1;
+            sum_in += v;
+            if v < min_in {
+                min_in = v;
+            }
+        }
+        if input_count < 2 {
             return false;
         }
 
-        let sum_in = input_values.iter().fold(Amount::from_sat(0), |a, b| a + *b);
-        let min_in = input_values.iter().min().copied().expect("len >= 2");
-        let sum_out = output_values
-            .iter()
-            .fold(Amount::from_sat(0), |a, b| a + *b);
-        let min_out = output_values.iter().min().copied().expect("non-empty");
+        let mut has_output = false;
+        let mut sum_out = Amount::from_sat(0);
+        let mut min_out = Amount::MAX_MONEY;
+        for v in tx.output_values() {
+            has_output = true;
+            sum_out += v;
+            if v < min_out {
+                min_out = v;
+            }
+        }
+        if !has_output {
+            return false;
+        }
 
         (sum_in - min_in) >= (sum_out - min_out)
     }
