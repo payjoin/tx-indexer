@@ -1,0 +1,32 @@
+[simulation]
+max_timestep = 60
+num_payment_obligations = 40
+denominate_change = true
+
+[simulation.denominated_funding]
+band_min = 131072
+band_max = 2097152
+utxos_per_wallet = 8
+
+[[wallet_types]]
+name = "participant"
+count = 20
+strategies = ["MultipartyStrategy"]
+script_type = "P2tr"
+
+[wallet_types.scorer]
+privacy_weight = 1000.0
+payment_obligation_weight = 1.0
+min_fallback_plans = 0
+subset_sum_threshold = 100
+radix_threshold = 50
+
+[[wallet_types]]
+name = "aggregator"
+count = 1
+strategies = ["AggregatorStrategy"]
+script_type = "P2tr"
+
+[wallet_types.scorer]
+privacy_weight = 0.0
+payment_obligation_weight = 1.0

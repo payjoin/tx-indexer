@@ -343,14 +343,19 @@ fn target_for_obligations(pos: &[PaymentObligationData], wallet: &WalletHandle) 
     }
 }
 
-/// Compute pre-selected change outputs for a `ContributeOutputsToSession` action.
-/// If the session has pre-selected inputs (from the aggregator), uses those exactly.
-/// Otherwise falls back to full BNB / spend-all selection over all wallet UTXOs.
+/// Change outputs for contributing `pos` to a session, or `None` when the wallet's committed
+/// session inputs cannot cover those obligations (so it must not contribute them — doing so
+/// would make the joint tx spend more than its inputs).
+///
+/// WHY the `None` path exists: the session path previously contributed *all* pending obligations
+/// regardless of coverage, the joint-transaction analogue of the `select_all` over-spend. Like
+/// that bug it only surfaces under the dense-subset-sum funding (small denominated balances), where
+/// a wallet's session inputs can be below its obligations.
 fn change_for_session_contribution(
     bb_id: &BulletinBoardId,
     pos: &[PaymentObligationData],
     wallet: &WalletHandle,
-) -> Vec<Amount> {
+) -> Option<Vec<Amount>> {
     let session = wallet
         .info()
         .active_multi_party_payjoins
@@ -359,16 +364,25 @@ fn change_for_session_contribution(
     let session_input_outpoints: Vec<Outpoint> =
         session.inputs.iter().map(|i| i.outpoint).collect();
     let target = target_for_obligations(pos, wallet);
-    if session_input_outpoints.is_empty() {
+    let change: Vec<Amount> = if session_input_outpoints.is_empty() {
         let candidates = wallet.coin_candidates();
-        if let Some((_, change)) = select_bnb(&candidates, target) {
-            return change;
+        match select_bnb(&candidates, target) {
+            Some((_, change)) => change,
+            None => select_all(&candidates, target).map(|(_, c)| c)?,
         }
-        select_all(&candidates, target).1
     } else {
         let candidates = wallet.coin_candidates_for(&session_input_outpoints);
-        select_all(&candidates, target).1
-    }
+        select_all(&candidates, target).map(|(_, c)| c)?
+    };
+
+    Some(if wallet.sim.denominate_change_enabled() {
+        change
+            .into_iter()
+            .flat_map(crate::denominate::denominate)
+            .collect()
+    } else {
+        change
+    })
 }
 
 /// Enumerate every `Action::UnilateralPayments` that a wallet could perform unilaterally,
@@ -400,8 +414,7 @@ fn enumerate_unilateral_actions(wallet: &WalletHandle) -> Vec<Action> {
         if let Some((inputs, change)) = select_bnb(&candidates, target) {
             actions.push(Action::UnilateralPayments(po_ids.clone(), inputs, change));
         }
-        let (all_inputs, change) = select_all(&candidates, target);
-        if !all_inputs.is_empty() {
+        if let Some((all_inputs, change)) = select_all(&candidates, target) {
             actions.push(Action::UnilateralPayments(po_ids, all_inputs, change));
         }
     }
@@ -427,8 +440,7 @@ impl Strategy for UnilateralSpender {
             if let Some((inputs, change)) = select_bnb(&candidates, target) {
                 actions.push(Action::UnilateralPayments(vec![po.id], inputs, change));
             }
-            let (all_inputs, change) = select_all(&candidates, target);
-            if !all_inputs.is_empty() {
+            if let Some((all_inputs, change)) = select_all(&candidates, target) {
                 actions.push(Action::UnilateralPayments(vec![po.id], all_inputs, change));
             }
         }
@@ -453,8 +465,7 @@ impl Strategy for Consolidator {
         let mut actions = Vec::new();
         for po in wallet.unhandled_payment_obligations().iter() {
             let target = target_for_obligations(std::slice::from_ref(po), wallet);
-            let (all_inputs, change) = select_all(&candidates, target);
-            if !all_inputs.is_empty() {
+            if let Some((all_inputs, change)) = select_all(&candidates, target) {
                 actions.push(Action::UnilateralPayments(vec![po.id], all_inputs, change));
             }
         }
@@ -484,8 +495,7 @@ impl Strategy for BatchSpender {
         if let Some((inputs, change)) = select_bnb(&candidates, target) {
             actions.push(Action::UnilateralPayments(po_ids.clone(), inputs, change));
         }
-        let (all_inputs, change) = select_all(&candidates, target);
-        if !all_inputs.is_empty() {
+        if let Some((all_inputs, change)) = select_all(&candidates, target) {
             actions.push(Action::UnilateralPayments(po_ids, all_inputs, change));
         }
         if actions.is_empty() {
@@ -541,8 +551,13 @@ impl Strategy for MultipartyStrategy {
             {
                 let po_ids: Vec<PaymentObligationId> =
                     payment_obligations.iter().map(|po| po.id).collect();
-                let change = change_for_session_contribution(bb_id, &payment_obligations, wallet);
-                actions.push(Action::ContributeOutputsToSession(*bb_id, po_ids, change));
+                // Only contribute obligations the wallet's committed session inputs can cover;
+                // otherwise the joint tx would spend more than its inputs.
+                if let Some(change) =
+                    change_for_session_contribution(bb_id, &payment_obligations, wallet)
+                {
+                    actions.push(Action::ContributeOutputsToSession(*bb_id, po_ids, change));
+                }
             }
         }
 
@@ -799,6 +814,11 @@ mod tests {
                     privacy_weight: 0.0,
                     payment_obligation_weight: 0.0,
                     min_fallback_plans: 0,
+                    subset_sum_threshold: None,
+                    subset_sum_max_size: 6,
+                    brute_max_terms: 15,
+                    radix_threshold: None,
+                    radix_density_floor: 0.5,
                 },
                 script_type: ScriptType::P2tr,
             }],
@@ -1089,6 +1109,9 @@ mod tests {
     #[test]
     fn test_multiparty_contributes_outputs_when_session_awaiting() {
         let mut sim = test_sim();
+        // Fund the wallet so its inputs can cover the obligation — otherwise the wallet
+        // correctly declines to contribute (contributing uncovered outputs would over-spend).
+        sim.build_universe();
 
         // Create a bulletin board and accept an invitation, advancing session to AcceptedProposal
         let bb_id = sim.create_bulletin_board();
@@ -1195,5 +1218,77 @@ mod tests {
             actions[0],
             Action::ContinueParticipateInCospend(id) if id == bb_active
         ));
+    }
+
+    #[test]
+    fn denominate_change_makes_coinjoin_outputs_standard() {
+        use crate::config::{ScorerConfig, WalletTypeConfig};
+        use crate::script_type::ScriptType;
+        use crate::SimulationBuilder;
+        use dense_subset_sum::is_standard_denom;
+
+        let wallets = vec![
+            WalletTypeConfig {
+                name: "participant".into(),
+                count: 4,
+                strategies: vec!["MultipartyStrategy".into()],
+                scorer: ScorerConfig {
+                    privacy_weight: 1.0,
+                    payment_obligation_weight: 2.0,
+                    min_fallback_plans: 0,
+                    subset_sum_threshold: None,
+                    subset_sum_max_size: 6,
+                    brute_max_terms: 15,
+                    radix_threshold: None,
+                    radix_density_floor: 0.5,
+                },
+                script_type: ScriptType::P2wpkh,
+            },
+            WalletTypeConfig {
+                name: "aggregator".into(),
+                count: 1,
+                strategies: vec!["AggregatorStrategy".into()],
+                scorer: ScorerConfig {
+                    privacy_weight: 0.0,
+                    payment_obligation_weight: 0.0,
+                    min_fallback_plans: 0,
+                    subset_sum_threshold: None,
+                    subset_sum_max_size: 6,
+                    brute_max_terms: 15,
+                    radix_threshold: None,
+                    radix_density_floor: 0.5,
+                },
+                script_type: ScriptType::P2wpkh,
+            },
+        ];
+
+        let run = |denominate: bool| -> (usize, usize) {
+            let mut sim = SimulationBuilder::new(42, wallets.clone(), 15, 1, 5)
+                .denominate_change(denominate)
+                .build();
+            sim.build_universe();
+            let result = sim.run();
+            let txs = result.dss_transactions();
+            // Payment amounts at seed 42 are non-standard, so more standard outputs means
+            // denominated change is working.
+            let total: usize = txs.iter().map(|t| t.outputs.len()).sum();
+            let standard: usize = txs
+                .iter()
+                .flat_map(|t| t.outputs.iter())
+                .filter(|&&v| is_standard_denom(v))
+                .count();
+            (standard, total)
+        };
+
+        let (std_off, total_off) = run(false);
+        let (std_on, total_on) = run(true);
+
+        // Both runs must produce coinjoin outputs, else the comparison is vacuous.
+        assert!(total_off > 0, "off-run should produce coinjoin outputs");
+        assert!(total_on > 0, "on-run should produce coinjoin outputs");
+        assert!(
+            std_on > std_off,
+            "denomination should increase standard-denom outputs: on={std_on}/{total_on} off={std_off}/{total_off}"
+        );
     }
 }

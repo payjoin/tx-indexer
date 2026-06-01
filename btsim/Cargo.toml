@@ -9,6 +9,12 @@ edition = "2021"
 name = "btsim"
 path = "src/lib.rs"
 
+[features]
+# Install the counting global allocator so the four_counts report can measure
+# per-primitive peak RAM. Off by default: otherwise every allocation in the
+# simulator pays for atomic accounting it does not need.
+alloc-probe = []
+
 [[bin]]
 name = "btsim"
 path = "src/main.rs"
@@ -35,3 +41,4 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
 tx-indexer-primitives = { path = "../src/crates/primitives" }
+dense-subset-sum = { git = "https://github.com/bc1cindy/dense-subset-sum", rev = "b1e01d4dcae0bd8c0b6c49ee4b0db38b4dd7d26b" }

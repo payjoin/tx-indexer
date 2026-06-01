@@ -34,6 +34,12 @@ use crate::{
     },
 };
 
+mod alloc_probe;
+
+#[cfg(feature = "alloc-probe")]
+#[global_allocator]
+static GLOBAL: alloc_probe::CountingAllocator = alloc_probe::CountingAllocator;
+
 #[macro_use]
 mod macros;
 mod actions;
@@ -41,11 +47,17 @@ mod blocks;
 mod bulletin_board;
 mod coin_selection;
 pub mod config;
+mod correctness;
 mod cospend;
+mod counts;
+mod denominate;
 mod economic_graph;
 mod graphviz;
+mod lower_bound_metric;
 mod message;
 pub mod metrics;
+mod subset_sum;
+pub use correctness::print_correctness_report;
 pub mod script_type;
 mod transaction;
 mod tx_contruction;
@@ -160,6 +172,8 @@ pub struct SimulationBuilder {
     block_interval: u64,
     /// Number of payment obligations to create
     num_payment_obligations: usize,
+    denominate_change: bool,
+    denominated_funding: Option<crate::config::DenominatedFunding>,
 }
 
 impl SimulationBuilder {
@@ -178,7 +192,22 @@ impl SimulationBuilder {
             max_timestep: TimeStep(max_timestep),
             block_interval,
             num_payment_obligations,
+            denominate_change: false,
+            denominated_funding: None,
         }
+    }
+
+    pub fn denominate_change(mut self, enabled: bool) -> Self {
+        self.denominate_change = enabled;
+        self
+    }
+
+    pub fn denominated_funding(
+        mut self,
+        funding: Option<crate::config::DenominatedFunding>,
+    ) -> Self {
+        self.denominated_funding = funding;
+        self
     }
 
     pub fn build(self) -> Simulation {
@@ -210,6 +239,8 @@ impl SimulationBuilder {
                 max_timestep: self.max_timestep,
                 block_interval: self.block_interval,
                 num_payment_obligations: self.num_payment_obligations,
+                denominate_change: self.denominate_change,
+                denominated_funding: self.denominated_funding,
             },
         };
 
@@ -247,7 +278,7 @@ impl SimulationBuilder {
         // Create wallets according to their type configurations
         for wallet_type in &self.wallet_types {
             let scorer = CompositeScorer {
-                privacy_bundle: crate::metrics::PrivacyBundle::default(),
+                privacy_bundle: crate::config::build_privacy_bundle(&wallet_type.scorer),
                 payment_obligation_weight: wallet_type.scorer.payment_obligation_weight,
                 min_fallback_plans: wallet_type.scorer.min_fallback_plans,
             };
@@ -281,6 +312,8 @@ struct SimulationConfig {
     max_timestep: TimeStep,
     block_interval: u64,
     num_payment_obligations: usize,
+    denominate_change: bool,
+    denominated_funding: Option<crate::config::DenominatedFunding>,
 }
 
 /// all entities are numbered sequentially
@@ -317,6 +350,10 @@ pub struct Simulation {
 }
 
 impl<'a> Simulation {
+    pub(crate) fn denominate_change_enabled(&self) -> bool {
+        self.config.denominate_change
+    }
+
     pub fn build_universe(&mut self) {
         let mut prng = self.prng_factory.generate_prng();
         let wallet_ids: Vec<WalletId> = self.wallet_data.iter().map(|w| w.id).collect();
@@ -325,19 +362,43 @@ impl<'a> Simulation {
             .map(|&id| id.with_mut(self).new_address())
             .collect::<Vec<_>>();
 
-        // For now we just mine a coinbase transaction for each wallet
+        let funding = self.config.denominated_funding.clone();
         let mut i = 0;
-        for address in addresses.iter() {
-            for _ in 0..prng.random_range(5..10) {
+        if let Some(funding) = funding {
+            // Denominated funding: each wallet gets utxos_per_wallet standard-denom UTXOs from a narrow
+            // band, so a multiparty coinjoin of them is dense by construction.
+            let denoms =
+                dense_subset_sum::standard_denoms_in_range(funding.band_min, funding.band_max);
+            assert!(
+                !denoms.is_empty(),
+                "denominated funding band has no standard denoms"
+            );
+            for address in addresses.iter() {
+                let amounts: Vec<u64> = (0..funding.utxos_per_wallet)
+                    .map(|j| denoms[j % denoms.len()])
+                    .collect();
                 let _ = BroadcastSetHandleMut {
                     id: BroadcastSetId(i),
                     sim: self,
                 }
                 .construct_block_template(Weight::MAX_BLOCK)
-                .mine(*address, self);
-
+                .mine_denominated(*address, &amounts, self);
                 self.assert_invariants();
                 i += 1;
+            }
+        } else {
+            // For now we just mine a coinbase transaction for each wallet
+            for address in addresses.iter() {
+                for _ in 0..prng.random_range(5..10) {
+                    let _ = BroadcastSetHandleMut {
+                        id: BroadcastSetId(i),
+                        sim: self,
+                    }
+                    .construct_block_template(Weight::MAX_BLOCK)
+                    .mine(*address, self);
+                    self.assert_invariants();
+                    i += 1;
+                }
             }
         }
 
@@ -912,6 +973,58 @@ impl SimulationResult {
         let file = std::fs::File::create(path).unwrap();
         serde_json::to_writer_pretty(file, &result).unwrap();
     }
+    pub fn dss_transactions(&self) -> Vec<dense_subset_sum::Transaction> {
+        (0..self.sim.tx_data.len())
+            .map(crate::transaction::TxId)
+            .filter_map(|txid| crate::counts::sim_tx_to_dss(&self.sim, txid))
+            .collect()
+    }
+
+    pub fn print_four_counts_report(&self) {
+        let limits = crate::counts::Limits::default();
+        println!(
+            "tx_index | primitive | log2W/count | lower-bound? | status | cpu_us | peak_bytes"
+        );
+        for (i, tx) in self.dss_transactions().into_iter().enumerate() {
+            for row in crate::counts::four_counts(&tx, &limits) {
+                let value = row
+                    .ambiguity
+                    .log()
+                    .map(|l| format!("{:.2}", l / std::f64::consts::LN_2))
+                    .unwrap_or_else(|| "-".to_string());
+                println!(
+                    "{:>8} | {:>8} | {:>11} | {:>12} | {:?} | {:>7} | {:>10}",
+                    i,
+                    row.name,
+                    value,
+                    row.is_lower_bound,
+                    row.status,
+                    row.cpu.as_micros(),
+                    row.peak_bytes,
+                );
+            }
+        }
+    }
+
+    pub fn print_four_counts_summary(&self) {
+        let txs = self.dss_transactions();
+        let bench = crate::counts::bench_four_counts(&txs, &crate::counts::Limits::default());
+        println!("{}", crate::counts::PrimitiveBench::header());
+        for b in &bench {
+            println!("{}", b.row());
+        }
+    }
+
+    pub fn print_density_regime(&self) {
+        println!("tx_index | density regime (best/worst-L bracket at midpoint E)");
+        for (i, tx) in self.dss_transactions().into_iter().enumerate() {
+            match crate::counts::regime_for_tx(&tx) {
+                Some(bracket) => println!("{i:>8} | {bracket}"),
+                None => println!("{i:>8} | (infeasible)"),
+            }
+        }
+    }
+
     // TODO: anon set metrics
 }
 
@@ -945,6 +1058,11 @@ mod tests {
                 privacy_weight: 2.0,
                 payment_obligation_weight: 1.0,
                 min_fallback_plans: 0,
+                subset_sum_threshold: None,
+                subset_sum_max_size: 6,
+                brute_max_terms: 15,
+                radix_threshold: None,
+                radix_density_floor: 0.5,
             },
             script_type: ScriptType::P2tr,
         }];
@@ -987,6 +1105,11 @@ mod tests {
                     privacy_weight: 1.0,
                     payment_obligation_weight: 2.0,
                     min_fallback_plans: 0,
+                    subset_sum_threshold: None,
+                    subset_sum_max_size: 6,
+                    brute_max_terms: 15,
+                    radix_threshold: None,
+                    radix_density_floor: 0.5,
                 },
                 script_type: ScriptType::P2wpkh,
             },
@@ -998,6 +1121,11 @@ mod tests {
                     privacy_weight: 0.0,
                     payment_obligation_weight: 0.0,
                     min_fallback_plans: 0,
+                    subset_sum_threshold: None,
+                    subset_sum_max_size: 6,
+                    brute_max_terms: 15,
+                    radix_threshold: None,
+                    radix_density_floor: 0.5,
                 },
                 script_type: ScriptType::P2wpkh,
             },
@@ -1027,6 +1155,11 @@ mod tests {
                 privacy_weight: 2.0,
                 payment_obligation_weight: 1.0,
                 min_fallback_plans: 0,
+                subset_sum_threshold: None,
+                subset_sum_max_size: 6,
+                brute_max_terms: 15,
+                radix_threshold: None,
+                radix_density_floor: 0.5,
             },
             script_type: ScriptType::P2tr,
         }];
@@ -1119,7 +1252,8 @@ mod tests {
         let candidates = alice.with(&sim).coin_candidates();
         let (selected_outpoints, change_amounts) =
             crate::coin_selection::select_bnb(&candidates, target)
-                .unwrap_or_else(|| crate::coin_selection::select_all(&candidates, target));
+                .or_else(|| crate::coin_selection::select_all(&candidates, target))
+                .expect("alice can cover the payment");
 
         let spend = alice
             .with_mut(&mut sim)
@@ -1234,6 +1368,11 @@ mod tests {
                     privacy_weight: 2.0,
                     payment_obligation_weight: 1.0,
                     min_fallback_plans: 0,
+                    subset_sum_threshold: None,
+                    subset_sum_max_size: 6,
+                    brute_max_terms: 15,
+                    radix_threshold: None,
+                    radix_density_floor: 0.5,
                 },
                 script_type,
             }];
@@ -1292,6 +1431,11 @@ mod tests {
                     privacy_weight: 0.0,
                     payment_obligation_weight: 1.0,
                     min_fallback_plans: 0,
+                    subset_sum_threshold: None,
+                    subset_sum_max_size: 6,
+                    brute_max_terms: 15,
+                    radix_threshold: None,
+                    radix_density_floor: 0.5,
                 },
                 script_type: ScriptType::P2tr,
             },
@@ -1303,6 +1447,11 @@ mod tests {
                     privacy_weight: 0.0,
                     payment_obligation_weight: 1.0,
                     min_fallback_plans: 0,
+                    subset_sum_threshold: None,
+                    subset_sum_max_size: 6,
+                    brute_max_terms: 15,
+                    radix_threshold: None,
+                    radix_density_floor: 0.5,
                 },
                 script_type: ScriptType::P2tr,
             },
@@ -1366,6 +1515,167 @@ mod tests {
         assert!(
             saw_consolidation,
             "Consolidator should broadcast a self-consolidation transaction"
+        );
+    }
+}
+
+#[cfg(test)]
+mod sp1_config_tests {
+    use crate::config::{ScorerConfig, WalletTypeConfig};
+    use crate::script_type::ScriptType;
+    use crate::SimulationBuilder;
+
+    fn wt() -> WalletTypeConfig {
+        WalletTypeConfig {
+            name: "t".into(),
+            count: 2,
+            strategies: vec!["UnilateralSpender".into()],
+            scorer: ScorerConfig {
+                privacy_weight: 0.0,
+                payment_obligation_weight: 1.0,
+                min_fallback_plans: 0,
+                subset_sum_threshold: None,
+                subset_sum_max_size: 6,
+                brute_max_terms: 15,
+                radix_threshold: None,
+                radix_density_floor: 0.5,
+            },
+            script_type: ScriptType::P2tr,
+        }
+    }
+
+    #[test]
+    fn denominate_change_defaults_off_and_can_be_enabled() {
+        let off = SimulationBuilder::new(42, vec![wt()], 5, 1, 0).build();
+        assert!(!off.denominate_change_enabled());
+        let on = SimulationBuilder::new(42, vec![wt()], 5, 1, 0)
+            .denominate_change(true)
+            .build();
+        assert!(on.denominate_change_enabled());
+    }
+
+    // Feasibility proof: denominated funding seeds each wallet with denominated UTXOs and build_universe
+    // (which calls assert_invariants) holds with a multi-output coinbase.
+    #[test]
+    fn denominated_funding_seeds_denominated_utxos_and_holds_invariants() {
+        use crate::config::DenominatedFunding;
+        use dense_subset_sum::is_standard_denom;
+        let mut sim = SimulationBuilder::new(42, vec![wt()], 5, 1, 0)
+            .denominated_funding(Some(DenominatedFunding {
+                band_min: 512,
+                band_max: 8192,
+                utxos_per_wallet: 4,
+            }))
+            .build();
+        sim.build_universe(); // panics via assert_invariants if the denominated coinbase breaks anything
+
+        let amounts: Vec<u64> = sim
+            .wallet_info
+            .iter()
+            .flat_map(|w| w.confirmed_utxos.iter().copied().collect::<Vec<_>>())
+            .map(|op| op.with(&sim).data().amount.to_sat())
+            .collect();
+
+        // 2 wallets (wt count) × 4 UTXOs each = 8 — proves ALL coinbase outputs got registered.
+        assert_eq!(
+            amounts.len(),
+            8,
+            "every denominated coinbase output must be registered, got {amounts:?}"
+        );
+        assert!(
+            amounts.iter().all(|&a| is_standard_denom(a)),
+            "funded UTXOs must be standard denoms: {amounts:?}"
+        );
+        assert!(
+            amounts.iter().all(|&a| (512..=8192).contains(&a)),
+            "funded UTXOs must be in band: {amounts:?}"
+        );
+    }
+
+    /// A denominated multiparty scenario: `participants` wallets (+1 aggregator) funded with
+    /// `upw` standard-denomination UTXOs in `[band_min, band_max]`, paying `num_obl` obligations
+    /// over `max_ts` ticks. Used to exercise emergent coinjoin formation and the counting paths.
+    #[allow(clippy::too_many_arguments)]
+    fn dense_scenario(
+        seed: u64,
+        participants: usize,
+        max_ts: u64,
+        num_obl: usize,
+        band_min: u64,
+        band_max: u64,
+        upw: usize,
+        denom_change: bool,
+    ) -> SimulationBuilder {
+        use crate::config::DenominatedFunding;
+        let participant = WalletTypeConfig {
+            name: "participant".into(),
+            count: participants,
+            strategies: vec!["MultipartyStrategy".into()],
+            scorer: ScorerConfig {
+                privacy_weight: 1000.0,
+                payment_obligation_weight: 1.0,
+                min_fallback_plans: 0,
+                subset_sum_threshold: Some(100),
+                subset_sum_max_size: 6,
+                brute_max_terms: 15,
+                radix_threshold: Some(50),
+                radix_density_floor: 0.5,
+            },
+            script_type: ScriptType::P2tr,
+        };
+        let aggregator = WalletTypeConfig {
+            name: "aggregator".into(),
+            count: 1,
+            strategies: vec!["AggregatorStrategy".into()],
+            scorer: ScorerConfig {
+                privacy_weight: 0.0,
+                payment_obligation_weight: 1.0,
+                min_fallback_plans: 0,
+                subset_sum_threshold: None,
+                subset_sum_max_size: 6,
+                brute_max_terms: 15,
+                radix_threshold: None,
+                radix_density_floor: 0.5,
+            },
+            script_type: ScriptType::P2tr,
+        };
+        SimulationBuilder::new(seed, vec![participant, aggregator], max_ts, 1, num_obl)
+            .denominate_change(denom_change)
+            .denominated_funding(Some(DenominatedFunding {
+                band_min,
+                band_max,
+                utxos_per_wallet: upw,
+            }))
+    }
+
+    // Regression for the over-spend fix. A small denominated band funds wallets with balances
+    // far below their (Geometric) obligations; the planner previously selected all inputs without
+    // checking coverage and built txs with outputs > inputs, tripping transaction.rs's
+    // value-conservation assert. The sim must now complete — wallets defer unaffordable
+    // obligations instead of over-spending.
+    #[test]
+    fn small_band_denominated_scenario_completes_without_overspend() {
+        let mut sim = dense_scenario(7, 20, 40, 40, 512, 8192, 4, true).build();
+        sim.build_universe();
+        let _ = sim.run();
+    }
+
+    // Exploration fixture (ignored): the larger denominated scenario forms a multiparty coinjoin.
+    // Emergent throughput is low (≈one large session per run) — see
+    // docs/superpowers/specs/2026-05-31-fix-sim-coordination-for-dense-coinjoins-design.md. This
+    // is the fixture for the switch-discovery sweep, not a pass/fail assertion of the full goal.
+    #[test]
+    #[ignore]
+    fn dense_large_forms_coinjoin() {
+        let mut sim = dense_scenario(7, 20, 60, 40, 131_072, 2_097_152, 8, true).build();
+        sim.build_universe();
+        let result = sim.run();
+        assert!(
+            result
+                .dss_transactions()
+                .iter()
+                .any(|t| t.inputs.len() >= 2),
+            "expected at least one multiparty coinjoin to form"
         );
     }
 }

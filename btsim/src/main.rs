@@ -14,6 +14,10 @@ fn main() {
     env_logger::init();
     let args = Args::parse();
 
+    if std::env::var_os("BTSIM_CORRECTNESS").is_some() {
+        btsim::print_correctness_report();
+    }
+
     // Read config file path from environment or use default
     let config_path = env::var("CONFIG_FILE").unwrap_or_else(|_| "config.toml".to_string());
 
@@ -28,10 +32,17 @@ fn main() {
         1, // TODO: hardcoded block interval for now. If we change this we need to ensure payment obligations are not being double handled.
         config.simulation.num_payment_obligations,
     )
+    .denominate_change(config.simulation.denominate_change)
+    .denominated_funding(config.simulation.denominated_funding.clone())
     .build();
 
     sim.build_universe();
     let result = sim.run();
+    if std::env::var_os("BTSIM_FOUR_COUNTS").is_some() {
+        result.print_four_counts_report();
+        result.print_four_counts_summary();
+        result.print_density_regime();
+    }
     if let Some(dir) = args.artifacts_dir.as_ref() {
         std::fs::create_dir_all(dir).unwrap();
         let graph_path = dir.join("graph.svg");
