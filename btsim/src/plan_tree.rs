@@ -1,6 +1,7 @@
+use bdk_coin_select::Target;
 use bitcoin::Amount;
 
-use crate::transaction::Outpoint;
+use crate::{coin_selection::{select_all, select_bnb, CoinCandidate}, transaction::Outpoint};
 
 /// A single registration event in a multi-party session.
 #[derive(Debug, Clone, PartialEq)]
@@ -189,6 +190,61 @@ mod tests {
             assert!(window[0] >= window[1], "denominations not sorted descending");
         }
     }
+}
+
+/// Generate up to `k` distinct input sets from `candidates` using iterative BNB exclusion.
+///
+/// Each successive call to BNB has UTXOs from all prior results excluded, producing diverse
+/// input sets. Falls back to `select_all` when no BNB solution exists and no candidates have
+/// been found yet. Returns an empty vec only if even `select_all` yields nothing meaningful
+/// (i.e. the total available value cannot cover the target).
+pub(crate) fn generate_input_candidates(
+    candidates: &[CoinCandidate],
+    target: Target,
+    k: usize,
+) -> Vec<Vec<Outpoint>> {
+    let mut results: Vec<Vec<Outpoint>> = Vec::new();
+    let mut excluded: std::collections::HashSet<Outpoint> = std::collections::HashSet::new();
+
+    while results.len() < k {
+        let remaining: Vec<&CoinCandidate> =
+            candidates.iter().filter(|c| !excluded.contains(&c.outpoint)).collect();
+
+        if remaining.is_empty() {
+            break;
+        }
+
+        // Re-build an owned slice for select_bnb (it takes a &[CoinCandidate] by value clone).
+        let owned: Vec<CoinCandidate> = remaining
+            .iter()
+            .map(|c| CoinCandidate {
+                outpoint: c.outpoint,
+                amount_sats: c.amount_sats,
+                weight_wu: c.weight_wu,
+                is_segwit: c.is_segwit,
+            })
+            .collect();
+
+        if let Some((selected, _)) = select_bnb(&owned, target) {
+            for op in &selected {
+                excluded.insert(*op);
+            }
+            results.push(selected);
+        } else {
+            // BNB found nothing from the remaining pool — stop trying more iterations.
+            break;
+        }
+    }
+
+    // Fallback: if BNB never found anything, try spend-all on the full candidate set.
+    if results.is_empty() {
+        let (selected, _) = select_all(candidates, target);
+        if !selected.is_empty() {
+            results.push(selected);
+        }
+    }
+
+    results
 }
 
 pub(crate) fn build_plan_tree(
