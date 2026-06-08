@@ -355,12 +355,47 @@ impl<'a> WalletHandleMut<'a> {
                     })
                     .map(|op| Input { outpoint: *op })
                     .collect();
+
+                // Build the local plan tree for this session so that change decomposition
+                // uses structured denominations rather than a single consolidated output.
+                let plan_tree = {
+                    use crate::plan_tree::{build_plan_tree, DenominationMenu};
+                    use std::collections::HashMap as StdHashMap;
+
+                    let payment_obligations = self.unhandled_payment_obligations();
+                    let payment_amounts: Vec<_> =
+                        payment_obligations.iter().map(|po| po.amount).collect();
+                    let utxo_amounts: StdHashMap<_, _> = self
+                        .spendable_utxos()
+                        .into_iter()
+                        .map(|u| (u.outpoint, u.amount))
+                        .collect();
+                    let candidates =
+                        vec![my_inputs.iter().map(|i| i.outpoint).collect::<Vec<_>>()];
+                    let menu = DenominationMenu::standard();
+                    // Flat fee placeholder; real fee estimation is deferred.
+                    let fee = bitcoin::Amount::from_sat(1_000);
+
+                    if candidates[0].is_empty() || payment_amounts.is_empty() {
+                        None
+                    } else {
+                        Some(build_plan_tree(
+                            candidates,
+                            payment_amounts,
+                            |op| utxo_amounts.get(op).copied().unwrap_or(bitcoin::Amount::ZERO),
+                            &menu,
+                            fee,
+                        ))
+                    }
+                };
+
                 self.info_mut().active_multi_party_payjoins.insert(
                     *bulletin_board_id,
                     MultiPartyPayjoinSession {
                         payment_obligation_ids: vec![],
                         inputs: my_inputs,
                         state: TxConstructionState::AcceptedProposal,
+                        plan_tree,
                     },
                 );
                 self.data_mut().messages_processed.insert(*message_id);
@@ -416,21 +451,22 @@ impl<'a> WalletHandleMut<'a> {
             }
             Action::ContributeOutputsToSession(bulletin_board_id, po_ids, change_amounts) => {
                 use crate::bulletin_board::BroadcastMessageType;
+
+                // Collect PO amounts first, before any mutable session borrow.
+                let po_amounts: Vec<bitcoin::Amount> = po_ids
+                    .iter()
+                    .map(|po_id| po_id.with(self.sim).data().amount)
+                    .collect();
+
                 let mut outputs = vec![];
-                for po_id in po_ids {
-                    let po = po_id.with(self.sim).data().clone();
-                    let to_addr = po.to.with_mut(self.sim).new_address();
-                    outputs.push(Output {
-                        amount: po.amount,
-                        address_id: to_addr,
-                    });
+                for (po_id, &po_amount) in po_ids.iter().zip(po_amounts.iter()) {
+                    let to_wallet = po_id.with(self.sim).data().to;
+                    let to_addr = to_wallet.with_mut(self.sim).new_address();
+                    outputs.push(Output { amount: po_amount, address_id: to_addr });
                 }
                 for &change_amount in change_amounts {
                     let change_addr = self.new_address();
-                    outputs.push(Output {
-                        amount: change_amount,
-                        address_id: change_addr,
-                    });
+                    outputs.push(Output { amount: change_amount, address_id: change_addr });
                 }
                 for output in &outputs {
                     self.sim.add_message_to_bulletin_board(
@@ -445,6 +481,18 @@ impl<'a> WalletHandleMut<'a> {
                     .unwrap();
                 session.payment_obligation_ids = po_ids.clone();
                 session.state = TxConstructionState::SentOutputs;
+
+                // Advance the plan tree cursor through the outputs just committed.
+                // Payment outputs come first (matching tree structure), then change.
+                if let Some(tree) = &mut session.plan_tree {
+                    use crate::plan_tree::StepAction;
+                    for amt in po_amounts {
+                        let _ = tree.commit(&StepAction::RegisterOutput(amt));
+                    }
+                    for &amt in change_amounts {
+                        let _ = tree.commit(&StepAction::RegisterOutput(amt));
+                    }
+                }
             }
             Action::ContinueParticipateInCospend(bulletin_board_id) => {
                 self.participate_in_multi_party_payjoin(bulletin_board_id);

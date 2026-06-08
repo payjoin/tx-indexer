@@ -10,14 +10,14 @@ use crate::{
 };
 
 /// A single registration event in a multi-party session.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum StepAction {
     RegisterInput(Outpoint),
     RegisterOutput(Amount),
 }
 
 /// One node in the plan tree, representing a step and its continuations.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlanNode {
     pub(crate) action: StepAction,
     pub(crate) children: Vec<PlanNode>,
@@ -29,13 +29,18 @@ pub(crate) struct PlanNode {
 /// At depth 0 the cursor is at the phantom root; `next_actions` returns all root-level
 /// actions. Each `commit` prunes siblings and advances depth by 1. After commit k,
 /// the live path is always `roots[0].children[0]...` (k-1 times `.children[0]`).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlanTree {
     /// One subtree per input candidate (children of the sentinel root).
     pub(crate) roots: Vec<PlanNode>,
     /// Number of commits made. After each commit, siblings are pruned so the path
     /// is always `roots[0].children[0]...` — no index array needed.
     depth: usize,
+    /// Number of RegisterInput nodes at the top of each root-to-leaf path, followed by
+    /// exactly this many RegisterOutput nodes that represent payment obligations (not change).
+    /// Used to positionally separate payment outputs from change outputs in a leaf path.
+    pub(crate) n_inputs: usize,
+    pub(crate) n_payment_outputs: usize,
 }
 
 /// Standard denomination amounts used when decomposing change.
@@ -63,8 +68,8 @@ pub(crate) enum CommitError {
 }
 
 impl PlanTree {
-    pub(crate) fn new(roots: Vec<PlanNode>) -> Self {
-        Self { roots, depth: 0 }
+    pub(crate) fn new(roots: Vec<PlanNode>, n_inputs: usize, n_payment_outputs: usize) -> Self {
+        Self { roots, depth: 0, n_inputs, n_payment_outputs }
     }
 
     /// The current live choices: roots before first commit, otherwise the children of the
@@ -108,25 +113,53 @@ impl PlanTree {
 
     /// Re-score all reachable leaves against current peer state.
     ///
-    /// Builds a minimal `Plan` from each leaf path (my inputs/outputs from the path,
-    /// counterparty inputs/outputs from `peer`) and delegates to `CompositeScorer::score`.
-    /// The residue is left empty — a stub approximation that treats all payment obligations
-    /// as handled. Full residue computation is deferred until this is wired into live session
-    /// state.
+    /// Builds a `Plan` from each leaf path using real UTXO amounts looked up from
+    /// `wallet`. `mode` controls whether external penalties are applied:
+    /// use `EXTERNAL_PENALTIES_OFF` before peer info is available (idle / pre-session)
+    /// and `EXTERNAL_PENALTIES_ON` once the bulletin board has peer outputs.
     pub(crate) fn score_leaves(
         &self,
         peer: &PeerState,
         scorer: &CompositeScorer,
         wallet: &WalletHandle,
+        mode: CostMode,
     ) -> Vec<(Vec<&StepAction>, LeafScore)> {
         self.reachable_leaves()
             .into_iter()
             .map(|path| {
-                let plan = plan_from_path(&path, peer);
-                let cost = scorer.score(&plan, wallet, CostMode::EXTERNAL_PENALTIES_ON);
+                let plan = plan_from_path(&path, peer, wallet);
+                let cost = scorer.score(&plan, wallet, mode);
                 (path, LeafScore(cost.0))
             })
             .collect()
+    }
+
+    /// Returns the outpoints that appear in every reachable leaf path as `RegisterInput`
+    /// nodes — i.e. inputs the wallet will spend regardless of which denomination path
+    /// is chosen. Safe to advertise in the orderbook unconditionally.
+    pub(crate) fn committed_inputs(&self) -> Vec<Outpoint> {
+        use std::collections::HashSet;
+        let leaves = self.reachable_leaves();
+        if leaves.is_empty() {
+            return vec![];
+        }
+        let extract = |leaf: &Vec<&StepAction>| -> HashSet<Outpoint> {
+            leaf.iter()
+                .filter_map(|a| {
+                    if let StepAction::RegisterInput(op) = a {
+                        Some(*op)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+        let mut common = extract(&leaves[0]);
+        for leaf in &leaves[1..] {
+            let s = extract(leaf);
+            common = common.intersection(&s).copied().collect();
+        }
+        common.into_iter().collect()
     }
 
     /// Returns the slice of nodes representing the current live choices.
@@ -177,6 +210,7 @@ fn collect_leaves<'a>(
 impl DenominationMenu {
     /// Powers of two and powers of ten in satoshis, deduplicated and sorted descending,
     /// covering 1_000 sat to 100_000_000 sat (1 BTC).
+    // TODO: this should be a static or const reference
     pub(crate) fn standard() -> Self {
         let mut denoms: Vec<u64> = Vec::new();
 
@@ -208,17 +242,25 @@ impl DenominationMenu {
     }
 }
 
+/// Maximum number of change outputs a single decomposition path may produce.
+/// Caps the recursion depth so large UTXO amounts don't produce exponential trees.
+const MAX_DECOMPOSE_DEPTH: usize = 4;
+
 /// Recursively decomposes `remaining` into a set of `RegisterOutput` nodes branching on each
 /// denomination in `menu`. Every root-to-leaf path through the result sums to exactly
-/// `remaining` (or to `remaining` rounded down to the nearest denomination, with the residual
-/// emitted as a single unstructured change leaf when `remaining < min(menu)`).
+/// `remaining` (or close to it — at `MAX_DECOMPOSE_DEPTH` the remainder is emitted as a single
+/// unstructured change output).
 pub(crate) fn decompose(remaining: Amount, menu: &DenominationMenu) -> Vec<PlanNode> {
+    decompose_inner(remaining, menu, 0)
+}
+
+fn decompose_inner(remaining: Amount, menu: &DenominationMenu, depth: usize) -> Vec<PlanNode> {
     if remaining == Amount::ZERO {
         return vec![];
     }
 
-    // If remaining is below the smallest denomination, emit it as a single residual leaf.
-    if menu.min().map_or(true, |min| remaining < min) {
+    // At the depth cap, or below the smallest denomination, emit a single residual leaf.
+    if depth >= MAX_DECOMPOSE_DEPTH || menu.min().map_or(true, |min| remaining < min) {
         return vec![PlanNode {
             action: StepAction::RegisterOutput(remaining),
             children: vec![],
@@ -231,7 +273,7 @@ pub(crate) fn decompose(remaining: Amount, menu: &DenominationMenu) -> Vec<PlanN
         .filter(|&d| d <= remaining)
         .map(|d| PlanNode {
             action: StepAction::RegisterOutput(d),
-            children: decompose(remaining - d, menu),
+            children: decompose_inner(remaining - d, menu, depth + 1),
         })
         .collect()
 }
@@ -298,7 +340,7 @@ mod tests {
         let y = PlanNode { action: StepAction::RegisterOutput(Amount::from_sat(2_000)), children: vec![] };
         let a = PlanNode { action: StepAction::RegisterOutput(Amount::from_sat(10_000)), children: vec![x, y] };
         let b = PlanNode { action: StepAction::RegisterOutput(Amount::from_sat(20_000)), children: vec![] };
-        PlanTree::new(vec![a, b])
+        PlanTree::new(vec![a, b], 0, 0)
     }
 
     #[test]
@@ -428,6 +470,7 @@ pub(crate) fn build_plan_tree(
     menu: &DenominationMenu,
     fee: Amount,
 ) -> PlanTree {
+    let n_payment_outputs = payment_amounts.len();
     let payment_total: Amount = payment_amounts.iter().copied().sum();
 
     let roots = input_candidates
@@ -463,22 +506,24 @@ pub(crate) fn build_plan_tree(
         })
         .collect();
 
-    PlanTree::new(roots)
+    PlanTree::new(roots, 0, n_payment_outputs)
 }
 
-/// Build a minimal `Plan` from a leaf action path and current peer state.
+/// Build a `Plan` from a leaf action path and current peer state.
 ///
-/// Collects `RegisterInput` actions as `my_inputs` (with zero amount as a stub — real
-/// amounts come from the UTXO pool at session time) and `RegisterOutput` actions as
-/// `my_outputs`. Counterparty inputs/outputs come from `peer`. The residue is left
-/// empty; full computation is deferred to when this is wired into live session state.
-fn plan_from_path(path: &[&StepAction], peer: &PeerState) -> Plan {
+/// Input amounts are looked up from the live UTXO pool via `wallet` so that
+/// `SubsetSumMetric` sees real values. Residue is left empty — all payment
+/// obligations are treated as handled for the purpose of leaf ranking.
+fn plan_from_path(path: &[&StepAction], peer: &PeerState, wallet: &WalletHandle) -> Plan {
     let mut my_inputs = Vec::new();
     let mut my_outputs = Vec::new();
 
     for action in path {
         match action {
-            StepAction::RegisterInput(op) => my_inputs.push((*op, Amount::ZERO)),
+            StepAction::RegisterInput(op) => {
+                let amount = op.with(wallet.sim).data().amount;
+                my_inputs.push((*op, amount));
+            }
             StepAction::RegisterOutput(amt) => my_outputs.push(*amt),
         }
     }

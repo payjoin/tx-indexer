@@ -1,8 +1,8 @@
 {
   "total_payment_obligations": 8,
   "percentage_payment_obligations_missed": 0.5,
-  "total_block_weight_wu": 10702,
-  "average_fee_cost_sats": 295,
+  "total_block_weight_wu": 12190,
+  "average_fee_cost_sats": 1614,
   "dust_utxo_count": 0,
   "utxo_size_distribution_sats": [
     3519,
@@ -12,9 +12,20 @@
     8422,
     16713,
     25140,
-    4999974750,
-    4999990931,
-    4999994481,
+    100000000,
+    100000000,
+    100000000,
+    100000000,
+    100000000,
+    100000000,
+    100000000,
+    100000000,
+    100000000,
+    100000000,
+    100000000,
+    100000000,
+    4199983663,
+    4599973860,
     5000000000,
     5000000000,
     5000000000,
@@ -52,17 +63,18 @@
     5000000000,
     5000000000,
     5000000000,
-    5000000251,
-    5000000339,
+    5000000000,
+    5000001229,
+    5000002000,
     9999970153
   ],
   "wallet_utxo_stats": [
     {
       "wallet_id": 0,
       "dust_count": 0,
-      "total_count": 20,
+      "total_count": 24,
       "p50_sats": 5000000000,
-      "p90_sats": 5000000251
+      "p90_sats": 5000001229
     },
     {
       "wallet_id": 1,
@@ -81,8 +93,8 @@
     {
       "wallet_id": 3,
       "dust_count": 0,
-      "total_count": 6,
-      "p50_sats": 5000000000,
+      "total_count": 14,
+      "p50_sats": 100000000,
       "p90_sats": 5000000000
     },
     {

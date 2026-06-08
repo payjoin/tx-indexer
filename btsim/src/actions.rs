@@ -10,7 +10,7 @@ use crate::{
     cospend::{CospendInterest, UtxoWithMetadata},
     message::MessageId,
     metrics::PrivacyBundle,
-    plan_tree::PlanTree,
+    plan_tree::{PeerState, StepAction},
     transaction::Outpoint,
     tx_contruction::TxConstructionState,
     wallet::{AddressId, PaymentObligationData, PaymentObligationId, WalletHandle},
@@ -501,15 +501,11 @@ impl Strategy for BatchSpender {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct MultipartyStrategy {
-    /// Pre-computed plan tree for the current session. Built when participation begins;
-    /// not yet used to drive action selection — existing round-by-round logic is unchanged.
-    pub(crate) plan_tree: Option<PlanTree>,
-}
+pub(crate) struct MultipartyStrategy;
 
 impl MultipartyStrategy {
     pub(crate) fn new() -> Self {
-        Self { plan_tree: None }
+        Self
     }
 }
 
@@ -552,7 +548,84 @@ impl Strategy for MultipartyStrategy {
             {
                 let po_ids: Vec<PaymentObligationId> =
                     payment_obligations.iter().map(|po| po.id).collect();
-                let change = change_for_session_contribution(bb_id, &payment_obligations, wallet);
+
+                // Use the plan tree to select structured change denominations when available.
+                // Fall back to the standard coin-selection-based change computation otherwise.
+                let change = session
+                    .plan_tree
+                    .as_ref()
+                    .and_then(|tree| {
+                        // Guard: if POs were revealed after the tree was built, the tree's
+                        // `remaining` was computed with fewer payments than we're actually
+                        // paying now. Using stale change would produce total outputs > total
+                        // inputs. Fall back to change_for_session_contribution instead.
+                        if payment_obligations.len() != tree.n_payment_outputs {
+                            return None;
+                        }
+
+                        use crate::bulletin_board::BroadcastMessageType;
+
+                        let bb_messages = &wallet.sim.bulletin_boards[bb_id.0].messages;
+                        let their_inputs = bb_messages
+                            .iter()
+                            .filter_map(|msg| match msg {
+                                BroadcastMessageType::ContributeInputs(op)
+                                    if !session.inputs.iter().any(|i| i.outpoint == *op) =>
+                                {
+                                    // Amount unknown at this point; zero is a stub.
+                                    Some((*op, bitcoin::Amount::ZERO))
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                        let their_outputs = bb_messages
+                            .iter()
+                            .filter_map(|msg| match msg {
+                                BroadcastMessageType::ContributeOutputs(out) => {
+                                    Some(out.amount)
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                        let peer = PeerState { their_inputs, their_outputs };
+
+                        let scored =
+                            tree.score_leaves(&peer, scorer, wallet, CostMode::EXTERNAL_PENALTIES_ON);
+                        let (best_path, _) = scored
+                            .into_iter()
+                            .min_by(|a, b| {
+                                a.1 .0
+                                    .partial_cmp(&b.1 .0)
+                                    .unwrap_or(std::cmp::Ordering::Equal)
+                            })?;
+
+                        // Extract change outputs using positional filtering: the tree
+                        // structure guarantees the first n_payment_outputs RegisterOutput
+                        // nodes are payments; everything after is change. This avoids
+                        // value-based matching, which breaks if a change denomination
+                        // coincidentally equals a payment amount.
+                        let n_pay = tree.n_payment_outputs;
+                        let mut pay_seen = 0usize;
+                        let change: Vec<bitcoin::Amount> = best_path
+                            .iter()
+                            .filter_map(|action| match action {
+                                StepAction::RegisterOutput(amt) => {
+                                    if pay_seen < n_pay {
+                                        pay_seen += 1;
+                                        None
+                                    } else {
+                                        Some(*amt)
+                                    }
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                        if change.is_empty() { None } else { Some(change) }
+                    })
+                    .unwrap_or_else(|| {
+                        change_for_session_contribution(bb_id, &payment_obligations, wallet)
+                    });
+
                 actions.push(Action::ContributeOutputsToSession(*bb_id, po_ids, change));
             }
         }
@@ -649,7 +722,7 @@ impl Strategy for MultipartyStrategy {
     }
 
     fn clone_box(&self) -> Box<dyn Strategy> {
-        Box::new(Self { plan_tree: self.plan_tree.clone() })
+        Box::new(Self)
     }
 }
 
@@ -842,6 +915,7 @@ mod tests {
                 state,
                 inputs: vec![],
                 payment_obligation_ids: vec![],
+                plan_tree: None,
             },
         );
         wallet.update_info(info);
