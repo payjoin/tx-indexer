@@ -19,12 +19,17 @@ pub(crate) struct PlanNode {
 
 /// The full tree of viable contribution sequences for a session, with a cursor
 /// tracking which actions have already been committed.
+///
+/// At depth 0 the cursor is at the phantom root; `next_actions` returns all root-level
+/// actions. Each `commit` prunes siblings and advances depth by 1. After commit k,
+/// the live path is always `roots[0].children[0]...` (k-1 times `.children[0]`).
 #[derive(Debug)]
 pub(crate) struct PlanTree {
     /// One subtree per input candidate (children of the sentinel root).
     pub(crate) roots: Vec<PlanNode>,
-    /// Indices into each level's children, starting from roots.
-    cursor_path: Vec<usize>,
+    /// Number of commits made. After each commit, siblings are pruned so the path
+    /// is always `roots[0].children[0]...` — no index array needed.
+    depth: usize,
 }
 
 /// Standard denomination amounts used when decomposing change.
@@ -53,25 +58,96 @@ pub(crate) enum CommitError {
 
 impl PlanTree {
     pub(crate) fn new(roots: Vec<PlanNode>) -> Self {
-        Self { roots, cursor_path: vec![] }
+        Self { roots, depth: 0 }
     }
 
+    /// The current live choices: roots before first commit, otherwise the children of the
+    /// committed node at `depth`.
     pub(crate) fn next_actions(&self) -> Vec<&StepAction> {
-        todo!()
+        self.current_level().iter().map(|n| &n.action).collect()
     }
 
+    /// All root-to-leaf action paths reachable from the current cursor position.
     pub(crate) fn reachable_leaves(&self) -> Vec<Vec<&StepAction>> {
-        todo!()
+        let mut leaves = Vec::new();
+        for node in self.current_level() {
+            collect_leaves(node, &mut vec![], &mut leaves);
+        }
+        leaves
     }
 
-    pub(crate) fn commit(&mut self, _action: &StepAction) -> Result<(), CommitError> {
-        todo!()
+    /// Advance the cursor to the choice matching `action`, pruning all siblings.
+    /// Returns `CommitError::ActionNotFound` if no choice matches.
+    /// Returns `CommitError::AlreadyAtLeaf` if there are no further choices.
+    pub(crate) fn commit(&mut self, action: &StepAction) -> Result<(), CommitError> {
+        let choices = self.current_level_mut();
+
+        if choices.is_empty() {
+            return Err(CommitError::AlreadyAtLeaf);
+        }
+
+        let idx = choices
+            .iter()
+            .position(|n| &n.action == action)
+            .ok_or(CommitError::ActionNotFound)?;
+
+        // Keep only the chosen node; drain and replace.
+        let chosen = choices.swap_remove(idx);
+        choices.clear();
+        choices.push(chosen);
+
+        self.depth += 1;
+        Ok(())
     }
 
     pub(crate) fn score_leaves(&self, _peer: &PeerState) -> Vec<(Vec<&StepAction>, LeafScore)> {
         todo!()
     }
+
+    /// Returns the slice of nodes representing the current live choices.
+    ///
+    /// At depth 0 this is `&self.roots`. At depth k it follows the single committed
+    /// path k times via `.children[0]` and returns that node's children.
+    fn current_level(&self) -> &[PlanNode] {
+        // SAFETY: after each commit, siblings are pruned to exactly one element.
+        // The path roots[0].children[0]... is therefore always valid up to `depth`.
+        unsafe {
+            let mut ptr: *const Vec<PlanNode> = &self.roots;
+            for _ in 0..self.depth {
+                ptr = &(&(*ptr))[0].children;
+            }
+            &*ptr
+        }
+    }
+
+    fn current_level_mut(&mut self) -> &mut Vec<PlanNode> {
+        // SAFETY: same invariant as current_level.
+        unsafe {
+            let mut ptr: *mut Vec<PlanNode> = &mut self.roots;
+            for _ in 0..self.depth {
+                ptr = &mut (&mut (*ptr))[0].children;
+            }
+            &mut *ptr
+        }
+    }
 }
+
+fn collect_leaves<'a>(
+    node: &'a PlanNode,
+    path: &mut Vec<&'a StepAction>,
+    out: &mut Vec<Vec<&'a StepAction>>,
+) {
+    path.push(&node.action);
+    if node.children.is_empty() {
+        out.push(path.clone());
+    } else {
+        for child in &node.children {
+            collect_leaves(child, path, out);
+        }
+    }
+    path.pop();
+}
+
 
 impl DenominationMenu {
     /// Powers of two and powers of ten in satoshis, deduplicated and sorted descending,
@@ -189,6 +265,68 @@ mod tests {
         for window in menu.denominations.windows(2) {
             assert!(window[0] >= window[1], "denominations not sorted descending");
         }
+    }
+
+    fn simple_tree() -> PlanTree {
+        // Two roots: A and B. A has children X and Y.
+        let x = PlanNode { action: StepAction::RegisterOutput(Amount::from_sat(1_000)), children: vec![] };
+        let y = PlanNode { action: StepAction::RegisterOutput(Amount::from_sat(2_000)), children: vec![] };
+        let a = PlanNode { action: StepAction::RegisterOutput(Amount::from_sat(10_000)), children: vec![x, y] };
+        let b = PlanNode { action: StepAction::RegisterOutput(Amount::from_sat(20_000)), children: vec![] };
+        PlanTree::new(vec![a, b])
+    }
+
+    #[test]
+    fn next_actions_at_root_returns_all_roots() {
+        let tree = simple_tree();
+        let actions = tree.next_actions();
+        assert_eq!(actions.len(), 2);
+        assert!(actions.contains(&&StepAction::RegisterOutput(Amount::from_sat(10_000))));
+        assert!(actions.contains(&&StepAction::RegisterOutput(Amount::from_sat(20_000))));
+    }
+
+    #[test]
+    fn commit_prunes_siblings_and_advances_cursor() {
+        let mut tree = simple_tree();
+        tree.commit(&StepAction::RegisterOutput(Amount::from_sat(10_000))).unwrap();
+        // After committing A, only A should remain at the root level.
+        let actions = tree.next_actions();
+        assert_eq!(actions.len(), 2); // A's children: X and Y
+        assert!(actions.contains(&&StepAction::RegisterOutput(Amount::from_sat(1_000))));
+        assert!(actions.contains(&&StepAction::RegisterOutput(Amount::from_sat(2_000))));
+    }
+
+    #[test]
+    fn commit_unknown_action_returns_error() {
+        let mut tree = simple_tree();
+        let result = tree.commit(&StepAction::RegisterOutput(Amount::from_sat(99_999)));
+        assert!(matches!(result, Err(CommitError::ActionNotFound)));
+    }
+
+    #[test]
+    fn commit_at_leaf_returns_error() {
+        let mut tree = simple_tree();
+        // Commit to B (a leaf)
+        tree.commit(&StepAction::RegisterOutput(Amount::from_sat(20_000))).unwrap();
+        let result = tree.commit(&StepAction::RegisterOutput(Amount::from_sat(20_000)));
+        assert!(matches!(result, Err(CommitError::AlreadyAtLeaf)));
+    }
+
+    #[test]
+    fn reachable_leaves_returns_all_leaf_paths() {
+        let tree = simple_tree();
+        let leaves = tree.reachable_leaves();
+        // Expected paths: [A,X], [A,Y], [B]
+        assert_eq!(leaves.len(), 3);
+    }
+
+    #[test]
+    fn reachable_leaves_shrinks_after_commit() {
+        let mut tree = simple_tree();
+        tree.commit(&StepAction::RegisterOutput(Amount::from_sat(10_000))).unwrap();
+        let leaves = tree.reachable_leaves();
+        // Only A's subtree remains: [A,X], [A,Y]  — but cursor is now inside A, so leaves = [X], [Y]
+        assert_eq!(leaves.len(), 2);
     }
 }
 
