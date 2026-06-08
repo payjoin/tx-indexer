@@ -247,12 +247,72 @@ pub(crate) fn generate_input_candidates(
     results
 }
 
+/// Assemble a PlanTree from pre-computed input candidates.
+///
+/// For each candidate set:
+/// 1. Sort inputs ascending by denomination fit (distance to nearest menu denomination)
+///    so the least-committal input is registered first.
+/// 2. Build a linear RegisterInput chain.
+/// 3. Append fixed RegisterOutput nodes for each payment amount.
+/// 4. Attach the recursive change decomposition as branching children.
+///
+/// `input_amounts` maps an outpoint to its UTXO value (used for denomination fit and
+/// computing the change remainder).
 pub(crate) fn build_plan_tree(
-    _input_candidates: Vec<Vec<Outpoint>>,
-    _payment_amounts: Vec<Amount>,
-    _input_amounts: impl Fn(&Outpoint) -> Amount,
-    _menu: &DenominationMenu,
-    _fee: Amount,
+    input_candidates: Vec<Vec<Outpoint>>,
+    payment_amounts: Vec<Amount>,
+    input_amounts: impl Fn(&Outpoint) -> Amount,
+    menu: &DenominationMenu,
+    fee: Amount,
 ) -> PlanTree {
-    todo!()
+    let payment_total: Amount = payment_amounts.iter().copied().sum();
+
+    let roots = input_candidates
+        .into_iter()
+        .map(|mut outpoints| {
+            // Sort by denomination fit: ascending distance to nearest menu denomination.
+            outpoints.sort_by_key(|op| denomination_fit(input_amounts(op), menu));
+
+            let total_in: Amount = outpoints.iter().map(|op| input_amounts(op)).sum();
+            let remaining = total_in.checked_sub(payment_total + fee).unwrap_or(Amount::ZERO);
+
+            // Build the output subtree: fixed payments then decomposed change.
+            let mut output_children = decompose(remaining, menu);
+            for &amt in payment_amounts.iter().rev() {
+                output_children = vec![PlanNode {
+                    action: StepAction::RegisterOutput(amt),
+                    children: output_children,
+                }];
+            }
+
+            // Build the input chain bottom-up.
+            let mut node_children = output_children;
+            for op in outpoints.into_iter().rev() {
+                node_children = vec![PlanNode {
+                    action: StepAction::RegisterInput(op),
+                    children: node_children,
+                }];
+            }
+
+            // node_children is now a single-element vec wrapping the whole chain.
+            // Unwrap it to get the root node for this candidate.
+            node_children.remove(0)
+        })
+        .collect();
+
+    PlanTree::new(roots)
+}
+
+/// Distance from `amount` to the nearest denomination in `menu` (in satoshis).
+/// Used to sort inputs by how cleanly they map to a standard denomination.
+fn denomination_fit(amount: Amount, menu: &DenominationMenu) -> u64 {
+    menu.denominations
+        .iter()
+        .map(|&d| {
+            let a = amount.to_sat();
+            let b = d.to_sat();
+            a.abs_diff(b)
+        })
+        .min()
+        .unwrap_or(u64::MAX)
 }
