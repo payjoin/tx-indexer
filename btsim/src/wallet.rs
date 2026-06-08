@@ -477,17 +477,27 @@ impl<'a> WalletHandleMut<'a> {
                         BroadcastMessageType::ContributeOutputs(*output),
                     );
                 }
-                let session = self
-                    .info_mut()
-                    .active_multi_party_payjoins
-                    .get_mut(bulletin_board_id)
-                    .unwrap();
-                session.payment_obligation_ids = po_ids.clone();
-                session.state = TxConstructionState::SentOutputs;
-
-                // Advance the plan tree cursor through the outputs just committed.
-                // Payment outputs come first (matching tree structure), then change.
-                if let Some(tree) = &mut session.plan_tree {
+                // Update session state and advance session-local plan tree.
+                {
+                    use crate::plan_tree::StepAction;
+                    let session = self
+                        .info_mut()
+                        .active_multi_party_payjoins
+                        .get_mut(bulletin_board_id)
+                        .unwrap();
+                    session.payment_obligation_ids = po_ids.clone();
+                    session.state = TxConstructionState::SentOutputs;
+                    if let Some(tree) = &mut session.plan_tree {
+                        for amt in po_amounts.iter().copied() {
+                            let _ = tree.commit(&StepAction::RegisterOutput(amt));
+                        }
+                        for &amt in change_amounts {
+                            let _ = tree.commit(&StepAction::RegisterOutput(amt));
+                        }
+                    }
+                }
+                // Advance the wallet-level plan tree cursor for the same outputs.
+                if let Some(tree) = &mut self.data_mut().wallet_plan_tree {
                     use crate::plan_tree::StepAction;
                     for amt in po_amounts {
                         let _ = tree.commit(&StepAction::RegisterOutput(amt));
@@ -503,6 +513,12 @@ impl<'a> WalletHandleMut<'a> {
             Action::RegisterInput(outpoints) => {
                 for outpoint in outpoints {
                     self.register_input(outpoint);
+                }
+                if let Some(tree) = &mut self.data_mut().wallet_plan_tree {
+                    use crate::plan_tree::StepAction;
+                    for op in outpoints {
+                        let _ = tree.commit(&StepAction::RegisterInput(*op));
+                    }
                 }
             }
         }

@@ -4,13 +4,17 @@ use bdk_coin_select::{Target, TargetFee, TargetOutputs};
 use bitcoin::Amount;
 use log::debug;
 
+use std::collections::HashMap as StdHashMap;
+
 use crate::{
     bulletin_board::BulletinBoardId,
     coin_selection::{select_all, select_bnb},
     cospend::{CospendInterest, UtxoWithMetadata},
     message::MessageId,
     metrics::PrivacyBundle,
-    plan_tree::{PeerState, StepAction},
+    plan_tree::{
+        build_plan_tree, generate_input_candidates, DenominationMenu, PeerState, StepAction,
+    },
     transaction::Outpoint,
     tx_contruction::TxConstructionState,
     wallet::{AddressId, PaymentObligationData, PaymentObligationId, WalletHandle, WalletHandleMut},
@@ -730,6 +734,230 @@ impl Strategy for MultipartyStrategy {
     }
 }
 
+// ---------------------------------------------------------------------------
+// PlanDrivenStrategy
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub(crate) struct PlanDrivenStrategy;
+
+impl PlanDrivenStrategy {
+    pub(crate) fn new() -> Self {
+        Self
+    }
+}
+
+impl Strategy for PlanDrivenStrategy {
+    /// Build the wallet-level plan tree the first time the wallet has UTXOs and POs.
+    /// Called once per `wake_up` with mutable wallet access before action enumeration.
+    fn pre_enumerate(&self, wallet: &mut WalletHandleMut) {
+        if wallet.data().wallet_plan_tree.is_some() {
+            return;
+        }
+        let h = wallet.handle();
+        let pos = h.unhandled_payment_obligations();
+        if pos.is_empty() {
+            return;
+        }
+        let candidates = h.coin_candidates();
+        let target = target_for_obligations(&pos, &h);
+        let input_sets = generate_input_candidates(&candidates, target, 5);
+        if input_sets.is_empty() {
+            return;
+        }
+        let utxo_amounts: StdHashMap<_, _> =
+            h.spendable_utxos().into_iter().map(|u| (u.outpoint, u.amount)).collect();
+        let payment_amounts: Vec<_> = pos.iter().map(|po| po.amount).collect();
+        let tree = build_plan_tree(
+            input_sets,
+            payment_amounts,
+            |op| utxo_amounts.get(op).copied().unwrap_or(bitcoin::Amount::ZERO),
+            &DenominationMenu::standard(),
+            bitcoin::Amount::from_sat(1_000),
+        );
+        wallet.data_mut().wallet_plan_tree = Some(tree);
+    }
+
+    fn enumerate_candidate_actions(&self, wallet: &WalletHandle) -> Vec<Action> {
+        let mut actions = vec![];
+        let payment_obligations = wallet.unhandled_payment_obligations();
+        let active_cospends = wallet.active_cospend_sessions();
+        let cospend_proposals = wallet.pending_cospend_proposals();
+        let registered_inputs = wallet.registered_input_outpoints();
+        let scorer = &wallet.data().scorer;
+        let tree = wallet.data().wallet_plan_tree.as_ref();
+
+        // Step A: continue active sessions (SentOutputs / SentReadyToSign).
+        for bb_id in active_cospends.iter() {
+            actions.push(Action::ContinueParticipateInCospend(*bb_id));
+        }
+
+        // Step B: contribute outputs to sessions in AcceptedProposal state.
+        for (bb_id, session) in wallet.info().active_multi_party_payjoins.iter() {
+            if session.state != TxConstructionState::AcceptedProposal {
+                continue;
+            }
+            if payment_obligations.is_empty() {
+                continue;
+            }
+            let po_ids: Vec<_> = payment_obligations.iter().map(|po| po.id).collect();
+
+            let change = tree
+                .and_then(|t| {
+                    if payment_obligations.len() != t.n_payment_outputs {
+                        return None;
+                    }
+                    use crate::bulletin_board::BroadcastMessageType;
+                    let bb_messages = &wallet.sim.bulletin_boards[bb_id.0].messages;
+                    let their_inputs = bb_messages
+                        .iter()
+                        .filter_map(|msg| match msg {
+                            BroadcastMessageType::ContributeInputs(op)
+                                if !session.inputs.iter().any(|i| i.outpoint == *op) =>
+                            {
+                                Some((*op, bitcoin::Amount::ZERO))
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    let their_outputs = bb_messages
+                        .iter()
+                        .filter_map(|msg| match msg {
+                            BroadcastMessageType::ContributeOutputs(out) => Some(out.amount),
+                            _ => None,
+                        })
+                        .collect();
+                    let peer = PeerState { their_inputs, their_outputs };
+
+                    let scored = t.score_leaves(
+                        &peer,
+                        scorer,
+                        wallet,
+                        CostMode::EXTERNAL_PENALTIES_ON,
+                    );
+                    let (best_path, _) = scored.into_iter().min_by(|a, b| {
+                        a.1 .0.partial_cmp(&b.1 .0).unwrap_or(std::cmp::Ordering::Equal)
+                    })?;
+
+                    let n_pay = t.n_payment_outputs;
+                    let mut pay_seen = 0usize;
+                    let change: Vec<bitcoin::Amount> = best_path
+                        .iter()
+                        .filter_map(|action| match action {
+                            StepAction::RegisterOutput(amt) => {
+                                if pay_seen < n_pay {
+                                    pay_seen += 1;
+                                    None
+                                } else {
+                                    Some(*amt)
+                                }
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    if change.is_empty() { None } else { Some(change) }
+                })
+                .unwrap_or_else(|| {
+                    change_for_session_contribution(bb_id, &payment_obligations, wallet)
+                });
+
+            actions.push(Action::ContributeOutputsToSession(*bb_id, po_ids, change));
+        }
+
+        // Step C: accept a pending proposal (no active session, enough fallbacks).
+        if let Some((bb_id, msg_id)) = cospend_proposals.first() {
+            if active_cospends.is_empty() {
+                let fallback_count = enumerate_unilateral_actions(wallet).len();
+                if fallback_count >= scorer.min_fallback_plans {
+                    actions.push(Action::AcceptCospendProposal((*msg_id, *bb_id)));
+                }
+            }
+        }
+
+        // Step D: idle decisions driven by plan tree.
+        let has_active_sessions = !active_cospends.is_empty()
+            || wallet
+                .info()
+                .active_multi_party_payjoins
+                .values()
+                .any(|s| !matches!(s.state, TxConstructionState::Success(_)));
+        if cospend_proposals.is_empty() && !has_active_sessions {
+            if let Some(t) = tree {
+                // Register committed inputs (those appearing on every reachable leaf path).
+                let unregistered: Vec<Outpoint> = t
+                    .committed_inputs()
+                    .into_iter()
+                    .filter(|op| !registered_inputs.contains(op))
+                    .collect();
+                if !unregistered.is_empty() {
+                    actions.push(Action::RegisterInput(unregistered));
+                }
+
+                // Propose cospend to competitive orderbook peers.
+                if !payment_obligations.is_empty() {
+                    if let Some(own_utxo) = wallet.spendable_utxos().into_iter().next() {
+                        let po_ids: Vec<_> =
+                            payment_obligations.iter().map(|po| po.id).collect();
+                        let unilateral_fallbacks = enumerate_unilateral_actions(wallet);
+                        if unilateral_fallbacks.len() >= scorer.min_fallback_plans {
+                            let best_unilateral_worst = unilateral_fallbacks
+                                .iter()
+                                .map(|a| {
+                                    scorer.bracket(&plan_from_action(a, wallet), wallet).worst
+                                })
+                                .min()
+                                .unwrap_or(ActionCost(f64::MAX));
+                            let residue_pos: Vec<_> = wallet
+                                .unhandled_payment_obligations()
+                                .into_iter()
+                                .filter(|po| !po_ids.contains(&po.id))
+                                .collect();
+                            let interests: Vec<CospendInterest> = wallet
+                                .orderbook_utxos()
+                                .into_iter()
+                                .filter(|peer_utxo| peer_utxo.owner != wallet.id)
+                                .filter(|peer_utxo| {
+                                    let plan = Plan {
+                                        my_inputs: vec![(own_utxo.outpoint, own_utxo.amount)],
+                                        my_outputs: vec![],
+                                        their_inputs: vec![(
+                                            peer_utxo.outpoint,
+                                            peer_utxo.amount,
+                                        )],
+                                        their_outputs: vec![],
+                                        wallet_residue: WalletResidue {
+                                            utxos: wallet.spendable_utxos(),
+                                            payment_obligations: residue_pos.clone(),
+                                        },
+                                    };
+                                    scorer.bracket(&plan, wallet).worst <= best_unilateral_worst
+                                })
+                                .map(|peer_utxo| CospendInterest {
+                                    utxos: vec![own_utxo.clone(), peer_utxo],
+                                })
+                                .collect();
+                            if !interests.is_empty() {
+                                actions.push(Action::ProposeCospend(interests));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if actions.is_empty() {
+            actions.push(Action::Wait);
+        }
+        actions
+    }
+
+    fn clone_box(&self) -> Box<dyn Strategy> {
+        Box::new(Self)
+    }
+}
+
+// ---------------------------------------------------------------------------
+
 const MIN_AGGREGATE_INTERESTS: usize = 2;
 
 #[derive(Debug, Clone)]
@@ -855,6 +1083,7 @@ pub(crate) fn create_strategy(name: &str) -> Result<Box<dyn Strategy>, String> {
         "BatchSpender" => Ok(Box::new(BatchSpender)),
         "MultipartyStrategy" => Ok(Box::new(MultipartyStrategy::new())),
         "AggregatorStrategy" => Ok(Box::new(AggregatorStrategy)),
+        "PlanDrivenStrategy" => Ok(Box::new(PlanDrivenStrategy::new())),
         _ => Err(format!("Unknown strategy: {}", name)),
     }
 }
