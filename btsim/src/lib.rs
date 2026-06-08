@@ -50,6 +50,7 @@ pub mod script_type;
 mod transaction;
 mod tx_contruction;
 mod wallet;
+pub(crate) mod plan_tree;
 
 #[derive(Debug, Clone)]
 struct PrngFactory(Pcg64);
