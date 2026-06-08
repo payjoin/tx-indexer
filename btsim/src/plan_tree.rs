@@ -1,7 +1,13 @@
 use bdk_coin_select::Target;
 use bitcoin::Amount;
 
-use crate::{coin_selection::{select_all, select_bnb, CoinCandidate}, transaction::Outpoint};
+use crate::{
+    actions::{CostMode, CompositeScorer, Plan, WalletResidue},
+    coin_selection::{select_all, select_bnb, CoinCandidate},
+    cospend::UtxoWithMetadata,
+    transaction::Outpoint,
+    wallet::{PaymentObligationData, WalletHandle},
+};
 
 /// A single registration event in a multi-party session.
 #[derive(Debug, Clone, PartialEq)]
@@ -100,8 +106,27 @@ impl PlanTree {
         Ok(())
     }
 
-    pub(crate) fn score_leaves(&self, _peer: &PeerState) -> Vec<(Vec<&StepAction>, LeafScore)> {
-        todo!()
+    /// Re-score all reachable leaves against current peer state.
+    ///
+    /// Builds a minimal `Plan` from each leaf path (my inputs/outputs from the path,
+    /// counterparty inputs/outputs from `peer`) and delegates to `CompositeScorer::score`.
+    /// The residue is left empty — a stub approximation that treats all payment obligations
+    /// as handled. Full residue computation is deferred until this is wired into live session
+    /// state.
+    pub(crate) fn score_leaves(
+        &self,
+        peer: &PeerState,
+        scorer: &CompositeScorer,
+        wallet: &WalletHandle,
+    ) -> Vec<(Vec<&StepAction>, LeafScore)> {
+        self.reachable_leaves()
+            .into_iter()
+            .map(|path| {
+                let plan = plan_from_path(&path, peer);
+                let cost = scorer.score(&plan, wallet, CostMode::EXTERNAL_PENALTIES_ON);
+                (path, LeafScore(cost.0))
+            })
+            .collect()
     }
 
     /// Returns the slice of nodes representing the current live choices.
@@ -439,6 +464,35 @@ pub(crate) fn build_plan_tree(
         .collect();
 
     PlanTree::new(roots)
+}
+
+/// Build a minimal `Plan` from a leaf action path and current peer state.
+///
+/// Collects `RegisterInput` actions as `my_inputs` (with zero amount as a stub — real
+/// amounts come from the UTXO pool at session time) and `RegisterOutput` actions as
+/// `my_outputs`. Counterparty inputs/outputs come from `peer`. The residue is left
+/// empty; full computation is deferred to when this is wired into live session state.
+fn plan_from_path(path: &[&StepAction], peer: &PeerState) -> Plan {
+    let mut my_inputs = Vec::new();
+    let mut my_outputs = Vec::new();
+
+    for action in path {
+        match action {
+            StepAction::RegisterInput(op) => my_inputs.push((*op, Amount::ZERO)),
+            StepAction::RegisterOutput(amt) => my_outputs.push(*amt),
+        }
+    }
+
+    Plan {
+        my_inputs,
+        my_outputs,
+        their_inputs: peer.their_inputs.clone(),
+        their_outputs: peer.their_outputs.clone(),
+        wallet_residue: WalletResidue {
+            utxos: Vec::<UtxoWithMetadata>::new(),
+            payment_obligations: Vec::<PaymentObligationData>::new(),
+        },
+    }
 }
 
 /// Distance from `amount` to the nearest denomination in `menu` (in satoshis).
