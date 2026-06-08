@@ -505,6 +505,7 @@ impl<'a> Simulation {
             strategies,
             scorer,
             script_type,
+            wallet_plan_tree: None,
         });
         id
     }

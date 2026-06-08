@@ -28,6 +28,9 @@ define_entity_data!(Wallet, {
     pub(crate) strategies: CompositeStrategy,
     pub(crate) scorer: CompositeScorer,
     pub(crate) script_type: ScriptType,
+    /// Wallet-level plan tree, built once when the wallet first has UTXOs and POs.
+    /// Lives on WalletData (not WalletInfo) so it is never cloned on tx recording.
+    pub(crate) wallet_plan_tree: Option<crate::plan_tree::PlanTree>,
 }, skip_eq_clone);
 define_entity_info!(Wallet, {
         pub(crate) broadcast_set_id: BroadcastSetId,
