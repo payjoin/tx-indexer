@@ -515,6 +515,7 @@ impl<'a> WalletHandleMut<'a> {
         let strategies = self.data().strategies.clone();
         let mut all_actions = Vec::new();
         for strategy in strategies.strategies.iter() {
+            strategy.pre_enumerate(self);
             all_actions.extend(strategy.enumerate_candidate_actions(self));
         }
 

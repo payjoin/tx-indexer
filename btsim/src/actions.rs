@@ -13,7 +13,7 @@ use crate::{
     plan_tree::{PeerState, StepAction},
     transaction::Outpoint,
     tx_contruction::TxConstructionState,
-    wallet::{AddressId, PaymentObligationData, PaymentObligationId, WalletHandle},
+    wallet::{AddressId, PaymentObligationData, PaymentObligationId, WalletHandle, WalletHandleMut},
 };
 
 fn piecewise_linear(x: f64, points: &[(f64, f64)]) -> f64 {
@@ -284,6 +284,10 @@ fn plan_from_action(action: &Action, wallet: &WalletHandle) -> Plan {
 /// Strategies will pick one action to minimize their cost
 /// TODO: Strategies should be composible. They should enform the action decision space scoring and doing actions should be handling by something else that has composed multiple strategies.
 pub(crate) trait Strategy: std::fmt::Debug {
+    /// Called once per `wake_up` with mutable wallet access before action enumeration.
+    /// Strategies that need to build or update persistent state (e.g. a plan tree stored
+    /// on `WalletData`) do so here. Default implementation is a no-op.
+    fn pre_enumerate(&self, _wallet: &mut WalletHandleMut) {}
     fn enumerate_candidate_actions(&self, wallet: &WalletHandle) -> Vec<Action>;
     fn clone_box(&self) -> Box<dyn Strategy>;
 }
