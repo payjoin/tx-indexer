@@ -10,6 +10,7 @@ use crate::{
     cospend::{CospendInterest, UtxoWithMetadata},
     message::MessageId,
     metrics::PrivacyBundle,
+    plan_tree::PlanTree,
     transaction::Outpoint,
     tx_contruction::TxConstructionState,
     wallet::{AddressId, PaymentObligationData, PaymentObligationId, WalletHandle},
@@ -500,7 +501,17 @@ impl Strategy for BatchSpender {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct MultipartyStrategy;
+pub(crate) struct MultipartyStrategy {
+    /// Pre-computed plan tree for the current session. Built when participation begins;
+    /// not yet used to drive action selection — existing round-by-round logic is unchanged.
+    pub(crate) plan_tree: Option<PlanTree>,
+}
+
+impl MultipartyStrategy {
+    pub(crate) fn new() -> Self {
+        Self { plan_tree: None }
+    }
+}
 
 impl Strategy for MultipartyStrategy {
     fn enumerate_candidate_actions(&self, wallet: &WalletHandle) -> Vec<Action> {
@@ -638,7 +649,7 @@ impl Strategy for MultipartyStrategy {
     }
 
     fn clone_box(&self) -> Box<dyn Strategy> {
-        Box::new(self.clone())
+        Box::new(Self { plan_tree: self.plan_tree.clone() })
     }
 }
 
@@ -765,7 +776,7 @@ pub(crate) fn create_strategy(name: &str) -> Result<Box<dyn Strategy>, String> {
         "UnilateralSpender" => Ok(Box::new(UnilateralSpender)),
         "Consolidator" => Ok(Box::new(Consolidator)),
         "BatchSpender" => Ok(Box::new(BatchSpender)),
-        "MultipartyStrategy" => Ok(Box::new(MultipartyStrategy)),
+        "MultipartyStrategy" => Ok(Box::new(MultipartyStrategy::new())),
         "AggregatorStrategy" => Ok(Box::new(AggregatorStrategy)),
         _ => Err(format!("Unknown strategy: {}", name)),
     }
@@ -979,7 +990,7 @@ mod tests {
         add_payment_obligation(&mut sim, po);
         // No UTXOs or orderbook entries — taker has nothing to propose with or to
         let wallet = WalletId(0).with_mut(&mut sim);
-        let strategy = MultipartyStrategy;
+        let strategy = MultipartyStrategy::new();
 
         let actions = strategy.enumerate_candidate_actions(&wallet);
 
@@ -1016,7 +1027,7 @@ mod tests {
             .with_mut(&mut sim)
             .do_action(&Action::RegisterInput(vec![first_peer_utxo]));
 
-        let strategy = MultipartyStrategy;
+        let strategy = MultipartyStrategy::new();
         let wallet = WalletId(0).with_mut(&mut sim);
 
         let actions = strategy.enumerate_candidate_actions(&wallet);
@@ -1049,7 +1060,7 @@ mod tests {
         );
 
         let wallet = WalletId(0).with_mut(&mut sim);
-        let strategy = MultipartyStrategy;
+        let strategy = MultipartyStrategy::new();
 
         let actions = strategy.enumerate_candidate_actions(&wallet);
 
@@ -1076,7 +1087,7 @@ mod tests {
         add_cospend_proposal_message(&mut sim, WalletId(0), WalletId(1), bb_id);
 
         let wallet = WalletId(0).with_mut(&mut sim);
-        let strategy = MultipartyStrategy;
+        let strategy = MultipartyStrategy::new();
 
         let actions = strategy.enumerate_candidate_actions(&wallet);
 
@@ -1107,7 +1118,7 @@ mod tests {
         };
         add_payment_obligation(&mut sim, po);
 
-        let strategy = MultipartyStrategy;
+        let strategy = MultipartyStrategy::new();
         let wallet = WalletId(0).with_mut(&mut sim);
 
         // Verify the session is in AcceptedProposal state
@@ -1150,7 +1161,7 @@ mod tests {
         );
 
         let wallet = WalletId(0).with_mut(&mut sim);
-        let strategy = MultipartyStrategy;
+        let strategy = MultipartyStrategy::new();
 
         let actions = strategy.enumerate_candidate_actions(&wallet);
 
@@ -1185,7 +1196,7 @@ mod tests {
         );
 
         let wallet = WalletId(0).with_mut(&mut sim);
-        let strategy = MultipartyStrategy;
+        let strategy = MultipartyStrategy::new();
 
         let actions = strategy.enumerate_candidate_actions(&wallet);
 

@@ -17,7 +17,7 @@ pub(crate) enum StepAction {
 }
 
 /// One node in the plan tree, representing a step and its continuations.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct PlanNode {
     pub(crate) action: StepAction,
     pub(crate) children: Vec<PlanNode>,
@@ -29,7 +29,7 @@ pub(crate) struct PlanNode {
 /// At depth 0 the cursor is at the phantom root; `next_actions` returns all root-level
 /// actions. Each `commit` prunes siblings and advances depth by 1. After commit k,
 /// the live path is always `roots[0].children[0]...` (k-1 times `.children[0]`).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct PlanTree {
     /// One subtree per input candidate (children of the sentinel root).
     pub(crate) roots: Vec<PlanNode>,
