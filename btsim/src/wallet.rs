@@ -304,6 +304,8 @@ impl<'a> WalletHandleMut<'a> {
                     self.info_mut()
                         .active_multi_party_payjoins
                         .insert(*bulletin_board_id, updated_session);
+                    // Reset the global plan tree so a fresh one is built next wake.
+                    self.data_mut().wallet_plan_tree = None;
                     log::info!(
                         "Multi party payjoin session successful with bulletin board id: {:?}",
                         bulletin_board_id
@@ -359,46 +361,12 @@ impl<'a> WalletHandleMut<'a> {
                     .map(|op| Input { outpoint: *op })
                     .collect();
 
-                // Build the local plan tree for this session so that change decomposition
-                // uses structured denominations rather than a single consolidated output.
-                let plan_tree = {
-                    use crate::plan_tree::{build_plan_tree, DenominationMenu};
-                    use std::collections::HashMap as StdHashMap;
-
-                    let payment_obligations = self.unhandled_payment_obligations();
-                    let payment_amounts: Vec<_> =
-                        payment_obligations.iter().map(|po| po.amount).collect();
-                    let utxo_amounts: StdHashMap<_, _> = self
-                        .spendable_utxos()
-                        .into_iter()
-                        .map(|u| (u.outpoint, u.amount))
-                        .collect();
-                    let candidates =
-                        vec![my_inputs.iter().map(|i| i.outpoint).collect::<Vec<_>>()];
-                    let menu = DenominationMenu::standard();
-                    // Flat fee placeholder; real fee estimation is deferred.
-                    let fee = bitcoin::Amount::from_sat(1_000);
-
-                    if candidates[0].is_empty() || payment_amounts.is_empty() {
-                        None
-                    } else {
-                        Some(build_plan_tree(
-                            candidates,
-                            payment_amounts,
-                            |op| utxo_amounts.get(op).copied().unwrap_or(bitcoin::Amount::ZERO),
-                            &menu,
-                            fee,
-                        ))
-                    }
-                };
-
                 self.info_mut().active_multi_party_payjoins.insert(
                     *bulletin_board_id,
                     MultiPartyPayjoinSession {
                         payment_obligation_ids: vec![],
                         inputs: my_inputs,
                         state: TxConstructionState::AcceptedProposal,
-                        plan_tree,
                     },
                 );
                 self.data_mut().messages_processed.insert(*message_id);
@@ -477,9 +445,7 @@ impl<'a> WalletHandleMut<'a> {
                         BroadcastMessageType::ContributeOutputs(*output),
                     );
                 }
-                // Update session state and advance session-local plan tree.
                 {
-                    use crate::plan_tree::StepAction;
                     let session = self
                         .info_mut()
                         .active_multi_party_payjoins
@@ -487,16 +453,7 @@ impl<'a> WalletHandleMut<'a> {
                         .unwrap();
                     session.payment_obligation_ids = po_ids.clone();
                     session.state = TxConstructionState::SentOutputs;
-                    if let Some(tree) = &mut session.plan_tree {
-                        for amt in po_amounts.iter().copied() {
-                            let _ = tree.commit(&StepAction::RegisterOutput(amt));
-                        }
-                        for &amt in change_amounts {
-                            let _ = tree.commit(&StepAction::RegisterOutput(amt));
-                        }
-                    }
                 }
-                // Advance the wallet-level plan tree cursor for the same outputs.
                 if let Some(tree) = &mut self.data_mut().wallet_plan_tree {
                     use crate::plan_tree::StepAction;
                     for amt in po_amounts {

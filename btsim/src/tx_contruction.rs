@@ -5,7 +5,6 @@
 
 use crate::{
     bulletin_board::{BroadcastMessageType, BulletinBoardId},
-    plan_tree::PlanTree,
     transaction::{Input, Output, TxData, TxId},
     wallet::PaymentObligationId,
     Simulation,
@@ -19,9 +18,6 @@ pub(crate) struct MultiPartyPayjoinSession {
     pub(crate) inputs: Vec<Input>,
     /// The state of the session
     pub(crate) state: TxConstructionState,
-    /// Local plan tree for this session. Built when the wallet accepts an invitation;
-    /// used to select structured change denominations when contributing outputs.
-    pub(crate) plan_tree: Option<PlanTree>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
