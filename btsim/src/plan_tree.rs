@@ -50,6 +50,12 @@ pub(crate) struct DenominationMenu {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LeafScore(pub(crate) f64);
 
+#[derive(Debug)]
+pub(crate) enum CommitError {
+    ActionNotFound,
+    AlreadyAtLeaf,
+}
+
 impl PlanTree {
     pub(crate) fn new(roots: Vec<PlanNode>, n_inputs: usize, n_payment_outputs: usize) -> Self {
         Self {
@@ -59,6 +65,107 @@ impl PlanTree {
             n_payment_outputs,
         }
     }
+
+    /// Current live choices: roots before first commit, otherwise the children of the
+    /// committed node at depth.
+    pub(crate) fn next_actions(&self) -> Vec<&StepAction> {
+        self.current_level().iter().map(|n| &n.action).collect()
+    }
+
+    /// All root-to-leaf action paths reachable from the current cursor position.
+    pub(crate) fn reachable_leaves(&self) -> Vec<Vec<&StepAction>> {
+        let mut leaves = Vec::new();
+        for node in self.current_level() {
+            collect_leaves(node, &mut vec![], &mut leaves);
+        }
+        leaves
+    }
+
+    /// Advance the cursor to the choice matching `action`, pruning all siblings.
+    pub(crate) fn commit(&mut self, action: &StepAction) -> Result<(), CommitError> {
+        let choices = self.current_level_mut();
+
+        if choices.is_empty() {
+            return Err(CommitError::AlreadyAtLeaf);
+        }
+
+        let idx = choices
+            .iter()
+            .position(|n| &n.action == action)
+            .ok_or(CommitError::ActionNotFound)?;
+
+        let chosen = choices.swap_remove(idx);
+        choices.clear();
+        choices.push(chosen);
+
+        self.depth += 1;
+        Ok(())
+    }
+
+    /// Outpoints appearing in every reachable leaf path — safe to advertise unconditionally.
+    pub(crate) fn committed_inputs(&self) -> Vec<Outpoint> {
+        use std::collections::HashSet;
+        let leaves = self.reachable_leaves();
+        if leaves.is_empty() {
+            return vec![];
+        }
+        let extract = |leaf: &Vec<&StepAction>| -> HashSet<Outpoint> {
+            leaf.iter()
+                .filter_map(|a| {
+                    if let StepAction::RegisterInput(op) = a {
+                        Some(*op)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+        let mut common = extract(&leaves[0]);
+        for leaf in &leaves[1..] {
+            let s = extract(leaf);
+            common = common.intersection(&s).copied().collect();
+        }
+        common.into_iter().collect()
+    }
+
+    fn current_level(&self) -> &[PlanNode] {
+        // SAFETY: after each commit siblings are pruned to exactly one element.
+        // The path roots[0].children[0]... is valid up to `depth`.
+        unsafe {
+            let mut ptr: *const Vec<PlanNode> = &self.roots;
+            for _ in 0..self.depth {
+                ptr = &(&(*ptr))[0].children;
+            }
+            &*ptr
+        }
+    }
+
+    fn current_level_mut(&mut self) -> &mut Vec<PlanNode> {
+        // SAFETY: same invariant as current_level.
+        unsafe {
+            let mut ptr: *mut Vec<PlanNode> = &mut self.roots;
+            for _ in 0..self.depth {
+                ptr = &mut (&mut (*ptr))[0].children;
+            }
+            &mut *ptr
+        }
+    }
+}
+
+fn collect_leaves<'a>(
+    node: &'a PlanNode,
+    path: &mut Vec<&'a StepAction>,
+    out: &mut Vec<Vec<&'a StepAction>>,
+) {
+    path.push(&node.action);
+    if node.children.is_empty() {
+        out.push(path.clone());
+    } else {
+        for child in &node.children {
+            collect_leaves(child, path, out);
+        }
+    }
+    path.pop();
 }
 
 impl DenominationMenu {
@@ -294,5 +401,77 @@ mod tests {
         for window in menu.denominations.windows(2) {
             assert!(window[0] >= window[1]);
         }
+    }
+
+    fn simple_tree() -> PlanTree {
+        let x = PlanNode {
+            action: StepAction::RegisterOutput(Amount::from_sat(1_000)),
+            children: vec![],
+        };
+        let y = PlanNode {
+            action: StepAction::RegisterOutput(Amount::from_sat(2_000)),
+            children: vec![],
+        };
+        let a = PlanNode {
+            action: StepAction::RegisterOutput(Amount::from_sat(10_000)),
+            children: vec![x, y],
+        };
+        let b = PlanNode {
+            action: StepAction::RegisterOutput(Amount::from_sat(20_000)),
+            children: vec![],
+        };
+        PlanTree::new(vec![a, b], 0, 0)
+    }
+
+    #[test]
+    fn next_actions_at_root_returns_all_roots() {
+        let tree = simple_tree();
+        let actions = tree.next_actions();
+        assert_eq!(actions.len(), 2);
+        assert!(actions.contains(&&StepAction::RegisterOutput(Amount::from_sat(10_000))));
+        assert!(actions.contains(&&StepAction::RegisterOutput(Amount::from_sat(20_000))));
+    }
+
+    #[test]
+    fn commit_prunes_siblings_and_advances_cursor() {
+        let mut tree = simple_tree();
+        tree.commit(&StepAction::RegisterOutput(Amount::from_sat(10_000)))
+            .unwrap();
+        let actions = tree.next_actions();
+        assert_eq!(actions.len(), 2);
+        assert!(actions.contains(&&StepAction::RegisterOutput(Amount::from_sat(1_000))));
+        assert!(actions.contains(&&StepAction::RegisterOutput(Amount::from_sat(2_000))));
+    }
+
+    #[test]
+    fn commit_unknown_action_returns_error() {
+        let mut tree = simple_tree();
+        let result = tree.commit(&StepAction::RegisterOutput(Amount::from_sat(99_999)));
+        assert!(matches!(result, Err(CommitError::ActionNotFound)));
+    }
+
+    #[test]
+    fn commit_at_leaf_returns_error() {
+        let mut tree = simple_tree();
+        tree.commit(&StepAction::RegisterOutput(Amount::from_sat(20_000)))
+            .unwrap();
+        let result = tree.commit(&StepAction::RegisterOutput(Amount::from_sat(20_000)));
+        assert!(matches!(result, Err(CommitError::AlreadyAtLeaf)));
+    }
+
+    #[test]
+    fn reachable_leaves_returns_all_leaf_paths() {
+        let tree = simple_tree();
+        let leaves = tree.reachable_leaves();
+        assert_eq!(leaves.len(), 3);
+    }
+
+    #[test]
+    fn reachable_leaves_shrinks_after_commit() {
+        let mut tree = simple_tree();
+        tree.commit(&StepAction::RegisterOutput(Amount::from_sat(10_000)))
+            .unwrap();
+        let leaves = tree.reachable_leaves();
+        assert_eq!(leaves.len(), 2);
     }
 }
