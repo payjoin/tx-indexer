@@ -17,7 +17,9 @@ use crate::{
     },
     transaction::Outpoint,
     tx_contruction::TxConstructionState,
-    wallet::{AddressId, PaymentObligationData, PaymentObligationId, WalletHandle, WalletHandleMut},
+    wallet::{
+        AddressId, PaymentObligationData, PaymentObligationId, WalletHandle, WalletHandleMut,
+    },
 };
 
 fn piecewise_linear(x: f64, points: &[(f64, f64)]) -> f64 {
@@ -123,14 +125,6 @@ impl CostMode {
         external: 1.0,
         internal: 1.0,
     };
-}
-
-/// Cost interval for a plan. Best and worse case scenarios are based on the cost mode.
-#[derive(Debug, Clone)]
-pub(crate) struct CostBracket {
-    pub(crate) worst: ActionCost,
-    #[allow(dead_code)]
-    pub(crate) best: ActionCost,
 }
 
 /// Build a `Plan` from any `Action`, deriving inputs, outputs, and wallet residue
@@ -521,6 +515,37 @@ impl PlanDrivenStrategy {
     }
 }
 
+fn selected_branch_inputs(branch: &[StepAction]) -> Vec<Outpoint> {
+    branch
+        .iter()
+        .filter_map(|action| {
+            if let StepAction::RegisterInput(op) = action {
+                Some(*op)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn selected_branch_change(branch: &[StepAction], n_payment_outputs: usize) -> Vec<Amount> {
+    let mut payment_outputs_seen = 0usize;
+    branch
+        .iter()
+        .filter_map(|action| match action {
+            StepAction::RegisterOutput(amt) => {
+                if payment_outputs_seen < n_payment_outputs {
+                    payment_outputs_seen += 1;
+                    None
+                } else {
+                    Some(*amt)
+                }
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 impl Strategy for PlanDrivenStrategy {
     /// Build the wallet-level plan tree the first time the wallet has UTXOs and POs.
     /// Called once per `wake_up` with mutable wallet access before action enumeration.
@@ -539,17 +564,44 @@ impl Strategy for PlanDrivenStrategy {
         if input_sets.is_empty() {
             return;
         }
-        let utxo_amounts: StdHashMap<_, _> =
-            h.spendable_utxos().into_iter().map(|u| (u.outpoint, u.amount)).collect();
+        let utxo_amounts: StdHashMap<_, _> = h
+            .spendable_utxos()
+            .into_iter()
+            .map(|u| (u.outpoint, u.amount))
+            .collect();
         let payment_amounts: Vec<_> = pos.iter().map(|po| po.amount).collect();
         let tree = build_plan_tree(
             input_sets,
             payment_amounts,
-            |op| utxo_amounts.get(op).copied().unwrap_or_else(|| unreachable!("input candidate outpoint missing from spendable UTXOs")),
+            |op| {
+                utxo_amounts.get(op).copied().unwrap_or_else(|| {
+                    unreachable!("input candidate outpoint missing from spendable UTXOs")
+                })
+            },
             &DenominationMenu::standard(),
             bitcoin::Amount::from_sat(1_000),
         );
-        wallet.data_mut().wallet_plan_tree = Some(tree);
+        // Pick one branch from current wallet state and stick with it for this plan.
+        // Future adaptive planning should invalidate and recompute this branch when
+        // new bulletin-board messages change the peer state.
+        let selected_branch = tree
+            .score_leaves(
+                &PeerState::default(),
+                &h.data().scorer,
+                &h,
+                CostMode::EXTERNAL_PENALTIES_OFF,
+            )
+            .into_iter()
+            .min_by(|a, b| {
+                a.1 .0
+                    .partial_cmp(&b.1 .0)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(path, _)| path.into_iter().cloned().collect());
+
+        let data = wallet.data_mut();
+        data.wallet_plan_tree = Some(tree);
+        data.selected_plan_branch = selected_branch;
     }
 
     fn enumerate_candidate_actions(&self, wallet: &WalletHandle) -> Vec<Action> {
@@ -560,6 +612,7 @@ impl Strategy for PlanDrivenStrategy {
         let registered_inputs = wallet.registered_input_outpoints();
         let scorer = &wallet.data().scorer;
         let tree = wallet.data().wallet_plan_tree.as_ref();
+        let selected_branch = wallet.data().selected_plan_branch.as_deref();
 
         // Step A: continue active sessions (SentOutputs / SentReadyToSign).
         for bb_id in active_cospends.iter() {
@@ -581,55 +634,8 @@ impl Strategy for PlanDrivenStrategy {
                     if payment_obligations.len() != t.n_payment_outputs {
                         return None;
                     }
-                    use crate::bulletin_board::BroadcastMessageType;
-                    let bb_messages = &wallet.sim.bulletin_boards[bb_id.0].messages;
-                    let their_inputs = bb_messages
-                        .iter()
-                        .filter_map(|msg| match msg {
-                            BroadcastMessageType::ContributeInputs(op)
-                                if !session.inputs.iter().any(|i| i.outpoint == *op) =>
-                            {
-                                Some((*op, op.with(wallet.sim).data().amount))
-                            }
-                            _ => None,
-                        })
-                        .collect();
-                    let their_outputs = bb_messages
-                        .iter()
-                        .filter_map(|msg| match msg {
-                            BroadcastMessageType::ContributeOutputs(out) => Some(out.amount),
-                            _ => None,
-                        })
-                        .collect();
-                    let peer = PeerState { their_inputs, their_outputs };
-
-                    let scored = t.score_leaves(
-                        &peer,
-                        scorer,
-                        wallet,
-                        CostMode::EXTERNAL_PENALTIES_ON,
-                    );
-                    let (best_path, _) = scored.into_iter().min_by(|a, b| {
-                        a.1 .0.partial_cmp(&b.1 .0).unwrap_or(std::cmp::Ordering::Equal)
-                    })?;
-
-                    let n_pay = t.n_payment_outputs;
-                    let mut pay_seen = 0usize;
-                    let change: Vec<bitcoin::Amount> = best_path
-                        .iter()
-                        .filter_map(|action| match action {
-                            StepAction::RegisterOutput(amt) => {
-                                if pay_seen < n_pay {
-                                    pay_seen += 1;
-                                    None
-                                } else {
-                                    Some(*amt)
-                                }
-                            }
-                            _ => None,
-                        })
-                        .collect();
-                    if change.is_empty() { None } else { Some(change) }
+                    selected_branch
+                        .map(|branch| selected_branch_change(branch, t.n_payment_outputs))
                 })
                 .unwrap_or_else(|| {
                     change_for_session_contribution(bb_id, &payment_obligations, wallet)
@@ -656,66 +662,50 @@ impl Strategy for PlanDrivenStrategy {
                 .values()
                 .any(|s| !matches!(s.state, TxConstructionState::Success(_)));
         if cospend_proposals.is_empty() && !has_active_sessions {
-            if let Some(t) = tree {
-                // Register committed inputs (those appearing on every reachable leaf path).
-                let unregistered: Vec<Outpoint> = t
-                    .committed_inputs()
+            if tree.is_some() {
+                // Register inputs from the fixed selected branch. We intentionally do not
+                // rescore here; future adaptive planning can recompute the branch when
+                // bulletin-board peer state changes.
+                let branch_inputs = selected_branch
+                    .map(selected_branch_inputs)
+                    .unwrap_or_default();
+                let unregistered: Vec<Outpoint> = branch_inputs
+                    .iter()
+                    .copied()
                     .into_iter()
                     .filter(|op| !registered_inputs.contains(op))
                     .collect();
                 if !unregistered.is_empty() {
-                    actions.push(Action::RegisterInput(unregistered));
+                    return vec![Action::RegisterInput(unregistered)];
                 }
 
-                // Propose cospend to competitive orderbook peers.
-                if !payment_obligations.is_empty() {
-                    if let Some(own_utxo) = wallet.spendable_utxos().into_iter().next() {
-                        let po_ids: Vec<_> =
-                            payment_obligations.iter().map(|po| po.id).collect();
-                        let unilateral_fallbacks = enumerate_unilateral_actions(wallet);
-                        if unilateral_fallbacks.len() >= scorer.min_fallback_plans {
-                            let best_unilateral_worst = unilateral_fallbacks
-                                .iter()
-                                .map(|a| {
-                                    scorer.bracket(&plan_from_action(a, wallet), wallet).worst
-                                })
-                                .min()
-                                .unwrap_or(ActionCost(f64::MAX));
-                            let residue_pos: Vec<_> = wallet
-                                .unhandled_payment_obligations()
-                                .into_iter()
-                                .filter(|po| !po_ids.contains(&po.id))
-                                .collect();
-                            let interests: Vec<CospendInterest> = wallet
-                                .orderbook_utxos()
-                                .into_iter()
-                                .filter(|peer_utxo| peer_utxo.owner != wallet.id)
-                                .filter(|peer_utxo| {
-                                    let plan = Plan {
-                                        my_inputs: vec![(own_utxo.outpoint, own_utxo.amount)],
-                                        my_outputs: vec![],
-                                        their_inputs: vec![(
-                                            peer_utxo.outpoint,
-                                            peer_utxo.amount,
-                                        )],
-                                        their_outputs: vec![],
-                                        wallet_residue: WalletResidue {
-                                            utxos: wallet.spendable_utxos(),
-                                            payment_obligations: residue_pos.clone(),
-                                        },
-                                    };
-                                    scorer.bracket(&plan, wallet).worst <= best_unilateral_worst
-                                })
-                                .map(|peer_utxo| CospendInterest {
-                                    utxos: vec![own_utxo.clone(), peer_utxo],
-                                })
-                                .collect();
-                            if !interests.is_empty() {
-                                actions.push(Action::ProposeCospend(interests));
-                            }
-                        }
-                    }
+                let selected_utxos: Vec<UtxoWithMetadata> = branch_inputs
+                    .iter()
+                    .map(|op| UtxoWithMetadata {
+                        outpoint: *op,
+                        amount: op.with(wallet.sim).data().amount,
+                        owner: wallet.id,
+                    })
+                    .collect();
+                if payment_obligations.is_empty() || selected_utxos.is_empty() {
+                    return vec![Action::Wait];
                 }
+
+                let interests: Vec<CospendInterest> = wallet
+                    .orderbook_utxos()
+                    .into_iter()
+                    .filter(|peer_utxo| peer_utxo.owner != wallet.id)
+                    .map(|peer_utxo| {
+                        let mut utxos = selected_utxos.clone();
+                        utxos.push(peer_utxo);
+                        CospendInterest { utxos }
+                    })
+                    .collect();
+                return if interests.is_empty() {
+                    vec![Action::Wait]
+                } else {
+                    vec![Action::ProposeCospend(interests)]
+                };
             }
         }
 
@@ -839,14 +829,6 @@ impl CompositeScorer {
             CostMode::EXTERNAL_PENALTIES_ON,
         )
     }
-
-    /// Compute a `[best, worst]` cost bracket for a plan.
-    pub(crate) fn bracket(&self, plan: &Plan, wallet: &WalletHandle) -> CostBracket {
-        CostBracket {
-            worst: self.score(plan, wallet, CostMode::EXTERNAL_PENALTIES_ON),
-            best: self.score(plan, wallet, CostMode::EXTERNAL_PENALTIES_OFF),
-        }
-    }
 }
 
 /// Creates a strategy instance from its name string
@@ -865,9 +847,6 @@ pub(crate) fn create_strategy(name: &str) -> Result<Box<dyn Strategy>, String> {
 mod tests {
     use super::*;
     use crate::{
-        bulletin_board::BulletinBoardId,
-        message::{MessageData, MessageId, MessageType},
-        tx_contruction::{MultiPartyPayjoinSession, TxConstructionState},
         wallet::{PaymentObligationData, WalletId},
         TimeStep,
     };
@@ -1020,5 +999,4 @@ mod tests {
         assert_eq!(actions.len(), 2);
         assert!(actions.iter().all(|a| matches!(a, Action::Wait)));
     }
-
 }

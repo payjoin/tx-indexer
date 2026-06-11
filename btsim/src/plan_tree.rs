@@ -2,7 +2,7 @@ use bdk_coin_select::Target;
 use bitcoin::Amount;
 
 use crate::{
-    actions::{CostMode, CompositeScorer, Plan, WalletResidue},
+    actions::{CompositeScorer, CostMode, Plan, WalletResidue},
     coin_selection::{select_all, select_bnb, CoinCandidate},
     cospend::UtxoWithMetadata,
     transaction::Outpoint,
@@ -69,7 +69,12 @@ pub(crate) enum CommitError {
 
 impl PlanTree {
     pub(crate) fn new(roots: Vec<PlanNode>, n_inputs: usize, n_payment_outputs: usize) -> Self {
-        Self { roots, depth: 0, n_inputs, n_payment_outputs }
+        Self {
+            roots,
+            depth: 0,
+            n_inputs,
+            n_payment_outputs,
+        }
     }
 
     /// The current live choices: roots before first commit, otherwise the children of the
@@ -206,7 +211,6 @@ fn collect_leaves<'a>(
     path.pop();
 }
 
-
 impl DenominationMenu {
     /// Powers of two and powers of ten in satoshis, deduplicated and sorted descending,
     /// covering 1_000 sat to 100_000_000 sat (1 BTC).
@@ -278,125 +282,6 @@ fn decompose_inner(remaining: Amount, menu: &DenominationMenu, depth: usize) -> 
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn leaf_paths(nodes: &[PlanNode], prefix: Vec<Amount>) -> Vec<Vec<Amount>> {
-        let mut paths = Vec::new();
-        for node in nodes {
-            let StepAction::RegisterOutput(amt) = node.action else { continue };
-            let mut path = prefix.clone();
-            path.push(amt);
-            if node.children.is_empty() {
-                paths.push(path);
-            } else {
-                paths.extend(leaf_paths(&node.children, path));
-            }
-        }
-        paths
-    }
-
-    #[test]
-    fn decompose_paths_sum_to_remaining() {
-        let menu = DenominationMenu::standard();
-        let remaining = Amount::from_sat(15_000);
-        let nodes = decompose(remaining, &menu);
-        assert!(!nodes.is_empty(), "expected at least one branch");
-        for path in leaf_paths(&nodes, vec![]) {
-            let total: Amount = path.iter().copied().sum();
-            assert_eq!(total, remaining, "path {:?} does not sum to {remaining}", path);
-        }
-    }
-
-    #[test]
-    fn decompose_zero_returns_empty() {
-        let menu = DenominationMenu::standard();
-        assert!(decompose(Amount::ZERO, &menu).is_empty());
-    }
-
-    #[test]
-    fn decompose_residual_below_min_denom() {
-        let menu = DenominationMenu::standard();
-        // 999 sat is below the 1_000 sat minimum denomination
-        let nodes = decompose(Amount::from_sat(999), &menu);
-        assert_eq!(nodes.len(), 1);
-        assert!(nodes[0].children.is_empty());
-        assert_eq!(nodes[0].action, StepAction::RegisterOutput(Amount::from_sat(999)));
-    }
-
-    #[test]
-    fn standard_menu_is_sorted_descending() {
-        let menu = DenominationMenu::standard();
-        assert!(!menu.denominations.is_empty());
-        for window in menu.denominations.windows(2) {
-            assert!(window[0] >= window[1], "denominations not sorted descending");
-        }
-    }
-
-    fn simple_tree() -> PlanTree {
-        // Two roots: A and B. A has children X and Y.
-        let x = PlanNode { action: StepAction::RegisterOutput(Amount::from_sat(1_000)), children: vec![] };
-        let y = PlanNode { action: StepAction::RegisterOutput(Amount::from_sat(2_000)), children: vec![] };
-        let a = PlanNode { action: StepAction::RegisterOutput(Amount::from_sat(10_000)), children: vec![x, y] };
-        let b = PlanNode { action: StepAction::RegisterOutput(Amount::from_sat(20_000)), children: vec![] };
-        PlanTree::new(vec![a, b], 0, 0)
-    }
-
-    #[test]
-    fn next_actions_at_root_returns_all_roots() {
-        let tree = simple_tree();
-        let actions = tree.next_actions();
-        assert_eq!(actions.len(), 2);
-        assert!(actions.contains(&&StepAction::RegisterOutput(Amount::from_sat(10_000))));
-        assert!(actions.contains(&&StepAction::RegisterOutput(Amount::from_sat(20_000))));
-    }
-
-    #[test]
-    fn commit_prunes_siblings_and_advances_cursor() {
-        let mut tree = simple_tree();
-        tree.commit(&StepAction::RegisterOutput(Amount::from_sat(10_000))).unwrap();
-        // After committing A, only A should remain at the root level.
-        let actions = tree.next_actions();
-        assert_eq!(actions.len(), 2); // A's children: X and Y
-        assert!(actions.contains(&&StepAction::RegisterOutput(Amount::from_sat(1_000))));
-        assert!(actions.contains(&&StepAction::RegisterOutput(Amount::from_sat(2_000))));
-    }
-
-    #[test]
-    fn commit_unknown_action_returns_error() {
-        let mut tree = simple_tree();
-        let result = tree.commit(&StepAction::RegisterOutput(Amount::from_sat(99_999)));
-        assert!(matches!(result, Err(CommitError::ActionNotFound)));
-    }
-
-    #[test]
-    fn commit_at_leaf_returns_error() {
-        let mut tree = simple_tree();
-        // Commit to B (a leaf)
-        tree.commit(&StepAction::RegisterOutput(Amount::from_sat(20_000))).unwrap();
-        let result = tree.commit(&StepAction::RegisterOutput(Amount::from_sat(20_000)));
-        assert!(matches!(result, Err(CommitError::AlreadyAtLeaf)));
-    }
-
-    #[test]
-    fn reachable_leaves_returns_all_leaf_paths() {
-        let tree = simple_tree();
-        let leaves = tree.reachable_leaves();
-        // Expected paths: [A,X], [A,Y], [B]
-        assert_eq!(leaves.len(), 3);
-    }
-
-    #[test]
-    fn reachable_leaves_shrinks_after_commit() {
-        let mut tree = simple_tree();
-        tree.commit(&StepAction::RegisterOutput(Amount::from_sat(10_000))).unwrap();
-        let leaves = tree.reachable_leaves();
-        // Only A's subtree remains: [A,X], [A,Y]  — but cursor is now inside A, so leaves = [X], [Y]
-        assert_eq!(leaves.len(), 2);
-    }
-}
-
 /// Generate up to `k` distinct input sets from `candidates` using iterative BNB exclusion.
 ///
 /// Each successive call to BNB has UTXOs from all prior results excluded, producing diverse
@@ -412,8 +297,10 @@ pub(crate) fn generate_input_candidates(
     let mut excluded: std::collections::HashSet<Outpoint> = std::collections::HashSet::new();
 
     while results.len() < k {
-        let remaining: Vec<&CoinCandidate> =
-            candidates.iter().filter(|c| !excluded.contains(&c.outpoint)).collect();
+        let remaining: Vec<&CoinCandidate> = candidates
+            .iter()
+            .filter(|c| !excluded.contains(&c.outpoint))
+            .collect();
 
         if remaining.is_empty() {
             break;
@@ -480,7 +367,9 @@ pub(crate) fn build_plan_tree(
             outpoints.sort_by_key(|op| denomination_fit(input_amounts(op), menu));
 
             let total_in: Amount = outpoints.iter().map(|op| input_amounts(op)).sum();
-            let remaining = total_in.checked_sub(payment_total + fee).unwrap_or(Amount::ZERO);
+            let remaining = total_in
+                .checked_sub(payment_total + fee)
+                .unwrap_or(Amount::ZERO);
 
             // Build the output subtree: fixed payments then decomposed change.
             let mut output_children = decompose(remaining, menu);
@@ -552,4 +441,150 @@ fn denomination_fit(amount: Amount, menu: &DenominationMenu) -> u64 {
         })
         .min()
         .unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn leaf_paths(nodes: &[PlanNode], prefix: Vec<Amount>) -> Vec<Vec<Amount>> {
+        let mut paths = Vec::new();
+        for node in nodes {
+            let StepAction::RegisterOutput(amt) = node.action else {
+                continue;
+            };
+            let mut path = prefix.clone();
+            path.push(amt);
+            if node.children.is_empty() {
+                paths.push(path);
+            } else {
+                paths.extend(leaf_paths(&node.children, path));
+            }
+        }
+        paths
+    }
+
+    #[test]
+    fn decompose_paths_sum_to_remaining() {
+        let menu = DenominationMenu::standard();
+        let remaining = Amount::from_sat(15_000);
+        let nodes = decompose(remaining, &menu);
+        assert!(!nodes.is_empty(), "expected at least one branch");
+        for path in leaf_paths(&nodes, vec![]) {
+            let total: Amount = path.iter().copied().sum();
+            assert_eq!(
+                total, remaining,
+                "path {:?} does not sum to {remaining}",
+                path
+            );
+        }
+    }
+
+    #[test]
+    fn decompose_zero_returns_empty() {
+        let menu = DenominationMenu::standard();
+        assert!(decompose(Amount::ZERO, &menu).is_empty());
+    }
+
+    #[test]
+    fn decompose_residual_below_min_denom() {
+        let menu = DenominationMenu::standard();
+        // 999 sat is below the 1_000 sat minimum denomination
+        let nodes = decompose(Amount::from_sat(999), &menu);
+        assert_eq!(nodes.len(), 1);
+        assert!(nodes[0].children.is_empty());
+        assert_eq!(
+            nodes[0].action,
+            StepAction::RegisterOutput(Amount::from_sat(999))
+        );
+    }
+
+    #[test]
+    fn standard_menu_is_sorted_descending() {
+        let menu = DenominationMenu::standard();
+        assert!(!menu.denominations.is_empty());
+        for window in menu.denominations.windows(2) {
+            assert!(
+                window[0] >= window[1],
+                "denominations not sorted descending"
+            );
+        }
+    }
+
+    fn simple_tree() -> PlanTree {
+        // Two roots: A and B. A has children X and Y.
+        let x = PlanNode {
+            action: StepAction::RegisterOutput(Amount::from_sat(1_000)),
+            children: vec![],
+        };
+        let y = PlanNode {
+            action: StepAction::RegisterOutput(Amount::from_sat(2_000)),
+            children: vec![],
+        };
+        let a = PlanNode {
+            action: StepAction::RegisterOutput(Amount::from_sat(10_000)),
+            children: vec![x, y],
+        };
+        let b = PlanNode {
+            action: StepAction::RegisterOutput(Amount::from_sat(20_000)),
+            children: vec![],
+        };
+        PlanTree::new(vec![a, b], 0, 0)
+    }
+
+    #[test]
+    fn next_actions_at_root_returns_all_roots() {
+        let tree = simple_tree();
+        let actions = tree.next_actions();
+        assert_eq!(actions.len(), 2);
+        assert!(actions.contains(&&StepAction::RegisterOutput(Amount::from_sat(10_000))));
+        assert!(actions.contains(&&StepAction::RegisterOutput(Amount::from_sat(20_000))));
+    }
+
+    #[test]
+    fn commit_prunes_siblings_and_advances_cursor() {
+        let mut tree = simple_tree();
+        tree.commit(&StepAction::RegisterOutput(Amount::from_sat(10_000)))
+            .unwrap();
+        // After committing A, only A should remain at the root level.
+        let actions = tree.next_actions();
+        assert_eq!(actions.len(), 2); // A's children: X and Y
+        assert!(actions.contains(&&StepAction::RegisterOutput(Amount::from_sat(1_000))));
+        assert!(actions.contains(&&StepAction::RegisterOutput(Amount::from_sat(2_000))));
+    }
+
+    #[test]
+    fn commit_unknown_action_returns_error() {
+        let mut tree = simple_tree();
+        let result = tree.commit(&StepAction::RegisterOutput(Amount::from_sat(99_999)));
+        assert!(matches!(result, Err(CommitError::ActionNotFound)));
+    }
+
+    #[test]
+    fn commit_at_leaf_returns_error() {
+        let mut tree = simple_tree();
+        // Commit to B (a leaf)
+        tree.commit(&StepAction::RegisterOutput(Amount::from_sat(20_000)))
+            .unwrap();
+        let result = tree.commit(&StepAction::RegisterOutput(Amount::from_sat(20_000)));
+        assert!(matches!(result, Err(CommitError::AlreadyAtLeaf)));
+    }
+
+    #[test]
+    fn reachable_leaves_returns_all_leaf_paths() {
+        let tree = simple_tree();
+        let leaves = tree.reachable_leaves();
+        // Expected paths: [A,X], [A,Y], [B]
+        assert_eq!(leaves.len(), 3);
+    }
+
+    #[test]
+    fn reachable_leaves_shrinks_after_commit() {
+        let mut tree = simple_tree();
+        tree.commit(&StepAction::RegisterOutput(Amount::from_sat(10_000)))
+            .unwrap();
+        let leaves = tree.reachable_leaves();
+        // Only A's subtree remains: [A,X], [A,Y]  — but cursor is now inside A, so leaves = [X], [Y]
+        assert_eq!(leaves.len(), 2);
+    }
 }

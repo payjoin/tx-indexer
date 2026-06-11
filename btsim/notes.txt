@@ -1,0 +1,20 @@
+Currently the plan tree is build once when the wallet first has UTXOs and POs.
+The wallets pick the best branch they can from the tree. And commit to it.
+
+They have no preferences over UTXOs on the orderbook. They should take a look at the utxos and 
+recompute scores on the tree. Perhaps a sparse branch becomes dense and the wallet should reconsider the branch.
+
+They should always keep track of their best branch (best worst case -- interms of external penalties).
+
+There are lot of optimizations to look into: 
+- caching scores for leaves
+- depending on the privacy metrics used other things may be memoized. Subsums, combinations, etc. Denominations, etc.
+
+We also need to recompute when there are any externalities. Until we cross a threshold where no matter what external events
+happen we always happy with the branch that we have. 
+
+Currently there is a lot of boilerplate and messy code in actions.rs. We need to step back and carefully refactor the layers of 
+abstraction correctly. 
+
+There is a strategies which define what actions are even available to a wallet. 
+These need to get refined or ignored where there is a plan tree. 

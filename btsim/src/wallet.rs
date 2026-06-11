@@ -31,6 +31,11 @@ define_entity_data!(Wallet, {
     /// Wallet-level plan tree, built once when the wallet first has UTXOs and POs.
     /// Lives on WalletData (not WalletInfo) so it is never cloned on tx recording.
     pub(crate) wallet_plan_tree: Option<crate::plan_tree::PlanTree>,
+    /// Best branch selected from the plan tree using only the wallet's current state.
+    ///
+    /// This is intentionally fixed after selection for now. Future adaptive planning should
+    /// invalidate and recompute it when new bulletin-board messages change peer state.
+    pub(crate) selected_plan_branch: Option<Vec<crate::plan_tree::StepAction>>,
 }, skip_eq_clone);
 define_entity_info!(Wallet, {
         pub(crate) broadcast_set_id: BroadcastSetId,
@@ -304,8 +309,10 @@ impl<'a> WalletHandleMut<'a> {
                     self.info_mut()
                         .active_multi_party_payjoins
                         .insert(*bulletin_board_id, updated_session);
-                    // Reset the global plan tree so a fresh one is built next wake.
-                    self.data_mut().wallet_plan_tree = None;
+                    // Reset the global plan tree and fixed branch so a fresh plan is built next wake.
+                    let data = self.data_mut();
+                    data.wallet_plan_tree = None;
+                    data.selected_plan_branch = None;
                     log::info!(
                         "Multi party payjoin session successful with bulletin board id: {:?}",
                         bulletin_board_id
@@ -433,11 +440,17 @@ impl<'a> WalletHandleMut<'a> {
                 for (po_id, &po_amount) in po_ids.iter().zip(po_amounts.iter()) {
                     let to_wallet = po_id.with(self.sim).data().to;
                     let to_addr = to_wallet.with_mut(self.sim).new_address();
-                    outputs.push(Output { amount: po_amount, address_id: to_addr });
+                    outputs.push(Output {
+                        amount: po_amount,
+                        address_id: to_addr,
+                    });
                 }
                 for &change_amount in change_amounts {
                     let change_addr = self.new_address();
-                    outputs.push(Output { amount: change_amount, address_id: change_addr });
+                    outputs.push(Output {
+                        amount: change_amount,
+                        address_id: change_addr,
+                    });
                 }
                 for output in &outputs {
                     self.sim.add_message_to_bulletin_board(

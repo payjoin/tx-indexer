@@ -46,11 +46,11 @@ mod economic_graph;
 mod graphviz;
 mod message;
 pub mod metrics;
+pub(crate) mod plan_tree;
 pub mod script_type;
 mod transaction;
 mod tx_contruction;
 mod wallet;
-pub(crate) mod plan_tree;
 
 #[derive(Debug, Clone)]
 struct PrngFactory(Pcg64);
@@ -506,6 +506,7 @@ impl<'a> Simulation {
             scorer,
             script_type,
             wallet_plan_tree: None,
+            selected_plan_branch: None,
         });
         id
     }
