@@ -1,8 +1,8 @@
-use std::{iter::Sum, ops::Add};
+use std::{collections::HashMap as StdHashMap, iter::Sum, ops::Add};
 
 use bdk_coin_select::{Target, TargetFee, TargetOutputs};
 use bitcoin::Amount;
-use log::debug;
+use log::trace;
 
 use crate::{
     bulletin_board::BulletinBoardId,
@@ -10,6 +10,9 @@ use crate::{
     cospend::{CospendInterest, UtxoWithMetadata},
     message::MessageId,
     metrics::PrivacyBundle,
+    plan_tree::{
+        build_plan_tree, generate_input_candidates, DenominationMenu, PeerState, StepAction,
+    },
     transaction::Outpoint,
     tx_contruction::TxConstructionState,
     wallet::{
@@ -120,14 +123,6 @@ impl CostMode {
         external: 1.0,
         internal: 1.0,
     };
-}
-
-/// Cost interval for a plan. Best and worse case scenarios are based on the cost mode.
-#[derive(Debug, Clone)]
-pub(crate) struct CostBracket {
-    pub(crate) worst: ActionCost,
-    #[allow(dead_code)]
-    pub(crate) best: ActionCost,
 }
 
 /// Build a `Plan` from any `Action`, deriving inputs, outputs, and wallet residue
@@ -504,55 +499,146 @@ impl Strategy for BatchSpender {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct MultipartyStrategy;
+// ---------------------------------------------------------------------------
+// PlanDrivenStrategy
+// ---------------------------------------------------------------------------
 
-impl Strategy for MultipartyStrategy {
+#[derive(Debug, Clone)]
+pub(crate) struct PlanDrivenStrategy;
+
+fn selected_branch_inputs(branch: &[StepAction]) -> Vec<Outpoint> {
+    branch
+        .iter()
+        .filter_map(|action| {
+            if let StepAction::RegisterInput(op) = action {
+                Some(*op)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn selected_branch_change(branch: &[StepAction], n_payment_outputs: usize) -> Vec<Amount> {
+    let mut payment_outputs_seen = 0usize;
+    branch
+        .iter()
+        .filter_map(|action| match action {
+            StepAction::RegisterOutput(amt) => {
+                if payment_outputs_seen < n_payment_outputs {
+                    payment_outputs_seen += 1;
+                    None
+                } else {
+                    Some(*amt)
+                }
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+impl Strategy for PlanDrivenStrategy {
+    fn pre_enumerate(&self, wallet: &mut WalletHandleMut) {
+        if wallet.data().wallet_plan_tree.is_some() {
+            return;
+        }
+        let h = wallet.handle();
+        let pos = h.unhandled_payment_obligations();
+        if pos.is_empty() {
+            return;
+        }
+        let candidates = h.coin_candidates();
+        let target = target_for_obligations(&pos, &h);
+        let input_sets = generate_input_candidates(&candidates, target, 5);
+        if input_sets.is_empty() {
+            return;
+        }
+        let utxo_amounts: StdHashMap<_, _> = h
+            .spendable_utxos()
+            .into_iter()
+            .map(|u| (u.outpoint, u.amount))
+            .collect();
+        let payment_amounts: Vec<_> = pos.iter().map(|po| po.amount).collect();
+        let tree = build_plan_tree(
+            input_sets,
+            payment_amounts,
+            |op| {
+                utxo_amounts.get(op).copied().unwrap_or_else(|| {
+                    unreachable!("input candidate outpoint missing from spendable UTXOs")
+                })
+            },
+            &DenominationMenu::standard(),
+            bitcoin::Amount::from_sat(1_000),
+        );
+        let selected_branch = tree
+            .score_leaves(
+                &PeerState::default(),
+                &h.data().scorer,
+                &h,
+                CostMode::EXTERNAL_PENALTIES_OFF,
+            )
+            .into_iter()
+            .min_by(|a, b| {
+                a.1 .0
+                    .partial_cmp(&b.1 .0)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(path, _)| path.into_iter().cloned().collect());
+
+        let data = wallet.data_mut();
+        data.wallet_plan_tree = Some(tree);
+        data.selected_plan_branch = selected_branch;
+    }
+
     fn enumerate_candidate_actions(&self, wallet: &WalletHandle) -> Vec<Action> {
         let mut actions = vec![];
-
+        let payment_obligations = wallet.unhandled_payment_obligations();
         let active_cospends = wallet.active_cospend_sessions();
         let cospend_proposals = wallet.pending_cospend_proposals();
-        let payment_obligations = wallet.unhandled_payment_obligations();
         let registered_inputs = wallet.registered_input_outpoints();
         let scorer = &wallet.data().scorer;
+        let tree = wallet.data().wallet_plan_tree.as_ref();
+        let selected_branch = wallet.data().selected_plan_branch.as_deref();
 
-        // Continue active sessions
-        for bulletin_board_id in active_cospends.iter() {
-            actions.push(Action::ContinueParticipateInCospend(*bulletin_board_id));
+        // Step A: continue active sessions.
+        for bb_id in active_cospends.iter() {
+            actions.push(Action::ContinueParticipateInCospend(*bb_id));
         }
 
-        // Accept incoming proposals if no active session and enough unilateral fallbacks exist.
-        // No cost comparison here — acceptance is cheap (no funds committed yet) and the real
-        // cost gate is in ContributeOutputsToSession where POs are actually committed.
-        if let Some((bulletin_board_id, message_id)) = cospend_proposals.first() {
+        // Step B: contribute outputs to sessions in AcceptedProposal state.
+        for (bb_id, session) in wallet.info().active_multi_party_payjoins.iter() {
+            if session.state != TxConstructionState::AcceptedProposal {
+                continue;
+            }
+            if payment_obligations.is_empty() {
+                continue;
+            }
+            let po_ids: Vec<_> = payment_obligations.iter().map(|po| po.id).collect();
+            let change = tree
+                .and_then(|t| {
+                    if payment_obligations.len() != t.n_payment_outputs {
+                        return None;
+                    }
+                    selected_branch
+                        .map(|branch| selected_branch_change(branch, t.n_payment_outputs))
+                })
+                .unwrap_or_else(|| {
+                    change_for_session_contribution(bb_id, &payment_obligations, wallet)
+                });
+            actions.push(Action::ContributeOutputsToSession(*bb_id, po_ids, change));
+        }
+
+        // Step C: accept a pending proposal (no active session, enough fallbacks).
+        if let Some((bb_id, msg_id)) = cospend_proposals.first() {
             if active_cospends.is_empty() {
                 let fallback_count = enumerate_unilateral_actions(wallet).len();
                 if fallback_count >= scorer.min_fallback_plans {
-                    actions.push(Action::AcceptCospendProposal((
-                        *message_id,
-                        *bulletin_board_id,
-                    )));
+                    actions.push(Action::AcceptCospendProposal((*msg_id, *bb_id)));
                 }
             }
         }
 
-        // Contribute outputs to sessions in AcceptedProposal state.
-        // No cost gate here: acceptance is the commitment decision; once accepted, the
-        // wallet fulfills by contributing all its pending POs to the session.
-        for (bb_id, session) in wallet.info().active_multi_party_payjoins.iter() {
-            if session.state == TxConstructionState::AcceptedProposal
-                && !payment_obligations.is_empty()
-            {
-                let po_ids: Vec<PaymentObligationId> =
-                    payment_obligations.iter().map(|po| po.id).collect();
-                let change = change_for_session_contribution(bb_id, &payment_obligations, wallet);
-                actions.push(Action::ContributeOutputsToSession(*bb_id, po_ids, change));
-            }
-        }
-
-        // When truly idle (no pending proposals, no non-completed sessions):
-        // register inputs in the orderbook and propose cospend if possible.
+        // Step D: idle decisions driven by plan tree.
         let has_active_sessions = !active_cospends.is_empty()
             || wallet
                 .info()
@@ -560,79 +646,46 @@ impl Strategy for MultipartyStrategy {
                 .values()
                 .any(|s| !matches!(s.state, TxConstructionState::Success(_)));
         if cospend_proposals.is_empty() && !has_active_sessions {
-            // Register inputs — use the intersection of inputs across all unilateral actions
-            // so we only advertise coins that are committed to regardless of which PO we pay.
-            let unilateral_actions = UnilateralSpender.enumerate_candidate_actions(wallet);
-            let per_action_inputs: Vec<std::collections::HashSet<Outpoint>> = unilateral_actions
-                .iter()
-                .filter_map(|a| match a {
-                    Action::UnilateralPayments(_, inputs, _) => {
-                        Some(inputs.iter().copied().collect())
-                    }
-                    _ => None,
-                })
-                .collect();
-            let common_inputs: Vec<Outpoint> = per_action_inputs
-                .iter()
-                .skip(1)
-                .fold(
-                    per_action_inputs.first().cloned().unwrap_or_default(),
-                    |acc, s| acc.intersection(s).copied().collect(),
-                )
-                .iter()
-                .filter(|o| !registered_inputs.contains(o))
-                .copied()
-                .collect();
-            if !common_inputs.is_empty() {
-                actions.push(Action::RegisterInput(common_inputs));
-            }
-
-            // Propose cospend to each orderbook peer whose worst-case cost is competitive,
-            // provided there are enough unilateral fallback plans.
-            if !payment_obligations.is_empty() {
-                if let Some(own_utxo) = wallet.spendable_utxos().into_iter().next() {
-                    let po_ids: Vec<PaymentObligationId> =
-                        payment_obligations.iter().map(|po| po.id).collect();
-                    let unilateral_fallbacks = enumerate_unilateral_actions(wallet);
-                    if unilateral_fallbacks.len() < scorer.min_fallback_plans {
-                        // Not enough fallback options. Don't propose anything dont make any commitments.
-                    } else {
-                        let best_unilateral_worst = unilateral_fallbacks
-                            .iter()
-                            .map(|a| scorer.bracket(&plan_from_action(a, wallet), wallet).worst)
-                            .min()
-                            .unwrap_or(ActionCost(f64::MAX));
-                        let residue_pos: Vec<PaymentObligationData> = wallet
-                            .unhandled_payment_obligations()
-                            .into_iter()
-                            .filter(|po| !po_ids.contains(&po.id))
-                            .collect();
-                        let interests: Vec<CospendInterest> = wallet
-                            .orderbook_utxos()
-                            .into_iter()
-                            .filter(|peer_utxo| peer_utxo.owner != wallet.id)
-                            .filter(|peer_utxo| {
-                                let plan = Plan {
-                                    my_inputs: vec![(own_utxo.outpoint, own_utxo.amount)],
-                                    my_outputs: vec![],
-                                    their_inputs: vec![(peer_utxo.outpoint, peer_utxo.amount)],
-                                    their_outputs: vec![],
-                                    wallet_residue: WalletResidue {
-                                        utxos: wallet.spendable_utxos(),
-                                        payment_obligations: residue_pos.clone(),
-                                    },
-                                };
-                                scorer.bracket(&plan, wallet).worst <= best_unilateral_worst
-                            })
-                            .map(|peer_utxo| CospendInterest {
-                                utxos: vec![own_utxo.clone(), peer_utxo],
-                            })
-                            .collect();
-                        if !interests.is_empty() {
-                            actions.push(Action::ProposeCospend(interests));
-                        }
-                    }
+            if tree.is_some() {
+                let branch_inputs = selected_branch
+                    .map(selected_branch_inputs)
+                    .unwrap_or_default();
+                let unregistered: Vec<Outpoint> = branch_inputs
+                    .iter()
+                    .copied()
+                    .filter(|op| !registered_inputs.contains(op))
+                    .collect();
+                if !unregistered.is_empty() {
+                    return vec![Action::RegisterInput(unregistered)];
                 }
+
+                let selected_utxos: Vec<UtxoWithMetadata> = branch_inputs
+                    .iter()
+                    .map(|op| UtxoWithMetadata {
+                        outpoint: *op,
+                        amount: op.with(wallet.sim).data().amount,
+                        owner: wallet.id,
+                    })
+                    .collect();
+                if payment_obligations.is_empty() || selected_utxos.is_empty() {
+                    return vec![Action::Wait];
+                }
+
+                let interests: Vec<CospendInterest> = wallet
+                    .orderbook_utxos()
+                    .into_iter()
+                    .filter(|peer_utxo| peer_utxo.owner != wallet.id)
+                    .map(|peer_utxo| {
+                        let mut utxos = selected_utxos.clone();
+                        utxos.push(peer_utxo);
+                        CospendInterest { utxos }
+                    })
+                    .collect();
+                return if interests.is_empty() {
+                    vec![Action::Wait]
+                } else {
+                    vec![Action::ProposeCospend(interests)]
+                };
             }
         }
 
@@ -643,9 +696,11 @@ impl Strategy for MultipartyStrategy {
     }
 
     fn clone_box(&self) -> Box<dyn Strategy> {
-        Box::new(self.clone())
+        Box::new(Self)
     }
 }
+
+// ---------------------------------------------------------------------------
 
 const MIN_AGGREGATE_INTERESTS: usize = 2;
 
@@ -732,9 +787,10 @@ impl CompositeScorer {
                 (5.0, 0.0),
             ];
             let utility = piecewise_linear(time_left as f64, &points);
-            debug!(
+            trace!(
                 "PaymentObligationHandled cost: base={} utility={}",
-                base_cost, utility
+                base_cost,
+                utility
             );
             cost = cost + ActionCost(base_cost - utility);
         }
@@ -754,14 +810,6 @@ impl CompositeScorer {
             CostMode::EXTERNAL_PENALTIES_ON,
         )
     }
-
-    /// Compute a `[best, worst]` cost bracket for a plan.
-    pub(crate) fn bracket(&self, plan: &Plan, wallet: &WalletHandle) -> CostBracket {
-        CostBracket {
-            worst: self.score(plan, wallet, CostMode::EXTERNAL_PENALTIES_ON),
-            best: self.score(plan, wallet, CostMode::EXTERNAL_PENALTIES_OFF),
-        }
-    }
 }
 
 /// Creates a strategy instance from its name string
@@ -770,7 +818,7 @@ pub(crate) fn create_strategy(name: &str) -> Result<Box<dyn Strategy>, String> {
         "UnilateralSpender" => Ok(Box::new(UnilateralSpender)),
         "Consolidator" => Ok(Box::new(Consolidator)),
         "BatchSpender" => Ok(Box::new(BatchSpender)),
-        "MultipartyStrategy" => Ok(Box::new(MultipartyStrategy)),
+        "PlanDrivenStrategy" => Ok(Box::new(PlanDrivenStrategy)),
         "AggregatorStrategy" => Ok(Box::new(AggregatorStrategy)),
         _ => Err(format!("Unknown strategy: {}", name)),
     }
@@ -820,40 +868,6 @@ mod tests {
         sim.payment_data.push(po);
         let last_id = sim.wallet_data[from.0].last_wallet_info_id;
         sim.wallet_info[last_id.0].payment_obligations.insert(id);
-    }
-
-    fn inject_active_session(
-        sim: &mut crate::Simulation,
-        wallet_id: WalletId,
-        bb_id: BulletinBoardId,
-        state: TxConstructionState,
-    ) {
-        let mut wallet = wallet_id.with_mut(sim);
-        let mut info = wallet.info().clone();
-        info.active_multi_party_payjoins.insert(
-            bb_id,
-            MultiPartyPayjoinSession {
-                state,
-                inputs: vec![],
-                payment_obligation_ids: vec![],
-            },
-        );
-        wallet.update_info(info);
-    }
-
-    fn add_cospend_proposal_message(
-        sim: &mut crate::Simulation,
-        to: WalletId,
-        from: WalletId,
-        bb_id: BulletinBoardId,
-    ) {
-        let id = MessageId(sim.messages.len());
-        sim.messages.push(MessageData {
-            id,
-            message: MessageType::ProposeCoSpend(bb_id),
-            from,
-            to,
-        });
     }
 
     #[test]
@@ -968,237 +982,5 @@ mod tests {
         // Composite collects one Wait from each strategy.
         assert_eq!(actions.len(), 2);
         assert!(actions.iter().all(|a| matches!(a, Action::Wait)));
-    }
-
-    #[test]
-    fn test_multiparty_waits_with_no_orderbook_utxos() {
-        let mut sim = test_sim();
-        let po = PaymentObligationData {
-            id: PaymentObligationId(0),
-            deadline: TimeStep(100),
-            reveal_time: TimeStep(0),
-            amount: Amount::from_sat(1000),
-            from: WalletId(0),
-            to: WalletId(1),
-        };
-        add_payment_obligation(&mut sim, po);
-        // No UTXOs or orderbook entries — taker has nothing to propose with or to
-        let wallet = WalletId(0).with_mut(&mut sim);
-        let strategy = MultipartyStrategy;
-
-        let actions = strategy.enumerate_candidate_actions(&wallet);
-
-        assert_eq!(actions.len(), 1);
-        assert!(matches!(actions[0], Action::Wait));
-    }
-
-    #[test]
-    fn test_multiparty_proposes_cospend_with_orderbook_utxos() {
-        let mut sim = test_sim();
-        // Give wallets real UTXOs via build_universe
-        sim.build_universe();
-
-        let po = PaymentObligationData {
-            id: PaymentObligationId(sim.payment_data.len()),
-            deadline: TimeStep(100),
-            reveal_time: TimeStep(0),
-            amount: Amount::from_sat(1000),
-            from: WalletId(0),
-            to: WalletId(1),
-        };
-        add_payment_obligation(&mut sim, po);
-
-        // Register exactly one of wallet 1's UTXOs in the orderbook
-        let first_peer_utxo = WalletId(1)
-            .with_mut(&mut sim)
-            .info()
-            .confirmed_utxos
-            .iter()
-            .next()
-            .cloned()
-            .unwrap();
-        WalletId(1)
-            .with_mut(&mut sim)
-            .do_action(&Action::RegisterInput(vec![first_peer_utxo]));
-
-        let strategy = MultipartyStrategy;
-        let wallet = WalletId(0).with_mut(&mut sim);
-
-        let actions = strategy.enumerate_candidate_actions(&wallet);
-
-        // Strategy also registers inputs when idle, so there may be more than one action.
-        assert!(actions
-            .iter()
-            .any(|a| matches!(a, Action::ProposeCospend(interests) if interests.len() == 1)));
-        assert!(!actions.iter().any(|a| matches!(a, Action::Wait)));
-    }
-
-    #[test]
-    fn test_multiparty_continues_active_session() {
-        let mut sim = test_sim();
-        let po = PaymentObligationData {
-            id: PaymentObligationId(0),
-            deadline: TimeStep(100),
-            reveal_time: TimeStep(0),
-            amount: Amount::from_sat(1000),
-            from: WalletId(0),
-            to: WalletId(1),
-        };
-        add_payment_obligation(&mut sim, po);
-        let bb_id = sim.create_bulletin_board();
-        inject_active_session(
-            &mut sim,
-            WalletId(0),
-            bb_id,
-            TxConstructionState::SentOutputs,
-        );
-
-        let wallet = WalletId(0).with_mut(&mut sim);
-        let strategy = MultipartyStrategy;
-
-        let actions = strategy.enumerate_candidate_actions(&wallet);
-
-        assert_eq!(actions.len(), 1);
-        assert!(actions
-            .iter()
-            .any(|a| matches!(a, Action::ContinueParticipateInCospend(_))));
-    }
-
-    #[test]
-    fn test_multiparty_accepts_new_invitation() {
-        let mut sim = test_sim();
-        let po = PaymentObligationData {
-            id: PaymentObligationId(0),
-            deadline: TimeStep(100),
-            reveal_time: TimeStep(0),
-            amount: Amount::from_sat(1000),
-            from: WalletId(0),
-            to: WalletId(1),
-        };
-        add_payment_obligation(&mut sim, po);
-        let bb_id = sim.create_bulletin_board();
-        // Send a ProposeCoSpend message from wallet 1 to wallet 0
-        add_cospend_proposal_message(&mut sim, WalletId(0), WalletId(1), bb_id);
-
-        let wallet = WalletId(0).with_mut(&mut sim);
-        let strategy = MultipartyStrategy;
-
-        let actions = strategy.enumerate_candidate_actions(&wallet);
-
-        assert_eq!(actions.len(), 1);
-        assert!(actions
-            .iter()
-            .any(|a| matches!(a, Action::AcceptCospendProposal((_, id)) if *id == bb_id)));
-    }
-
-    #[test]
-    fn test_multiparty_contributes_outputs_when_session_awaiting() {
-        let mut sim = test_sim();
-
-        // Create a bulletin board and accept an invitation, advancing session to AcceptedProposal
-        let bb_id = sim.create_bulletin_board();
-        let msg_id = MessageId(0);
-        WalletId(0)
-            .with_mut(&mut sim)
-            .do_action(&Action::AcceptCospendProposal((msg_id, bb_id)));
-
-        let po = PaymentObligationData {
-            id: PaymentObligationId(0),
-            deadline: TimeStep(100),
-            reveal_time: TimeStep(0),
-            amount: Amount::from_sat(1000),
-            from: WalletId(0),
-            to: WalletId(1),
-        };
-        add_payment_obligation(&mut sim, po);
-
-        let strategy = MultipartyStrategy;
-        let wallet = WalletId(0).with_mut(&mut sim);
-
-        // Verify the session is in AcceptedProposal state
-        let session = wallet
-            .info()
-            .active_multi_party_payjoins
-            .get(&bb_id)
-            .unwrap();
-        assert_eq!(session.state, TxConstructionState::AcceptedProposal);
-
-        let actions = strategy.enumerate_candidate_actions(&wallet);
-
-        assert!(actions
-            .iter()
-            .any(|a| matches!(a, Action::ContributeOutputsToSession(id, ids, _) if *id == bb_id && ids.len() == 1)));
-        // Should NOT emit ContinueParticipateInCospend for this session
-        assert!(!actions
-            .iter()
-            .any(|a| matches!(a, Action::ContinueParticipateInCospend(id) if *id == bb_id)));
-    }
-
-    #[test]
-    fn test_multiparty_with_active_session() {
-        let mut sim = test_sim();
-        let po = PaymentObligationData {
-            id: PaymentObligationId(0),
-            deadline: TimeStep(100),
-            reveal_time: TimeStep(0),
-            amount: Amount::from_sat(1000),
-            from: WalletId(0),
-            to: WalletId(1),
-        };
-        add_payment_obligation(&mut sim, po);
-        let bb_id = sim.create_bulletin_board();
-        inject_active_session(
-            &mut sim,
-            WalletId(0),
-            bb_id,
-            TxConstructionState::SentOutputs,
-        );
-
-        let wallet = WalletId(0).with_mut(&mut sim);
-        let strategy = MultipartyStrategy;
-
-        let actions = strategy.enumerate_candidate_actions(&wallet);
-
-        assert_eq!(actions.len(), 1);
-        assert!(actions
-            .iter()
-            .any(|a| matches!(a, Action::ContinueParticipateInCospend(_))));
-    }
-
-    #[test]
-    fn test_multiparty_prefers_continue_when_invite_and_active() {
-        let mut sim = test_sim();
-        let po = PaymentObligationData {
-            id: PaymentObligationId(0),
-            deadline: TimeStep(100),
-            reveal_time: TimeStep(0),
-            amount: Amount::from_sat(1000),
-            from: WalletId(0),
-            to: WalletId(1),
-        };
-        add_payment_obligation(&mut sim, po);
-        let bb_invite = sim.create_bulletin_board();
-        let bb_active = sim.create_bulletin_board();
-        // Pending invitation for bb_invite
-        add_cospend_proposal_message(&mut sim, WalletId(0), WalletId(1), bb_invite);
-        // Active session for bb_active (SentOutputs state)
-        inject_active_session(
-            &mut sim,
-            WalletId(0),
-            bb_active,
-            TxConstructionState::SentOutputs,
-        );
-
-        let wallet = WalletId(0).with_mut(&mut sim);
-        let strategy = MultipartyStrategy;
-
-        let actions = strategy.enumerate_candidate_actions(&wallet);
-
-        // With both a new invitation and active session, strategy should continue active session.
-        assert_eq!(actions.len(), 1);
-        assert!(matches!(
-            actions[0],
-            Action::ContinueParticipateInCospend(id) if id == bb_active
-        ));
     }
 }

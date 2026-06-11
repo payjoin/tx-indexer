@@ -985,7 +985,7 @@ mod tests {
             WalletTypeConfig {
                 name: "participant".to_string(),
                 count: 4,
-                strategies: vec!["MultipartyStrategy".to_string()],
+                strategies: vec!["PlanDrivenStrategy".to_string()],
                 scorer: ScorerConfig {
                     privacy_weight: 1.0,
                     payment_obligation_weight: 2.0,
