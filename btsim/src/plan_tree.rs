@@ -2,8 +2,11 @@ use bdk_coin_select::Target;
 use bitcoin::Amount;
 
 use crate::{
+    actions::{CompositeScorer, CostMode, Plan, WalletResidue},
     coin_selection::{select_all, select_bnb, CoinCandidate},
+    cospend::UtxoWithMetadata,
     transaction::Outpoint,
+    wallet::{PaymentObligationData, WalletHandle},
 };
 
 /// A single registration event in a multi-party session.
@@ -49,6 +52,13 @@ pub(crate) struct DenominationMenu {
 /// Scored cost for a leaf path.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LeafScore(pub(crate) f64);
+
+/// Observed registrations from other session participants.
+#[derive(Debug, Default)]
+pub(crate) struct PeerState {
+    pub(crate) their_inputs: Vec<(Outpoint, Amount)>,
+    pub(crate) their_outputs: Vec<Amount>,
+}
 
 #[derive(Debug)]
 pub(crate) enum CommitError {
@@ -126,6 +136,25 @@ impl PlanTree {
             common = common.intersection(&s).copied().collect();
         }
         common.into_iter().collect()
+    }
+
+    /// Re-scores all reachable leaves. Use `EXTERNAL_PENALTIES_OFF` before peer info is
+    /// available, `EXTERNAL_PENALTIES_ON` once the bulletin board has peer outputs.
+    pub(crate) fn score_leaves(
+        &self,
+        peer: &PeerState,
+        scorer: &CompositeScorer,
+        wallet: &WalletHandle,
+        mode: CostMode,
+    ) -> Vec<(Vec<&StepAction>, LeafScore)> {
+        self.reachable_leaves()
+            .into_iter()
+            .map(|path| {
+                let plan = plan_from_path(&path, peer, wallet);
+                let cost = scorer.score(&plan, wallet, mode);
+                (path, LeafScore(cost.0))
+            })
+            .collect()
     }
 
     fn current_level(&self) -> &[PlanNode] {
@@ -329,6 +358,35 @@ pub(crate) fn build_plan_tree(
         .collect();
 
     PlanTree::new(roots, 0, n_payment_outputs)
+}
+
+/// Builds a `Plan` from a leaf action path and current peer state.
+/// Input amounts are looked up from the live UTXO pool. Residue is empty —
+/// all payment obligations are treated as handled for leaf ranking purposes.
+fn plan_from_path(path: &[&StepAction], peer: &PeerState, wallet: &WalletHandle) -> Plan {
+    let mut my_inputs = Vec::new();
+    let mut my_outputs = Vec::new();
+
+    for action in path {
+        match action {
+            StepAction::RegisterInput(op) => {
+                let amount = op.with(wallet.sim).data().amount;
+                my_inputs.push((*op, amount));
+            }
+            StepAction::RegisterOutput(amt) => my_outputs.push(*amt),
+        }
+    }
+
+    Plan {
+        my_inputs,
+        my_outputs,
+        their_inputs: peer.their_inputs.clone(),
+        their_outputs: peer.their_outputs.clone(),
+        wallet_residue: WalletResidue {
+            utxos: Vec::<UtxoWithMetadata>::new(),
+            payment_obligations: Vec::<PaymentObligationData>::new(),
+        },
+    }
 }
 
 /// Distance from `amount` to the nearest denomination in `menu` (in satoshis).
