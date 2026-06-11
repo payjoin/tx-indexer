@@ -808,8 +808,8 @@ impl CompositeScorer {
             ];
             let utility = piecewise_linear(time_left as f64, &points);
             debug!(
-                "PaymentObligationHandled cost: base={} utility={}",
-                base_cost, utility
+                "PaymentObligationHandled cost: base={} utility={} ts={:?} wallet={:?}",
+                base_cost, utility, ts, wallet.id
             );
             cost = cost + ActionCost(base_cost - utility);
         }

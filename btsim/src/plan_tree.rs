@@ -218,16 +218,16 @@ impl DenominationMenu {
     pub(crate) fn standard() -> Self {
         let mut denoms: Vec<u64> = Vec::new();
 
-        // Powers of two: 2^10 (1024) through 2^26 (67_108_864)
+        // Powers of two: 2^10 (1_024) through 2^13 (8_192)
         let mut p2: u64 = 1 << 10;
-        while p2 <= 100_000_000 {
+        while p2 <= 10_000 {
             denoms.push(p2);
             p2 *= 2;
         }
 
-        // Powers of ten: 10^3 (1_000) through 10^8 (100_000_000)
+        // Powers of ten: 10^3 (1_000) through 10^4 (10_000)
         let mut p10: u64 = 1_000;
-        while p10 <= 100_000_000 {
+        while p10 <= 10_000 {
             denoms.push(p10);
             p10 *= 10;
         }

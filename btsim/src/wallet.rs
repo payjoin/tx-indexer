@@ -505,10 +505,14 @@ impl<'a> WalletHandleMut<'a> {
             all_actions.extend(strategy.enumerate_candidate_actions(self));
         }
 
-        let action = all_actions
-            .into_iter()
-            .min_by_key(|action| scorer.action_cost(action, self))
-            .unwrap_or(Action::Wait);
+        let action = if self.data().selected_plan_branch.is_some() {
+            all_actions.into_iter().find(|a| !matches!(a, Action::Wait)).unwrap_or(Action::Wait)
+        } else {
+            all_actions
+                .into_iter()
+                .min_by_key(|action| scorer.action_cost(action, self))
+                .unwrap_or(Action::Wait)
+        };
         info!("Wallet id: {:?} chose action: {:?}", self.id, action);
         self.do_action(&action);
     }
