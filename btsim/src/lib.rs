@@ -46,6 +46,7 @@ mod economic_graph;
 mod graphviz;
 mod message;
 pub mod metrics;
+pub(crate) mod plan_tree;
 pub mod script_type;
 mod transaction;
 mod tx_contruction;
