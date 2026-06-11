@@ -7,12 +7,13 @@ num_payment_obligations = 5
 [[wallet_types]]
 name = "participant"
 count = 4
-strategies = ["MultipartyStrategy"]
+strategies = ["PlanDrivenStrategy"]
 script_type = "p2wpkh"
 
 [wallet_types.scorer]
 privacy_weight = 1.0
 payment_obligation_weight = 2.0
+min_fallback_plans = 0
 
 # Aggregators: create aggregate proposals from pending interests
 # For now they are a distinct role that should not have payment obligations
@@ -25,3 +26,4 @@ script_type = "p2wpkh"
 [wallet_types.scorer]
 privacy_weight = 0.0
 payment_obligation_weight = 0.0
+min_fallback_plans = 0
