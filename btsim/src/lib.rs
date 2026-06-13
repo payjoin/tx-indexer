@@ -51,6 +51,10 @@ mod transaction;
 mod tx_contruction;
 mod wallet;
 
+/// Inclusive range (in satoshis) for the random amount funded to each wallet coinbase
+/// during universe setup.
+const WALLET_FUNDING_RANGE_SATS: std::ops::RangeInclusive<u64> = 10_000..=10_000_000;
+
 #[derive(Debug, Clone)]
 struct PrngFactory(Pcg64);
 
@@ -325,16 +329,18 @@ impl<'a> Simulation {
             .map(|&id| id.with_mut(self).new_address())
             .collect::<Vec<_>>();
 
-        // For now we just mine a coinbase transaction for each wallet
+        // For now we just mine a coinbase transaction for each wallet, funding each with a
+        // random amount instead of the full block subsidy so wallets start with varied UTXOs.
         let mut i = 0;
         for address in addresses.iter() {
             for _ in 0..prng.random_range(5..10) {
+                let funding = Amount::from_sat(prng.random_range(WALLET_FUNDING_RANGE_SATS));
                 let _ = BroadcastSetHandleMut {
                     id: BroadcastSetId(i),
                     sim: self,
                 }
                 .construct_block_template(Weight::MAX_BLOCK)
-                .mine(*address, self);
+                .mine_with_reward(*address, Some(funding), self);
 
                 self.assert_invariants();
                 i += 1;

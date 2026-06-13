@@ -363,6 +363,18 @@ pub(crate) struct BlockTemplate {
 
 impl<'a> BlockTemplate {
     pub(crate) fn mine(self, rewards_to: AddressId, sim: &'a mut Simulation) -> BlockHandle<'a> {
+        self.mine_with_reward(rewards_to, None, sim)
+    }
+
+    /// Mine a block, optionally overriding the coinbase output amount. `reward_override`
+    /// is used to seed wallets with arbitrary funding amounts during universe setup;
+    /// `None` pays the normal subsidy + fees.
+    pub(crate) fn mine_with_reward(
+        self,
+        rewards_to: AddressId,
+        reward_override: Option<Amount>,
+        sim: &'a mut Simulation,
+    ) -> BlockHandle<'a> {
         let parent_block = self.parent.with(sim);
 
         let height = 1 + parent_block.info().height;
@@ -370,7 +382,7 @@ impl<'a> BlockTemplate {
 
         let fees = self.txs.iter().map(|tx| tx.with(sim).info().fee).sum();
 
-        let block_rewards = subsidy + fees;
+        let block_rewards = reward_override.unwrap_or(subsidy + fees);
 
         let mut confirmed_txs = OrdSet::from(&self.txs);
 
