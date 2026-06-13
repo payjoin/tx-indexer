@@ -734,7 +734,7 @@ impl Strategy for PlanDrivenStrategy {
                 .values()
                 .any(|s| !matches!(s.state, TxConstructionState::Success(_)));
         if cospend_proposals.is_empty() && !has_active_sessions {
-            if tree.is_some() {
+            if let Some(tree) = tree {
                 let branch_inputs = selected_branch
                     .map(selected_branch_inputs)
                     .unwrap_or_default();
@@ -759,13 +759,50 @@ impl Strategy for PlanDrivenStrategy {
                     return vec![Action::Wait];
                 }
 
-                let interests: Vec<CospendInterest> = wallet
+                // Best (lowest) achievable leaf score across all branches for a hypothetical
+                // peer contribution. Adversarial mode so a peer's inputs actually move the
+                // privacy term.
+                let best_score = |peer: &PeerState| -> Option<f64> {
+                    tree.score_leaves(peer, scorer, wallet, CostMode::EXTERNAL_PENALTIES_ON)
+                        .into_iter()
+                        .map(|(_, s)| s.0)
+                        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                };
+
+                let peers: Vec<UtxoWithMetadata> = wallet
                     .orderbook_utxos()
                     .into_iter()
                     .filter(|peer_utxo| peer_utxo.owner != wallet.id)
+                    .collect();
+
+                // Prefer peers whose input lowers our best achievable leaf score: rescore with
+                // that single input added and keep it if the new minimum beats the peer-free
+                // baseline — whether the gain lands on our current best branch or promotes a
+                // different one. If nothing improves the score (e.g. no privacy metric is
+                // configured, so all leaves tie), fall back to proposing to every peer so
+                // sessions can still form.
+                let baseline = best_score(&PeerState::default());
+                let improving: Vec<&UtxoWithMetadata> = peers
+                    .iter()
+                    .filter(|peer_utxo| {
+                        let peer = PeerState {
+                            their_inputs: vec![(peer_utxo.outpoint, peer_utxo.amount)],
+                            their_outputs: vec![],
+                        };
+                        matches!((best_score(&peer), baseline), (Some(w), Some(b)) if w < b)
+                    })
+                    .collect();
+                let chosen: Vec<&UtxoWithMetadata> = if improving.is_empty() {
+                    peers.iter().collect()
+                } else {
+                    improving
+                };
+
+                let interests: Vec<CospendInterest> = chosen
+                    .into_iter()
                     .map(|peer_utxo| {
                         let mut utxos = selected_utxos.clone();
-                        utxos.push(peer_utxo);
+                        utxos.push(peer_utxo.clone());
                         CospendInterest { utxos }
                     })
                     .collect();
