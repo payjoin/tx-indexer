@@ -537,10 +537,24 @@ fn selected_branch_change(branch: &[StepAction], n_payment_outputs: usize) -> Ve
         .collect()
 }
 
+/// Cost at or below which the already-selected plan branch is treated as good enough: once a
+/// session has formed and the committed branch scores this low under the known peer state, we
+/// stop re-selecting and lock it in rather than chasing marginal improvements.
+///
+/// Scores are `ActionCost` values where lower is better. With the default (empty) privacy
+/// bundle the score is dominated by the payment-obligation term, so this threshold mainly bites
+/// once a privacy metric and budget are configured — there cost ≈ penalty × budget_sats, so a
+/// meaningful "good enough" lives well above zero. Tune to taste.
+const GOOD_ENOUGH_LEAF_SCORE: f64 = 0.0;
+
 /// Re-scores the live plan tree against peer contributions observed on the bulletin board
 /// and re-selects the cheapest branch. Called once a session has formed, so the initial
 /// peer-blind selection (made under `EXTERNAL_PENALTIES_OFF`) can be revised now that the
 /// counterparty inputs and outputs are known.
+///
+/// If the branch we already committed to is already good enough under the now-known peer
+/// state (see [`GOOD_ENOUGH_LEAF_SCORE`]), the selection is left untouched — no point churning
+/// it for a marginal gain.
 fn rescore_against_peers(wallet: &mut WalletHandleMut) {
     use crate::bulletin_board::BroadcastMessageType;
     use std::cmp::Ordering;
@@ -585,8 +599,22 @@ fn rescore_against_peers(wallet: &mut WalletHandleMut) {
     let Some(tree) = h.data().wallet_plan_tree.as_ref() else {
         return;
     };
-    let new_branch: Option<Vec<StepAction>> = tree
-        .score_leaves(&peer, &h.data().scorer, &h, CostMode::EXTERNAL_PENALTIES_ON)
+    let scored = tree.score_leaves(&peer, &h.data().scorer, &h, CostMode::EXTERNAL_PENALTIES_ON);
+
+    // If the branch we already committed to is good enough under the known peer state, lock it
+    // in. Paths from `score_leaves` are full root-to-leaf, so they compare directly to the
+    // stored branch.
+    if let Some(current) = wallet.data().selected_plan_branch.as_deref() {
+        let current_score = scored.iter().find_map(|(path, score)| {
+            (path.len() == current.len() && path.iter().zip(current).all(|(a, b)| *a == b))
+                .then_some(score.0)
+        });
+        if matches!(current_score, Some(score) if score <= GOOD_ENOUGH_LEAF_SCORE) {
+            return;
+        }
+    }
+
+    let new_branch: Option<Vec<StepAction>> = scored
         .into_iter()
         .min_by(|a, b| a.1 .0.partial_cmp(&b.1 .0).unwrap_or(Ordering::Equal))
         .map(|(path, _)| path.into_iter().cloned().collect());
