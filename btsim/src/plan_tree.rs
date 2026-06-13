@@ -140,6 +140,10 @@ impl PlanTree {
 
     /// Re-scores all reachable leaves. Use `EXTERNAL_PENALTIES_OFF` before peer info is
     /// available, `EXTERNAL_PENALTIES_ON` once the bulletin board has peer outputs.
+    ///
+    /// Each returned path is a full root-to-leaf path: the already-committed prefix is
+    /// prepended to each reachable tail so that a mid-session rescore still accounts for
+    /// this wallet's own committed inputs, not just the remaining change choices.
     pub(crate) fn score_leaves(
         &self,
         peer: &PeerState,
@@ -147,14 +151,30 @@ impl PlanTree {
         wallet: &WalletHandle,
         mode: CostMode,
     ) -> Vec<(Vec<&StepAction>, LeafScore)> {
+        let prefix = self.committed_path();
         self.reachable_leaves()
             .into_iter()
-            .map(|path| {
+            .map(|tail| {
+                let path: Vec<&StepAction> = prefix.iter().copied().chain(tail).collect();
                 let plan = plan_from_path(&path, peer, wallet);
                 let cost = scorer.score(&plan, wallet, mode);
                 (path, LeafScore(cost.0))
             })
             .collect()
+    }
+
+    /// The actions already committed: the single-node chain from the root up to `depth`.
+    /// Empty before the first commit.
+    fn committed_path(&self) -> Vec<&StepAction> {
+        let mut path = Vec::with_capacity(self.depth);
+        let mut level: &[PlanNode] = &self.roots;
+        for _ in 0..self.depth {
+            // Invariant: after each commit siblings are pruned to exactly one node.
+            let node = &level[0];
+            path.push(&node.action);
+            level = &node.children;
+        }
+        path
     }
 
     fn current_level(&self) -> &[PlanNode] {

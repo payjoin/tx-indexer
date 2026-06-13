@@ -537,9 +537,69 @@ fn selected_branch_change(branch: &[StepAction], n_payment_outputs: usize) -> Ve
         .collect()
 }
 
+/// Re-scores the live plan tree against peer contributions observed on the bulletin board
+/// and re-selects the cheapest branch. Called once a session has formed, so the initial
+/// peer-blind selection (made under `EXTERNAL_PENALTIES_OFF`) can be revised now that the
+/// counterparty inputs and outputs are known.
+fn rescore_against_peers(wallet: &mut WalletHandleMut) {
+    use crate::bulletin_board::BroadcastMessageType;
+    use std::cmp::Ordering;
+
+    let h = wallet.handle();
+
+    // Inform the rescore from a session awaiting our outputs: our inputs are committed but
+    // the change decomposition is not, so re-selection can still change what we contribute.
+    let Some((bb_id, my_outpoints)) = h
+        .info()
+        .active_multi_party_payjoins
+        .iter()
+        .find(|(_, s)| s.state == TxConstructionState::AcceptedProposal)
+        .map(|(bb_id, s)| {
+            (
+                *bb_id,
+                s.inputs.iter().map(|i| i.outpoint).collect::<Vec<_>>(),
+            )
+        })
+    else {
+        return;
+    };
+
+    let my_addresses: std::collections::HashSet<AddressId> =
+        h.data().addresses.iter().cloned().collect();
+    let mut peer = PeerState::default();
+    for message in h.sim.bulletin_boards[bb_id.0].messages.iter() {
+        match message {
+            BroadcastMessageType::ContributeInputs(op) if !my_outpoints.contains(op) => {
+                peer.their_inputs.push((*op, op.with(h.sim).data().amount));
+            }
+            BroadcastMessageType::ContributeOutputs(o) if !my_addresses.contains(&o.address_id) => {
+                peer.their_outputs.push(o.amount);
+            }
+            _ => {}
+        }
+    }
+    if peer.their_inputs.is_empty() && peer.their_outputs.is_empty() {
+        return; // no new information from peers yet
+    }
+
+    let Some(tree) = h.data().wallet_plan_tree.as_ref() else {
+        return;
+    };
+    let new_branch: Option<Vec<StepAction>> = tree
+        .score_leaves(&peer, &h.data().scorer, &h, CostMode::EXTERNAL_PENALTIES_ON)
+        .into_iter()
+        .min_by(|a, b| a.1 .0.partial_cmp(&b.1 .0).unwrap_or(Ordering::Equal))
+        .map(|(path, _)| path.into_iter().cloned().collect());
+
+    if new_branch.is_some() {
+        wallet.data_mut().selected_plan_branch = new_branch;
+    }
+}
+
 impl Strategy for PlanDrivenStrategy {
     fn pre_enumerate(&self, wallet: &mut WalletHandleMut) {
         if wallet.data().wallet_plan_tree.is_some() {
+            rescore_against_peers(wallet);
             return;
         }
         let h = wallet.handle();
