@@ -28,6 +28,11 @@ define_entity_data!(Wallet, {
     pub(crate) strategies: CompositeStrategy,
     pub(crate) scorer: CompositeScorer,
     pub(crate) script_type: ScriptType,
+    /// Wallet-level plan tree built once when the wallet first has UTXOs and POs.
+    /// Lives on WalletData so it is never cloned on tx recording.
+    pub(crate) wallet_plan_tree: Option<crate::plan_tree::PlanTree>,
+    /// Best branch selected from the plan tree using the wallet's current state.
+    pub(crate) selected_plan_branch: Option<Vec<crate::plan_tree::StepAction>>,
 }, skip_eq_clone);
 define_entity_info!(Wallet, {
         pub(crate) broadcast_set_id: BroadcastSetId,
@@ -301,6 +306,10 @@ impl<'a> WalletHandleMut<'a> {
                     self.info_mut()
                         .active_multi_party_payjoins
                         .insert(*bulletin_board_id, updated_session);
+                    // Reset tree and branch so a fresh plan is built next wake.
+                    let data = self.data_mut();
+                    data.wallet_plan_tree = None;
+                    data.selected_plan_branch = None;
                     log::info!(
                         "Multi party payjoin session successful with bulletin board id: {:?}",
                         bulletin_board_id
@@ -445,6 +454,14 @@ impl<'a> WalletHandleMut<'a> {
                     .unwrap();
                 session.payment_obligation_ids = po_ids.clone();
                 session.state = TxConstructionState::SentOutputs;
+
+                // Advance tree cursor through payment outputs then change outputs.
+                if let Some(tree) = &mut self.data_mut().wallet_plan_tree {
+                    use crate::plan_tree::StepAction;
+                    for output in &outputs {
+                        let _ = tree.commit(&StepAction::RegisterOutput(output.amount));
+                    }
+                }
             }
             Action::ContinueParticipateInCospend(bulletin_board_id) => {
                 self.participate_in_multi_party_payjoin(bulletin_board_id);
@@ -452,6 +469,13 @@ impl<'a> WalletHandleMut<'a> {
             Action::RegisterInput(outpoints) => {
                 for outpoint in outpoints {
                     self.register_input(outpoint);
+                }
+                // Advance tree cursor through each registered input.
+                if let Some(tree) = &mut self.data_mut().wallet_plan_tree {
+                    use crate::plan_tree::StepAction;
+                    for op in outpoints {
+                        let _ = tree.commit(&StepAction::RegisterInput(*op));
+                    }
                 }
             }
         }
@@ -464,13 +488,22 @@ impl<'a> WalletHandleMut<'a> {
         let strategies = self.data().strategies.clone();
         let mut all_actions = Vec::new();
         for strategy in strategies.strategies.iter() {
+            strategy.pre_enumerate(self);
             all_actions.extend(strategy.enumerate_candidate_actions(self));
         }
 
-        let action = all_actions
-            .into_iter()
-            .min_by_key(|action| scorer.action_cost(action, self))
-            .unwrap_or(Action::Wait);
+        let action = if self.data().selected_plan_branch.is_some() {
+            // Branch already selected — skip scoring and take the first non-Wait action.
+            all_actions
+                .into_iter()
+                .find(|a| !matches!(a, Action::Wait))
+                .unwrap_or(Action::Wait)
+        } else {
+            all_actions
+                .into_iter()
+                .min_by_key(|action| scorer.action_cost(action, self))
+                .unwrap_or(Action::Wait)
+        };
         info!("Wallet id: {:?} chose action: {:?}", self.id, action);
         self.do_action(&action);
     }

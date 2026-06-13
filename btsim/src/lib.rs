@@ -46,6 +46,7 @@ mod economic_graph;
 mod graphviz;
 mod message;
 pub mod metrics;
+pub(crate) mod plan_tree;
 pub mod script_type;
 mod transaction;
 mod tx_contruction;
@@ -504,6 +505,8 @@ impl<'a> Simulation {
             strategies,
             scorer,
             script_type,
+            wallet_plan_tree: None,
+            selected_plan_branch: None,
         });
         id
     }
@@ -982,7 +985,7 @@ mod tests {
             WalletTypeConfig {
                 name: "participant".to_string(),
                 count: 4,
-                strategies: vec!["MultipartyStrategy".to_string()],
+                strategies: vec!["PlanDrivenStrategy".to_string()],
                 scorer: ScorerConfig {
                     privacy_weight: 1.0,
                     payment_obligation_weight: 2.0,
