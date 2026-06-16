@@ -1,3 +1,5 @@
+pub mod radix;
+
 use std::collections::{HashMap, HashSet};
 use tx_indexer_primitives::traits::abstract_types::{
     EnumerateInputValueInArbitraryOrder, EnumerateOutputValueInArbitraryOrder,
