@@ -158,6 +158,11 @@ mod tests {
                     privacy_weight: 0.0,
                     payment_obligation_weight: 0.0,
                     min_fallback_plans: 0,
+                    subset_sum_threshold: None,
+                    subset_sum_max_size: 6,
+                    brute_max_terms: 15,
+                    radix_threshold: None,
+                    radix_density_floor: 0.5,
                 },
                 script_type: crate::script_type::ScriptType::P2tr,
             }];

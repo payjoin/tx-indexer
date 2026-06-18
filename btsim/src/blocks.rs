@@ -423,6 +423,73 @@ impl<'a> BlockTemplate {
             },
         )
     }
+
+    /// Like `mine`, but the coinbase pays one output per entry in `amounts` (the denominated values)
+    /// to `rewards_to`, instead of the block subsidy — used by the denominated funding mode to seed
+    /// dense, denominated wallet UTXOs. There is no coinbase-conservation invariant, and the
+    /// block-acceptance scan registers every output, so a multi-output coinbase is sound.
+    pub(crate) fn mine_denominated(
+        self,
+        rewards_to: AddressId,
+        amounts: &[u64],
+        sim: &'a mut Simulation,
+    ) -> BlockHandle<'a> {
+        let parent_block = self.parent.with(sim);
+        let height = 1 + parent_block.info().height;
+
+        let mut confirmed_txs = OrdSet::from(&self.txs);
+
+        let amounts: Vec<Amount> = amounts.iter().map(|&a| Amount::from_sat(a)).collect();
+        let coinbase_tx = sim.new_tx(|tx, _| {
+            for &amount in &amounts {
+                tx.outputs.push(Output {
+                    address_id: rewards_to,
+                    amount,
+                });
+            }
+        });
+
+        confirmed_txs.insert(coinbase_tx);
+
+        let parent_block = self.parent.with(sim);
+        let all_confirmed_txs = parent_block
+            .info()
+            .all_confirmed_txs
+            .clone()
+            .union(confirmed_txs.clone());
+
+        let rewards_wallet = rewards_to.with(sim).wallet().id;
+        sim.wallet_data[rewards_wallet.0]
+            .own_transactions
+            .push(coinbase_tx);
+
+        let mut utxos = self.utxos;
+        let mut created = self.created;
+        for index in 0..amounts.len() {
+            let outpoint = Outpoint {
+                txid: coinbase_tx,
+                index,
+            };
+            utxos.insert(outpoint);
+            created.insert(outpoint);
+        }
+
+        sim.new_block(
+            BlockData {
+                parent: Some(self.parent),
+                coinbase_tx,
+                confirmed_txs: self.txs,
+            },
+            BlockInfo {
+                height,
+                utxos,
+                created,
+                spent: self.spent,
+                confirmed_txs,
+                all_confirmed_txs,
+            },
+        )
+    }
 }
 
 impl BlockData {
